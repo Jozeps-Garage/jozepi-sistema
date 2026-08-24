@@ -26,6 +26,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dropdown } from "@/components/ui/dropdown";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
+import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { formatCurrency, formatPhone, normalizeOptionalPhone } from "@/lib/utils/format";
 import {
   createProductId,
@@ -710,21 +711,19 @@ export function ProductsPage() {
     let cancelled = false;
 
     async function loadPageData() {
-      const { data: profile, error: profileError } = await supabase
-        .from("profiles")
-        .select("workshop_id")
-        .single();
+      const { workshopId: profileWorkshopId, error: profileError } =
+        await fetchOwnWorkshop(supabase);
 
       if (cancelled) return;
 
-      if (profileError || !profile?.workshop_id) {
+      if (profileError || !profileWorkshopId) {
         setSupplierError(profileError?.message ?? "Oficina não encontrada.");
         setSuppliersLoaded(true);
         setCatalogSyncReady(true);
         return;
       }
 
-      const resolvedWorkshopId = profile.workshop_id;
+      const resolvedWorkshopId = profileWorkshopId;
       setWorkshopId(resolvedWorkshopId);
 
       try {

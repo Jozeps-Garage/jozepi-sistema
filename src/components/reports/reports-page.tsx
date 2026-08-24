@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Dropdown } from "@/components/ui/dropdown";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
+import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { formatCurrency } from "@/lib/utils/format";
 import { DEFAULT_TIME_ZONE, wallClockInTimeZone } from "@/lib/timezone";
 import {
@@ -197,19 +198,16 @@ export function ReportsPage() {
     setLoading(true);
     setError(null);
 
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("workshop_id")
-      .single();
+    const { workshopId, error: profileError } = await fetchOwnWorkshop(supabase);
 
-    if (profileError || !profile?.workshop_id) {
+    if (profileError || !workshopId) {
       setError(profileError?.message ?? "Oficina não encontrada.");
       setLoading(false);
       return;
     }
 
     try {
-      const source = await fetchReportsSourceData(profile.workshop_id);
+      const source = await fetchReportsSourceData(workshopId);
       setWorkshop(source.workshop);
       setClients(source.clients);
       setRevenueEntries(source.revenueEntries);

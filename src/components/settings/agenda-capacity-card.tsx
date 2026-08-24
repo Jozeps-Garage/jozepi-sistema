@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SettingsCollapsibleCard } from "@/components/settings/settings-collapsible-card";
 import { createClient } from "@/lib/supabase/client";
+import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 
 const DEFAULT_AGENDA_CAPACITY = 1;
 const AGENDA_CAPACITY_STORAGE_KEY = "auto-estetica-agenda-capacity";
@@ -68,23 +69,21 @@ export function AgendaCapacityCard() {
     setError(null);
     setMessage(null);
 
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("workshop_id")
-      .single();
+    const { workshopId: currentWorkshopId, error: profileError } =
+      await fetchOwnWorkshop(supabase);
 
-    if (profileError || !profile?.workshop_id) {
+    if (profileError || !currentWorkshopId) {
       setError(profileError?.message ?? "Oficina não encontrada.");
       setLoading(false);
       return;
     }
 
-    setWorkshopId(profile.workshop_id);
+    setWorkshopId(currentWorkshopId);
 
     const { data: workshop, error: workshopError } = await supabase
       .from("workshops")
       .select("agenda_capacity")
-      .eq("id", profile.workshop_id)
+      .eq("id", currentWorkshopId)
       .single();
 
     if (workshopError) {
@@ -101,16 +100,16 @@ export function AgendaCapacityCard() {
     }
 
     const remoteCapacity = normalizeCapacity(workshop?.agenda_capacity);
-    const localCapacity = readLocalAgendaCapacityForImport(profile.workshop_id);
+    const localCapacity = readLocalAgendaCapacityForImport(currentWorkshopId);
 
     if (localCapacity !== null && localCapacity !== remoteCapacity) {
       const { error: importError } = await supabase
         .from("workshops")
         .update({ agenda_capacity: localCapacity })
-        .eq("id", profile.workshop_id);
+        .eq("id", currentWorkshopId);
 
       if (!importError) {
-        clearLocalAgendaCapacity(profile.workshop_id);
+        clearLocalAgendaCapacity(currentWorkshopId);
         setCapacity(String(localCapacity));
         setMessage("Capacidade local importada para o Supabase.");
         setLoading(false);
@@ -119,7 +118,7 @@ export function AgendaCapacityCard() {
     }
 
     if (localCapacity !== null) {
-      clearLocalAgendaCapacity(profile.workshop_id);
+      clearLocalAgendaCapacity(currentWorkshopId);
     }
 
     setCapacity(String(remoteCapacity));

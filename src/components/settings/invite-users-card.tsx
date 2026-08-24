@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SettingsCollapsibleCard } from "@/components/settings/settings-collapsible-card";
 import { createClient } from "@/lib/supabase/client";
+import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { formatDate } from "@/lib/utils/format";
 import {
   buildInviteUrl,
@@ -41,38 +42,24 @@ export function InviteUsersCard() {
     setLoading(true);
     setError(null);
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+    const { userId: currentUserId, workshopId: currentWorkshopId, error: profileError } =
+      await fetchOwnWorkshop(supabase);
 
-    if (userError || !user) {
-      setError(userError?.message ?? "Usuário não encontrado.");
-      setLoading(false);
-      return;
-    }
-
-    setUserId(user.id);
-
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("workshop_id")
-      .single();
-
-    if (profileError || !profile?.workshop_id) {
+    if (profileError || !currentUserId || !currentWorkshopId) {
       setError(profileError?.message ?? "Oficina não encontrada.");
       setLoading(false);
       return;
     }
 
-    setWorkshopId(profile.workshop_id);
+    setUserId(currentUserId);
+    setWorkshopId(currentWorkshopId);
 
     const { data, error: invitesError } = await supabase
       .from("invites")
       .select(
         "id, token, workshop_id, created_by, email, status, expires_at, used_at, used_by, created_at"
       )
-      .eq("workshop_id", profile.workshop_id)
+      .eq("workshop_id", currentWorkshopId)
       .order("created_at", { ascending: false });
 
     if (invitesError) {

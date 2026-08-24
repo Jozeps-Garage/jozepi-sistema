@@ -1,11 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { isMissingTimezoneError } from "@/lib/timezone";
 
 export async function fetchWorkshopProfile(supabase: SupabaseClient) {
-  return supabase
-    .from("profiles")
-    .select("workshop_id")
-    .single();
+  const { workshopId, error } = await fetchOwnWorkshop(supabase);
+  if (error || !workshopId) {
+    return { data: null, error };
+  }
+  return { data: { workshop_id: workshopId }, error: null };
 }
 
 export async function fetchWorkshopCapacity(

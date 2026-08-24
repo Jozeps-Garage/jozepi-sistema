@@ -15,6 +15,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { createClient } from "@/lib/supabase/client";
+import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -510,24 +511,21 @@ export function ClientsPage() {
   const loadClients = useCallback(async () => {
     setLoading(true);
 
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("workshop_id")
-      .single();
+    const { workshopId: profileWorkshopId } = await fetchOwnWorkshop(supabase);
 
-    if (!profile?.workshop_id) {
+    if (!profileWorkshopId) {
       setLoading(false);
       return;
     }
 
-    setWorkshopId(profile.workshop_id);
+    setWorkshopId(profileWorkshopId);
 
     const { data, error } = await supabase
       .from("clients")
       .select(
         "*, vehicles(id, client_id, brand, model, plate, year, photo_url_1, photo_url_2)"
       )
-      .eq("workshop_id", profile.workshop_id)
+      .eq("workshop_id", profileWorkshopId)
       .order("name", { ascending: true });
 
     if (error) {

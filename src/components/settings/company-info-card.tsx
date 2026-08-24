@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SettingsCollapsibleCard } from "@/components/settings/settings-collapsible-card";
 import { createClient } from "@/lib/supabase/client";
+import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { isCnpjComplete, maskCnpj, maskPhone } from "@/lib/utils/masks";
 import {
   deleteWorkshopLogoByUrl,
@@ -50,23 +51,21 @@ export function CompanyInfoCard() {
     setError(null);
     setMessage(null);
 
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("workshop_id")
-      .single();
+    const { workshopId: currentWorkshopId, error: profileError } =
+      await fetchOwnWorkshop(supabase);
 
-    if (profileError || !profile?.workshop_id) {
+    if (profileError || !currentWorkshopId) {
       setError(profileError?.message ?? "Oficina não encontrada.");
       setLoading(false);
       return;
     }
 
-    setWorkshopId(profile.workshop_id);
+    setWorkshopId(currentWorkshopId);
 
     const { data: workshop, error: workshopError } = await supabase
       .from("workshops")
       .select("name, document, phone, address, logo_url")
-      .eq("id", profile.workshop_id)
+      .eq("id", currentWorkshopId)
       .single();
 
     if (workshopError) {

@@ -30,6 +30,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dropdown } from "@/components/ui/dropdown";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
+import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { assertMutationRows } from "@/lib/supabase/mutations";
 import { formatCurrency } from "@/lib/utils/format";
 import {
@@ -327,22 +328,19 @@ export function ServicesPage() {
   async function loadServices() {
     setLoading(true);
 
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("workshop_id")
-      .single();
+    const { workshopId: profileWorkshopId } = await fetchOwnWorkshop(supabase);
 
-    if (!profile?.workshop_id) {
+    if (!profileWorkshopId) {
       setLoading(false);
       return;
     }
 
-    setWorkshopId(profile.workshop_id);
+    setWorkshopId(profileWorkshopId);
 
     const { data, error: servicesError } = await supabase
       .from("services")
       .select("*")
-      .eq("workshop_id", profile.workshop_id)
+      .eq("workshop_id", profileWorkshopId)
       .order("active", { ascending: false })
       .order("name", { ascending: true });
 
@@ -351,7 +349,7 @@ export function ServicesPage() {
     } else {
       const loadedServices = await migrateLegacyServiceCategories(
         supabase,
-        profile.workshop_id,
+        profileWorkshopId,
         (data as ServiceItem[]) ?? []
       );
       setServices(loadedServices);

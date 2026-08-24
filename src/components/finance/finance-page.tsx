@@ -36,6 +36,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dropdown } from "@/components/ui/dropdown";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
+import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { formatCurrency } from "@/lib/utils/format";
 
 type FinanceTab = "overview" | "revenues" | "expenses" | "fixedCosts";
@@ -66,6 +67,7 @@ function normalizePaymentStatus(value: unknown): PaymentStatus {
 
 const SUPPLIERS_STORAGE_KEY = "auto-estetica-suppliers";
 const FIXED_COSTS_STORAGE_KEY = "auto-estetica-fixed-costs";
+const FIXED_COST_PAYMENT_DAYS_KEY = "auto-estetica-fixed-cost-payment-days";
 const TX_PAYMENT_STATUS_STORAGE_KEY = "auto-estetica-tx-payment-status";
 
 interface FinancialTransaction {
@@ -169,7 +171,7 @@ function mergeFixedCosts(current: FixedCost[], incoming: FixedCost[]) {
           : cost.payment_day ?? existing.payment_day,
     });
   });
-  return sortFixedCosts(Array.from(byId.values()));
+  return applyStoredPaymentDays(sortFixedCosts(Array.from(byId.values())));
 }
 
 function readStoredFixedCosts() {
@@ -186,6 +188,59 @@ function readStoredFixedCosts() {
 function writeStoredFixedCosts(costs: FixedCost[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(FIXED_COSTS_STORAGE_KEY, JSON.stringify(costs));
+}
+
+function readStoredPaymentDays(): Record<string, number> {
+  if (typeof window === "undefined") return {};
+
+  try {
+    const stored = window.localStorage.getItem(FIXED_COST_PAYMENT_DAYS_KEY);
+    if (!stored) return {};
+
+    const parsed = JSON.parse(stored) as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(parsed).flatMap(([id, value]) => {
+        const day = typeof value === "number" ? value : Number(value);
+        if (!id || !Number.isFinite(day) || day < 1 || day > 31) return [];
+        return [[id, Math.round(day)] as const];
+      })
+    );
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredPaymentDay(id: string, day: number | null) {
+  if (typeof window === "undefined" || !id) return;
+
+  try {
+    const current = readStoredPaymentDays();
+    if (day === null) {
+      delete current[id];
+    } else {
+      current[id] = day;
+    }
+    window.localStorage.setItem(
+      FIXED_COST_PAYMENT_DAYS_KEY,
+      JSON.stringify(current)
+    );
+  } catch {
+    // Ignora falhas de armazenamento local.
+  }
+}
+
+function applyStoredPaymentDays(costs: FixedCost[]): FixedCost[] {
+  const days = readStoredPaymentDays();
+  return costs.map((cost) => {
+    if (cost.kind === "estimated") {
+      return { ...cost, payment_day: null };
+    }
+
+    return {
+      ...cost,
+      payment_day: cost.payment_day ?? days[cost.id] ?? null,
+    };
+  });
 }
 
 function readStoredTxPaymentStatuses(): Record<string, PaymentStatus> {
@@ -1823,10 +1878,18 @@ export function FinancePage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [fixedCosts, setFixedCosts] = useState<FixedCost[]>(() => {
     if (typeof window === "undefined") return [];
-    return readStoredFixedCosts().map((cost) =>
+    const stored = readStoredFixedCosts().map((cost) =>
       normalizeFixedCost(cost as unknown as Record<string, unknown>)
     );
+    stored.forEach((cost) => {
+      if (cost.kind === "real" && cost.payment_day) {
+        writeStoredPaymentDay(cost.id, cost.payment_day);
+      }
+    });
+    return applyStoredPaymentDays(stored);
   });
+  const fixedCostsRef = useRef(fixedCosts);
+  const initialFinanceLoadRef = useRef(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<FinanceDeleteConfirm>(null);
@@ -1860,21 +1923,21 @@ export function FinancePage() {
   const [overviewChartInterval, setOverviewChartInterval] = useState<ChartInterval>("6m");
 
   const loadFinanceData = useCallback(async () => {
-    setLoading(true);
+    if (initialFinanceLoadRef.current) {
+      setLoading(true);
+    }
     setError(null);
 
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("workshop_id")
-      .single();
+    const { workshopId: profileWorkshopId, error: profileError } =
+      await fetchOwnWorkshop(supabase);
 
-    if (profileError || !profile?.workshop_id) {
+    if (profileError || !profileWorkshopId) {
       setError(profileError?.message ?? "Oficina não encontrada.");
       setLoading(false);
       return;
     }
 
-    setWorkshopId(profile.workshop_id);
+    setWorkshopId(profileWorkshopId);
 
     const [
       { data: ordersData, error: ordersError },
@@ -1899,23 +1962,23 @@ export function FinancePage() {
             )
           `
           )
-          .eq("workshop_id", profile.workshop_id)
+          .eq("workshop_id", profileWorkshopId)
           .eq("status", "finalizada")
           .order("completed_at", { ascending: false }),
         supabase
           .from("suppliers")
           .select("id, name")
-          .eq("workshop_id", profile.workshop_id)
+          .eq("workshop_id", profileWorkshopId)
           .order("name", { ascending: true }),
         supabase
           .from("fixed_costs")
           .select(FIXED_COST_SELECT_FULL)
-          .eq("workshop_id", profile.workshop_id)
+          .eq("workshop_id", profileWorkshopId)
           .order("name", { ascending: true }),
       ]);
     let transactionsData: FinancialTransaction[] = [];
     try {
-      transactionsData = await loadFinancialTransactions(supabase, profile.workshop_id);
+      transactionsData = await loadFinancialTransactions(supabase, profileWorkshopId);
     } catch (transactionsError) {
       setError(
         transactionsError instanceof Error
@@ -1939,44 +2002,47 @@ export function FinancePage() {
       setSuppliers(sortSuppliers((suppliersResult.data as Supplier[] | null) ?? []));
     }
 
-    const storedFixedCosts = readStoredFixedCosts().map((cost) =>
-      normalizeFixedCost(cost as unknown as Record<string, unknown>)
+    const storedFixedCosts = applyStoredPaymentDays(
+      readStoredFixedCosts().map((cost) =>
+        normalizeFixedCost(cost as unknown as Record<string, unknown>)
+      )
     );
-    let loadedFixedCosts = storedFixedCosts;
+    const localFixedCosts = applyStoredPaymentDays(
+      mergeFixedCosts(storedFixedCosts, fixedCostsRef.current)
+    );
+    let loadedFixedCosts = localFixedCosts;
     if (fixedCostsResult.error) {
       if (isMissingColumnError(fixedCostsResult.error, "payment_day")) {
         const legacyResult = await supabase
           .from("fixed_costs")
           .select(FIXED_COST_SELECT_LEGACY)
-          .eq("workshop_id", profile.workshop_id)
+          .eq("workshop_id", profileWorkshopId)
           .order("name", { ascending: true });
         if (!legacyResult.error) {
           loadedFixedCosts = mergeFixedCosts(
-            storedFixedCosts,
+            localFixedCosts,
             ((legacyResult.data as Record<string, unknown>[] | null) ?? []).map(
               normalizeFixedCost
             )
           );
-        } else {
-          loadedFixedCosts = storedFixedCosts;
         }
-      } else {
-        loadedFixedCosts = storedFixedCosts;
       }
     } else {
       loadedFixedCosts = mergeFixedCosts(
-        storedFixedCosts,
+        localFixedCosts,
         ((fixedCostsResult.data as Record<string, unknown>[] | null) ?? []).map(
           normalizeFixedCost
         )
       );
     }
+    loadedFixedCosts = applyStoredPaymentDays(loadedFixedCosts);
+    fixedCostsRef.current = loadedFixedCosts;
     setFixedCosts(loadedFixedCosts);
 
-    if (profile.workshop_id) {
+    if (profileWorkshopId) {
       const synced = await syncFixedCostExpenses(
         supabase,
-        profile.workshop_id,
+        profileWorkshopId,
         loadedFixedCosts,
         transactionsData
       );
@@ -1989,8 +2055,13 @@ export function FinancePage() {
       }
     }
 
+    initialFinanceLoadRef.current = false;
     setLoading(false);
   }, [supabase]);
+
+  useEffect(() => {
+    fixedCostsRef.current = fixedCosts;
+  }, [fixedCosts]);
 
   useEffect(() => {
     void Promise.resolve().then(loadFinanceData);
@@ -2777,6 +2848,15 @@ export function FinancePage() {
       created_at: existingCost?.created_at ?? now,
       updated_at: now,
     };
+    writeStoredPaymentDay(localCost.id, localCost.payment_day);
+    const nextCostsOptimistic = sortFixedCosts([
+      ...fixedCosts.filter((cost) => cost.id !== localCost.id),
+      localCost,
+    ]);
+    fixedCostsRef.current = nextCostsOptimistic;
+    writeStoredFixedCosts(nextCostsOptimistic);
+    setFixedCosts(nextCostsOptimistic);
+
     const payload = {
       workshop_id: workshopId,
       name: localCost.name,
@@ -2798,7 +2878,11 @@ export function FinancePage() {
           .single()
       : await supabase
           .from("fixed_costs")
-          .insert(payload)
+          .insert({
+            id: localCost.id,
+            created_at: localCost.created_at,
+            ...payload,
+          })
           .select(FIXED_COST_SELECT_FULL)
           .single();
 
@@ -2814,7 +2898,11 @@ export function FinancePage() {
             .single()
         : await supabase
             .from("fixed_costs")
-            .insert(legacyPayload)
+            .insert({
+              id: localCost.id,
+              created_at: localCost.created_at,
+              ...legacyPayload,
+            })
             .select(FIXED_COST_SELECT_LEGACY)
             .single();
 
@@ -2829,25 +2917,39 @@ export function FinancePage() {
 
     if (result.error && !result.data) {
       setFixedCostError(result.error.message);
+      const reverted = existingCost
+        ? sortFixedCosts([
+            ...fixedCostsRef.current.filter((cost) => cost.id !== localCost.id),
+            existingCost,
+          ])
+        : fixedCostsRef.current.filter((cost) => cost.id !== localCost.id);
+      fixedCostsRef.current = reverted;
+      writeStoredFixedCosts(reverted);
+      setFixedCosts(reverted);
+      if (!existingCost) {
+        writeStoredPaymentDay(localCost.id, null);
+      }
       return;
     }
 
-    const savedCost = result.data
-      ? normalizeFixedCost({
-          ...(result.data as Record<string, unknown>),
-          payment_day:
-            (result.data as Record<string, unknown>).payment_day ??
-            localCost.payment_day,
-        })
-      : localCost;
+    const savedCost = applyStoredPaymentDays([
+      result.data
+        ? normalizeFixedCost({
+            ...(result.data as Record<string, unknown>),
+            payment_day:
+              (result.data as Record<string, unknown>).payment_day ??
+              localCost.payment_day,
+          })
+        : localCost,
+    ])[0];
+    writeStoredPaymentDay(savedCost.id, savedCost.payment_day);
 
     setFixedCosts((prev) => {
-      const nextCosts = editingFixedCostId
-        ? sortFixedCosts([
-            ...prev.filter((cost) => cost.id !== editingFixedCostId),
-            savedCost,
-          ])
-        : mergeFixedCosts(prev, [savedCost]);
+      const nextCosts = sortFixedCosts([
+        ...prev.filter((cost) => cost.id !== localCost.id && cost.id !== savedCost.id),
+        savedCost,
+      ]);
+      fixedCostsRef.current = nextCosts;
       writeStoredFixedCosts(nextCosts);
       return nextCosts;
     });
@@ -2878,9 +2980,12 @@ export function FinancePage() {
       updated_at: new Date().toISOString(),
     };
 
-    setFixedCosts((prev) =>
-      prev.map((item) => (item.id === cost.id ? nextCost : item))
-    );
+    setFixedCosts((prev) => {
+      const next = prev.map((item) => (item.id === cost.id ? nextCost : item));
+      fixedCostsRef.current = next;
+      writeStoredFixedCosts(next);
+      return next;
+    });
 
     await supabase
       .from("fixed_costs")
@@ -2918,7 +3023,13 @@ export function FinancePage() {
     setDeletingFinanceItem(true);
 
     try {
-      setFixedCosts((prev) => prev.filter((item) => item.id !== cost.id));
+      setFixedCosts((prev) => {
+        const next = prev.filter((item) => item.id !== cost.id);
+        fixedCostsRef.current = next;
+        writeStoredFixedCosts(next);
+        writeStoredPaymentDay(cost.id, null);
+        return next;
+      });
 
       await supabase
         .from("fixed_costs")
@@ -3648,10 +3759,11 @@ export function FinancePage() {
               )}
 
               <div className="w-full overflow-x-auto">
-                <div className="min-w-[760px]">
-                  <div className="grid grid-cols-[minmax(220px,1fr)_150px_130px_130px_112px] gap-4 border-b border-border px-3 py-3 text-xs font-semibold text-muted">
+                <div className="min-w-[860px]">
+                  <div className="grid grid-cols-[minmax(200px,1fr)_110px_110px_120px_110px_112px] gap-4 border-b border-border px-3 py-3 text-xs font-semibold text-muted">
                     <span>Nome</span>
                     <span>Tipo</span>
+                    <span>Dia</span>
                     <span>Valor</span>
                     <span>Status</span>
                     <span className="text-right">Ações</span>
@@ -3664,7 +3776,7 @@ export function FinancePage() {
                     fixedCosts.map((cost) => (
                       <article
                         key={cost.id}
-                        className="grid grid-cols-[minmax(220px,1fr)_150px_130px_130px_112px] items-center gap-4 border-b border-border/70 px-3 py-3 transition-colors hover:bg-background/70"
+                        className="grid grid-cols-[minmax(200px,1fr)_110px_110px_120px_110px_112px] items-center gap-4 border-b border-border/70 px-3 py-3 transition-colors hover:bg-background/70"
                       >
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
@@ -3676,11 +3788,6 @@ export function FinancePage() {
                                 Estimado
                               </span>
                             )}
-                            {cost.kind === "real" && cost.payment_day && (
-                              <span className="rounded-full bg-background px-2.5 py-1 text-[11px] font-semibold text-muted">
-                                Todo dia {cost.payment_day}
-                              </span>
-                            )}
                           </div>
                           {cost.notes && (
                             <p className="mt-1 truncate text-xs text-muted">
@@ -3690,6 +3797,11 @@ export function FinancePage() {
                         </div>
                         <p className="text-sm font-medium text-foreground">
                           {cost.kind === "real" ? "Real" : "Média"}
+                        </p>
+                        <p className="text-sm font-medium text-foreground">
+                          {cost.kind === "real" && cost.payment_day
+                            ? `Dia ${cost.payment_day}`
+                            : "—"}
                         </p>
                         <p className="text-sm font-bold text-foreground">
                           {formatCurrency(toCurrencyNumber(cost.amount))}
