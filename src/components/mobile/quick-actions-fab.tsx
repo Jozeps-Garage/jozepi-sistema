@@ -100,12 +100,12 @@ export function QuickActionsFab({ workshopId }: { workshopId: string }) {
 
   return (
     <>
-      {/* FAB central, sempre acima da barra de navegação inferior no mobile */}
+      {/* FAB no canto inferior direito, sempre acima da barra de navegação inferior no mobile */}
       <button
         type="button"
         onClick={() => setMenuOpen(true)}
         aria-label="Adicionar"
-        className="fab-pop tap-press fixed bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] left-1/2 z-50 flex h-16 w-16 -translate-x-1/2 items-center justify-center rounded-full bg-primary text-white shadow-card-hover ring-4 ring-background md:bottom-8 md:left-auto md:right-8 md:translate-x-0"
+        className="fab-pop tap-press fixed bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] right-5 z-50 flex h-16 w-16 items-center justify-center rounded-full bg-primary text-white shadow-card-hover ring-4 ring-background md:bottom-8 md:right-8"
       >
         <Plus size={30} weight="bold" aria-hidden />
       </button>
