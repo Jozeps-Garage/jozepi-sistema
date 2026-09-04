@@ -2,8 +2,8 @@
 // Objetivo: tornar o app instalável e dar um fallback offline decente.
 // NÃO cacheia chamadas ao Supabase nem respostas de API — apenas o shell/estáticos.
 
-const CACHE_VERSION = "jozepi-v1";
-const APP_SHELL = ["/atalhos", "/offline", "/manifest.webmanifest"];
+const CACHE_VERSION = "jozepi-v2";
+const APP_SHELL = ["/", "/offline", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

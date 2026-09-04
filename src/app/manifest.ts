@@ -6,7 +6,7 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "Jozepi",
     description: "Atalhos rápidos para o atendimento — Jozep's Garage",
     lang: "pt-BR",
-    start_url: "/atalhos",
+    start_url: "/",
     scope: "/",
     display: "standalone",
     orientation: "portrait",

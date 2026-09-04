@@ -180,25 +180,7 @@ h3 {
   }
 }
 
-/* ─── Mobile / PWA (hub de atalhos) ────────────────────────────────────────── */
-
-.safe-top {
-  padding-top: env(safe-area-inset-top);
-}
-.safe-bottom {
-  padding-bottom: env(safe-area-inset-bottom);
-}
-.safe-x {
-  padding-left: env(safe-area-inset-left);
-  padding-right: env(safe-area-inset-right);
-}
-
-/* Cabeçalho translúcido "liquid glass" fixo no topo. */
-.glass-header {
-  background: color-mix(in srgb, var(--sidebar) 82%, transparent);
-  backdrop-filter: saturate(180%) blur(18px);
-  -webkit-backdrop-filter: saturate(180%) blur(18px);
-}
+/* ─── Mobile / PWA (ações rápidas) ─────────────────────────────────────────── */
 
 /* Painel de vidro claro (sheets, cartões flutuantes). */
 .glass-panel {
