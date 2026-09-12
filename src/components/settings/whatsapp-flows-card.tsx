@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { MessageSquareText } from "lucide-react";
+import { MessageSquareText, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SettingsCollapsibleCard } from "@/components/settings/settings-collapsible-card";
@@ -27,13 +27,15 @@ type Flow = {
   offset_minutes: number;
 };
 
+// Texto de fábrica de cada mensagem. Vive só aqui: é o que preenche a caixa quando a oficina
+// ainda não salvou nada, e é para onde o botão "reverter" volta.
 const EVENTOS: {
   event: WhatsappEvent;
   titulo: string;
   quando: string;
   prazo: "nenhum" | "antes" | "depois";
   padraoMinutos: number;
-  exemplo: string;
+  padrao: string;
 }[] = [
   {
     event: "agendamento_criado",
@@ -41,7 +43,8 @@ const EVENTOS: {
     quando: "Assim que a ordem é agendada.",
     prazo: "nenhum",
     padraoMinutos: 0,
-    exemplo: "oi {{cliente}}, agendamos o {{veiculo}} para {{data}} às {{hora}}. qualquer coisa é só chamar aqui.",
+    padrao:
+      "oi {{cliente}}, tudo certo! agendamos o {{veiculo}} para {{data}} às {{hora}} aqui na {{oficina}}. qualquer coisa é só chamar por aqui.",
   },
   {
     event: "agendamento_reagendado",
@@ -49,7 +52,8 @@ const EVENTOS: {
     quando: "Quando a data ou a hora mudam.",
     prazo: "nenhum",
     padraoMinutos: 0,
-    exemplo: "oi {{cliente}}, remarcamos o {{veiculo}} para {{data}} às {{hora}}.",
+    padrao:
+      "oi {{cliente}}, remarcamos o {{veiculo}} para {{data}} às {{hora}}. se esse horário não ficar bom, me avisa que a gente ajusta.",
   },
   {
     event: "agendamento_cancelado",
@@ -57,7 +61,8 @@ const EVENTOS: {
     quando: "Quando a ordem é cancelada.",
     prazo: "nenhum",
     padraoMinutos: 0,
-    exemplo: "oi {{cliente}}, cancelamos o agendamento do {{veiculo}}. quando quiser remarcar, é só falar.",
+    padrao:
+      "oi {{cliente}}, cancelamos o agendamento do {{veiculo}} que estava marcado para {{data}}. quando quiser remarcar, é só falar.",
   },
   {
     event: "lembrete_vespera",
@@ -65,7 +70,8 @@ const EVENTOS: {
     quando: "Antes do horário agendado.",
     prazo: "antes",
     padraoMinutos: 1440,
-    exemplo: "oi {{cliente}}, passando pra lembrar do {{veiculo}} amanhã às {{hora}}.",
+    padrao:
+      "oi {{cliente}}, passando pra lembrar do {{veiculo}} amanhã às {{hora}}. se precisar remarcar, me avisa que a gente resolve.",
   },
   {
     event: "pos_servico",
@@ -73,7 +79,8 @@ const EVENTOS: {
     quando: "Depois que a ordem é finalizada.",
     prazo: "depois",
     padraoMinutos: 1440,
-    exemplo: "oi {{cliente}}, tudo certo com o {{veiculo}}? qualquer coisa a gente resolve.",
+    padrao:
+      "oi {{cliente}}, tudo certo com o {{veiculo}}? qualquer coisa que tenha ficado fora do esperado, me chama que a gente resolve.",
   },
   {
     event: "manutencao",
@@ -81,7 +88,8 @@ const EVENTOS: {
     quando: "Bastante tempo depois da última finalização.",
     prazo: "depois",
     padraoMinutos: 129600,
-    exemplo: "oi {{cliente}}, já faz um tempo desde a última limpeza do {{veiculo}}. quer agendar?",
+    padrao:
+      "oi {{cliente}}, já faz um tempo desde a última passada do {{veiculo}} aqui na {{oficina}}. quer deixar ele novo de novo? é só dizer o dia.",
   },
 ];
 
@@ -107,6 +115,11 @@ function emLinguagemHumana(minutos: number): string {
   if (minutos % 1440 === 0) return `${minutos / 1440} dia(s)`;
   if (minutos % 60 === 0) return `${minutos / 60} hora(s)`;
   return `${minutos} minuto(s)`;
+}
+
+function padraoDe(event: WhatsappEvent): Flow {
+  const base = EVENTOS.find((e) => e.event === event)!;
+  return { event, body: base.padrao, active: false, offset_minutes: base.padraoMinutos };
 }
 
 export function WhatsappFlowsCard() {
@@ -137,7 +150,11 @@ export function WhatsappFlowsCard() {
     if (queryError) {
       setError(queryError.message);
     } else {
+      // Começa com o texto de fábrica em todos e sobrescreve com o que a oficina já salvou.
       const mapa: Record<string, Flow> = {};
+      EVENTOS.forEach((e) => {
+        mapa[e.event] = padraoDe(e.event);
+      });
       (data ?? []).forEach((f) => {
         mapa[f.event] = f as Flow;
       });
@@ -155,14 +172,8 @@ export function WhatsappFlowsCard() {
     campo: keyof Flow,
     valor: string | boolean | number
   ) => {
-    const base = EVENTOS.find((e) => e.event === event)!;
     setFlows((atual) => {
-      const anterior: Flow = atual[event] ?? {
-        event,
-        body: "",
-        active: false,
-        offset_minutes: base.padraoMinutos,
-      };
+      const anterior: Flow = atual[event] ?? padraoDe(event);
       return { ...atual, [event]: { ...anterior, [campo]: valor } };
     });
   };
@@ -217,12 +228,17 @@ export function WhatsappFlowsCard() {
                 </code>
               ))}
             </div>
+            <p className="mt-2 text-xs text-muted">
+              Os textos já vêm prontos. Edite à vontade: nada é enviado enquanto a mensagem não
+              estiver marcada como ativa e salva.
+            </p>
           </div>
 
           {EVENTOS.map((e) => {
-            const f = flows[e.event];
-            const body = f?.body ?? "";
-            const minutos = f?.offset_minutes ?? e.padraoMinutos;
+            const f = flows[e.event] ?? padraoDe(e.event);
+            const body = f.body ?? "";
+            const minutos = f.offset_minutes ?? e.padraoMinutos;
+            const alterado = body.trim() !== e.padrao;
 
             return (
               <div key={e.event} className="space-y-3 rounded-lg border border-border p-4">
@@ -234,7 +250,7 @@ export function WhatsappFlowsCard() {
                   <label className="flex items-center gap-2 text-xs text-muted">
                     <input
                       type="checkbox"
-                      checked={f?.active ?? false}
+                      checked={f.active}
                       onChange={(ev) => atualizar(e.event, "active", ev.target.checked)}
                       className="h-4 w-4 rounded border-border"
                     />
@@ -245,7 +261,6 @@ export function WhatsappFlowsCard() {
                 <textarea
                   value={body}
                   onChange={(ev) => atualizar(e.event, "body", ev.target.value)}
-                  placeholder={e.exemplo}
                   rows={3}
                   maxLength={1000}
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -275,13 +290,25 @@ export function WhatsappFlowsCard() {
                   </div>
                 )}
 
-                <Button
-                  variant="secondary"
-                  onClick={() => salvar(e.event)}
-                  loading={salvando === e.event}
-                >
-                  Salvar
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={() => salvar(e.event)}
+                    loading={salvando === e.event}
+                  >
+                    Salvar
+                  </Button>
+                  {alterado && (
+                    <Button
+                      variant="ghost"
+                      onClick={() => atualizar(e.event, "body", e.padrao)}
+                      title="Volta o texto original. Só vale depois de salvar."
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                      Reverter para o original
+                    </Button>
+                  )}
+                </div>
               </div>
             );
           })}
