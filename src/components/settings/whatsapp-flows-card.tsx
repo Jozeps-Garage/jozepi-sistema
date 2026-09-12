@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { MessageSquareText, RotateCcw } from "lucide-react";
+import { MessageSquareText, RotateCcw, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SettingsCollapsibleCard } from "@/components/settings/settings-collapsible-card";
@@ -128,6 +128,8 @@ export function WhatsappFlowsCard() {
   const [flows, setFlows] = useState<Record<string, Flow>>({});
   const [loading, setLoading] = useState(true);
   const [salvando, setSalvando] = useState<WhatsappEvent | null>(null);
+  const [testando, setTestando] = useState<WhatsappEvent | null>(null);
+  const [conectado, setConectado] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -140,6 +142,14 @@ export function WhatsappFlowsCard() {
       return;
     }
     setWorkshopId(id);
+
+    // O botão de teste só faz sentido com um número conectado.
+    const { data: conexao } = await supabase
+      .from("whatsapp_connections")
+      .select("state")
+      .eq("workshop_id", id)
+      .maybeSingle();
+    setConectado(conexao?.state === "open");
 
     const { data, error: queryError } = await supabase
       .from("whatsapp_flows")
@@ -205,6 +215,45 @@ export function WhatsappFlowsCard() {
     if (upsertError) setError(upsertError.message);
     else setMessage("Mensagem salva.");
     setSalvando(null);
+  };
+
+  // Manda a prévia (com os valores de exemplo) para o próprio número conectado.
+  // Não precisa salvar antes: testa o texto que está na tela.
+  const testar = async (event: WhatsappEvent) => {
+    const texto = preview((flows[event] ?? padraoDe(event)).body ?? "");
+    if (!texto) {
+      setError("Escreva a mensagem antes de testar.");
+      return;
+    }
+
+    setTestando(event);
+    setError(null);
+    setMessage(null);
+
+    const { error: fnError } = await supabase.functions.invoke("whatsapp", {
+      body: { action: "test", text: texto },
+    });
+
+    if (fnError) {
+      let detalhe = "";
+      try {
+        const r = await (fnError as { context?: Response }).context?.json?.();
+        if (r?.error === "aguarde") {
+          detalhe = `Aguarde ${r.retryAfterSec ?? 15}s entre um teste e outro (o envio é espaçado de propósito).`;
+        } else if (r?.error === "nao_conectado") {
+          detalhe = "Conecte o WhatsApp da oficina antes de testar.";
+        } else if (r?.error) {
+          detalhe = String(r.error);
+        }
+      } catch {
+        /* sem detalhe: cai na mensagem genérica */
+      }
+      setError(detalhe || "Não foi possível enviar o teste.");
+    } else {
+      setMessage("Mensagem de teste enviada para o número conectado.");
+    }
+
+    setTestando(null);
   };
 
   return (
@@ -297,6 +346,20 @@ export function WhatsappFlowsCard() {
                     loading={salvando === e.event}
                   >
                     Salvar
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => testar(e.event)}
+                    loading={testando === e.event}
+                    disabled={!conectado}
+                    title={
+                      conectado
+                        ? "Envia esta mensagem para o próprio número conectado"
+                        : "Conecte o WhatsApp da oficina para poder testar"
+                    }
+                  >
+                    <Send className="h-4 w-4" />
+                    Enviar teste
                   </Button>
                   {alterado && (
                     <Button

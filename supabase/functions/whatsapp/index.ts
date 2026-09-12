@@ -38,12 +38,13 @@ Deno.serve(async (req) => {
   const workshopId = profile?.workshop_id;
   if (!workshopId) return json(403, { error: "sem_oficina" });
 
-  let acao = "";
+  let corpo: any = {};
   try {
-    acao = (await req.json())?.action ?? "";
+    corpo = (await req.json()) ?? {};
   } catch {
     return json(400, { error: "json_invalido" });
   }
+  const acao: string = corpo.action ?? "";
 
   const admin = createClient(SUPABASE_URL, SERVICE_KEY);
   const base = `/v1/tenants/${workshopId}`;
@@ -75,6 +76,34 @@ Deno.serve(async (req) => {
         .eq("workshop_id", workshopId)
         .eq("status", "pendente");
       return json(200, { state: "missing" });
+    }
+
+    if (acao === "test") {
+      // Manda a mensagem para o PRÓPRIO número conectado. O destino nunca vem do navegador:
+      // é lido da conexão da oficina, então isto não vira um jeito de mandar para terceiros.
+      const texto = typeof corpo.text === "string" ? corpo.text.trim() : "";
+      if (!texto || texto.length > 4000) return json(400, { error: "texto_invalido" });
+
+      const { data: conexao } = await admin
+        .from("whatsapp_connections")
+        .select("phone, state")
+        .eq("workshop_id", workshopId)
+        .single();
+
+      if (!conexao?.phone || conexao.state !== "open") return json(409, { error: "nao_conectado" });
+
+      const r = await callGateway("POST", `${base}/messages`, {
+        to: conexao.phone,
+        text: texto,
+        idempotencyKey: `teste-${workshopId.slice(0, 8)}-${Date.now()}`,
+      });
+
+      if (r.status === 202) return json(200, { ok: true, para: conexao.phone });
+      if (r.status === 429) {
+        // O gateway espaça os envios de propósito (anti-ban). Não é erro, é fila.
+        return json(429, { error: "aguarde", retryAfterSec: r.data?.retryAfterSec ?? 15 });
+      }
+      return json(502, { error: r.data?.error ?? "gateway_erro" });
     }
 
     return json(400, { error: "acao_invalida" });
