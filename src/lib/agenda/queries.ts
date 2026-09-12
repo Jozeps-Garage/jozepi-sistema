@@ -38,7 +38,7 @@ export async function fetchClients(
   return supabase
     .from("clients")
     .select(
-      "*, vehicles(id, client_id, brand, model, plate, year, photo_url_1, photo_url_2)"
+      "*, vehicles(id, client_id, brand, model, plate, year, photo_url_1, photo_url_2, pre_cadastro)"
     )
     .eq("workshop_id", workshopId)
     .order("name", { ascending: true });

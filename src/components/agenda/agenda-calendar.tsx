@@ -59,6 +59,7 @@ import {
   applyStockDiscount,
   importLocalAppointments,
   createClientWithVehicles,
+  createPreCadastroClient,
 } from "@/lib/agenda/mutations";
 import type {
   Appointment,
@@ -710,6 +711,8 @@ export function AgendaCalendar() {
     serviceIds: [],
     totalAmount: "",
     notes: "",
+    preCadastro: false,
+    preCadastroLabel: "",
   });
   const [notesPanelOpen, setNotesPanelOpen] = useState(false);
   const [notesDraft, setNotesDraft] = useState("");
@@ -1257,6 +1260,8 @@ export function AgendaCalendar() {
       serviceIds: [],
       totalAmount: "",
       notes: "",
+      preCadastro: false,
+      preCadastroLabel: "",
     });
     setError(null);
     setAddingService(false);
@@ -1306,6 +1311,8 @@ export function AgendaCalendar() {
         serviceIds: [],
         totalAmount: "",
         notes: "",
+        preCadastro: false,
+        preCadastroLabel: "",
       });
       setError(null);
       setAddingService(false);
@@ -1376,6 +1383,9 @@ export function AgendaCalendar() {
           ? String(appointment.totalAmount)
           : "",
       notes: appointment.notes,
+      // Editar agendamento existente nunca cria pré-cadastro: o cliente já existe.
+      preCadastro: false,
+      preCadastroLabel: "",
     });
     setEditingAppointmentId(appointment.id);
     setError(null);
@@ -1689,19 +1699,53 @@ export function AgendaCalendar() {
       return;
     }
 
-    const appointmentClient = clients.find(
+    let appointmentClient = clients.find(
       (client) => client.id === form.clientId
     );
-    const appointmentVehicle = appointmentClient?.vehicles?.find(
+    let appointmentVehicle = appointmentClient?.vehicles?.find(
       (vehicle) => vehicle.id === form.vehicleId
     );
+
+    // Cliente não cadastrado: cria na hora um cliente incompleto (e um veículo de marcação),
+    // para o horário poder ser salvo sem ter nome, telefone ou carro em mãos. O cadastro é
+    // finalizado depois, pela tela de clientes.
+    if (form.preCadastro && !editingAppointmentId) {
+      if (selectedServices.length === 0) {
+        setError("Selecione ao menos um serviço.");
+        return;
+      }
+      if (!workshopId) {
+        setError("Oficina não encontrada.");
+        return;
+      }
+
+      try {
+        const novoCliente = await createPreCadastroClient(
+          supabase,
+          workshopId,
+          form.preCadastroLabel
+        );
+        setClients((prev) =>
+          [...prev, novoCliente].sort((a, b) => a.name.localeCompare(b.name))
+        );
+        appointmentClient = novoCliente;
+        appointmentVehicle = novoCliente.vehicles?.[0];
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Erro ao criar o pré-cadastro."
+        );
+        return;
+      }
+    }
 
     if (!appointmentClient || !appointmentVehicle || selectedServices.length === 0) {
       setError("Selecione cliente, veículo e serviço válidos.");
       return;
     }
 
-    const vehicleLabel = `${appointmentVehicle.brand} ${appointmentVehicle.model} - ${appointmentVehicle.plate}`;
+    const vehicleLabel = appointmentVehicle.pre_cadastro
+      ? "Veículo a definir"
+      : `${appointmentVehicle.brand} ${appointmentVehicle.model} - ${appointmentVehicle.plate}`;
     const serviceLabel = selectedServices.map((service) => service.name).join(", ");
 
     let resolvedCustomTotal = customTotalAmount;
@@ -2551,17 +2595,52 @@ export function AgendaCalendar() {
                       Novo cliente
                     </button>
                   </div>
+                  <label className="mb-2.5 flex items-start gap-2 rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={form.preCadastro}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          preCadastro: e.target.checked,
+                          clientId: "",
+                          vehicleId: "",
+                        }))
+                      }
+                      className="mt-0.5 h-4 w-4 rounded border-border"
+                    />
+                    <span>
+                      Cliente não cadastrado
+                      <span className="block text-xs text-muted">
+                        Salva o horário agora. O cadastro fica pendente na tela de clientes.
+                      </span>
+                    </span>
+                  </label>
+                  {form.preCadastro && (
+                    <div className="mb-2.5">
+                      <Input
+                        label="Como identificar (opcional)"
+                        value={form.preCadastroLabel}
+                        onChange={(e) =>
+                          setForm((prev) => ({ ...prev, preCadastroLabel: e.target.value }))
+                        }
+                        placeholder="ex: João do Civic prata"
+                      />
+                    </div>
+                  )}
                   <AgendaDropdown
                     id="agenda-client"
                     value={form.clientId}
                     placeholder={
-                      loadingClients
-                        ? "Carregando clientes..."
-                        : "Selecione um cliente"
+                      form.preCadastro
+                        ? "Pré-cadastro: criado ao salvar"
+                        : loadingClients
+                          ? "Carregando clientes..."
+                          : "Selecione um cliente"
                     }
                     emptyMessage="Nenhum cliente cadastrado."
                     options={clientOptions}
-                    disabled={loadingClients}
+                    disabled={loadingClients || form.preCadastro}
                     open={openSelectId === "client"}
                     searchable
                     searchPlaceholder="Digite nome ou telefone"
@@ -3502,6 +3581,28 @@ export function AgendaCalendar() {
                     )}
                   </div>
 
+                  {/* Cliente não cadastrado: agenda agora, cadastra depois */}
+                  <label className="flex items-start gap-2 rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={form.preCadastro}
+                      onChange={(e) => setForm((prev) => ({ ...prev, preCadastro: e.target.checked, clientId: "", vehicleId: "" }))}
+                      className="mt-0.5 h-4 w-4 rounded border-border"
+                    />
+                    <span>
+                      Cliente não cadastrado
+                      <span className="block text-xs text-muted">Salva o horário agora. O cadastro fica pendente na tela de clientes.</span>
+                    </span>
+                  </label>
+                  {form.preCadastro && (
+                    <Input
+                      label="Como identificar (opcional)"
+                      value={form.preCadastroLabel}
+                      onChange={(e) => setForm((prev) => ({ ...prev, preCadastroLabel: e.target.value }))}
+                      placeholder="ex: João do Civic prata"
+                    />
+                  )}
+
                   {/* Cliente */}
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-3">
@@ -3513,10 +3614,10 @@ export function AgendaCalendar() {
                     <AgendaDropdown
                       id="modal-client"
                       value={form.clientId}
-                      placeholder={loadingClients ? "Carregando..." : "Selecione um cliente"}
+                      placeholder={form.preCadastro ? "Pré-cadastro: criado ao salvar" : loadingClients ? "Carregando..." : "Selecione um cliente"}
                       emptyMessage="Nenhum cliente cadastrado."
                       options={clientOptions}
-                      disabled={loadingClients}
+                      disabled={loadingClients || form.preCadastro}
                       open={openSelectId === "client"}
                       searchable
                       searchPlaceholder="Digite nome ou telefone"

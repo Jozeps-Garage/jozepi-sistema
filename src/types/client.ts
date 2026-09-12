@@ -7,6 +7,8 @@ export interface Vehicle {
   year: number | null;
   photo_url_1: string | null;
   photo_url_2: string | null;
+  /** Veículo de marcação criado junto de um pré-cadastro: marca/modelo/placa ainda vazios. */
+  pre_cadastro?: boolean;
 }
 
 export interface Client {
@@ -21,6 +23,8 @@ export interface Client {
   created_at: string;
   updated_at: string;
   vehicles?: Vehicle[];
+  /** Criado pela agenda sem dados completos. Telefone fica vazio até alguém finalizar o cadastro. */
+  pre_cadastro?: boolean;
 }
 
 export type VehicleFormItem = {

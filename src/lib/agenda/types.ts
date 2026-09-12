@@ -28,6 +28,10 @@ export interface AppointmentForm {
   serviceIds: string[];
   totalAmount: string;
   notes: string;
+  /** Marca o horário sem ter o cliente cadastrado: cria um pré-cadastro no momento de salvar. */
+  preCadastro: boolean;
+  /** Como identificar esse cliente até alguém completar o cadastro. Opcional. */
+  preCadastroLabel: string;
 }
 
 export interface AgendaService {

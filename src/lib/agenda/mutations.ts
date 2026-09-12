@@ -351,6 +351,67 @@ export async function importLocalAppointments(
 
 // ─── clients ─────────────────────────────────────────────────────────────────
 
+/**
+ * Cria um cliente incompleto direto da agenda: dá pra marcar o horário sem ter nome,
+ * telefone ou veículo em mãos, e alguém finaliza o cadastro depois pela tela de clientes.
+ *
+ * Telefone nasce VAZIO (não nulo): o resto do sistema já trata string vazia como "não tem",
+ * e assim nenhuma coluna precisou virar nullable.
+ *
+ * O veículo de marcação é inserido aqui e não pelo syncVehicles de propósito: aquele ignora
+ * veículo sem marca/modelo/placa, que é exatamente o caso aqui.
+ */
+export async function createPreCadastroClient(
+  supabase: SupabaseClient,
+  workshopId: string,
+  label: string
+): Promise<Client> {
+  const nome = label.trim() || "Cliente a identificar";
+
+  const { data: newClient, error: clientError } = await supabase
+    .from("clients")
+    .insert({
+      name: nome,
+      phone: "",
+      notes: null,
+      workshop_id: workshopId,
+      pre_cadastro: true,
+    })
+    .select("id")
+    .single();
+
+  if (clientError) {
+    throw new Error(clientError.message);
+  }
+
+  const { error: vehicleError } = await supabase.from("vehicles").insert({
+    workshop_id: workshopId,
+    client_id: newClient.id,
+    brand: "",
+    model: "",
+    plate: "",
+    pre_cadastro: true,
+  });
+
+  if (vehicleError) {
+    throw new Error(vehicleError.message);
+  }
+
+  const { data: savedClient, error: savedClientError } = await supabase
+    .from("clients")
+    .select(
+      "*, vehicles(id, client_id, brand, model, plate, year, photo_url_1, photo_url_2, pre_cadastro)"
+    )
+    .eq("id", newClient.id)
+    .single();
+
+  if (savedClientError) {
+    throw new Error(savedClientError.message);
+  }
+
+  return savedClient as Client;
+}
+
 export async function createClientWithVehicles(
   supabase: SupabaseClient,
   workshopId: string,

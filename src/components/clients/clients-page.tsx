@@ -523,7 +523,7 @@ export function ClientsPage() {
     const { data, error } = await supabase
       .from("clients")
       .select(
-        "*, vehicles(id, client_id, brand, model, plate, year, photo_url_1, photo_url_2)"
+        "*, vehicles(id, client_id, brand, model, plate, year, photo_url_1, photo_url_2, pre_cadastro)"
       )
       .eq("workshop_id", profileWorkshopId)
       .order("name", { ascending: true });
@@ -645,16 +645,29 @@ export function ClientsPage() {
       [vehicle],
       vehicle.id ? [vehicle.id] : []
     );
+
+    // Veículo que veio de um pré-cadastro nasce vazio; ao receber marca, modelo e placa,
+    // deixa de ser marcação e vira veículo de verdade.
+    if (vehicle.id) {
+      await supabase
+        .from("vehicles")
+        .update({ pre_cadastro: false })
+        .eq("id", vehicle.id);
+    }
+
     await refreshClientVehicles(vehicleModalClient.id);
   }
 
   async function handleSave(data: ClientFormData) {
     if (!workshopId) throw new Error("Oficina não encontrada.");
 
+    // Salvar por este formulário é o que "finaliza" um pré-cadastro: o telefone é obrigatório
+    // aqui, então quem chegou até o salvar já preencheu o que faltava.
     const payload = {
       name: data.name.trim(),
       phone: normalizePhone(data.phone),
       notes: data.notes.trim() || null,
+      pre_cadastro: false,
     };
 
     if (editingClient) {
@@ -906,22 +919,39 @@ export function ClientsPage() {
                   <h2 className="truncate text-base font-semibold text-foreground">
                     {client.name}
                   </h2>
+                  {client.pre_cadastro && (
+                    <span className="mt-1 inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
+                      Pré-cadastro · falta preencher
+                    </span>
+                  )}
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted">
-                    <a
-                      href={getWhatsAppUrl(client.phone)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={`group ${clientInfoCardClass} text-[#008000] transition-all hover:-translate-y-0.5 hover:border-[#008000] hover:bg-[#008000] hover:text-white hover:shadow-card-hover`}
-                      title="Abrir conversa no WhatsApp"
-                    >
-                      <WhatsappLogo
-                        size={16}
-                        weight={CLIENT_ICON_WEIGHT}
-                        className="shrink-0 text-[#008000] transition-colors group-hover:text-white"
-                        aria-hidden
-                      />
-                      <span>{formatPhone(client.phone)}</span>
-                    </a>
+                    {client.phone ? (
+                      <a
+                        href={getWhatsAppUrl(client.phone)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`group ${clientInfoCardClass} text-[#008000] transition-all hover:-translate-y-0.5 hover:border-[#008000] hover:bg-[#008000] hover:text-white hover:shadow-card-hover`}
+                        title="Abrir conversa no WhatsApp"
+                      >
+                        <WhatsappLogo
+                          size={16}
+                          weight={CLIENT_ICON_WEIGHT}
+                          className="shrink-0 text-[#008000] transition-colors group-hover:text-white"
+                          aria-hidden
+                        />
+                        <span>{formatPhone(client.phone)}</span>
+                      </a>
+                    ) : (
+                      // Sem telefone não existe link de WhatsApp: o botão leva direto pro cadastro.
+                      <button
+                        type="button"
+                        onClick={() => openEditModal(client)}
+                        className={`${clientInfoCardClass} text-muted transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:bg-primary hover:text-white`}
+                        title="Finalizar o cadastro deste cliente"
+                      >
+                        Sem telefone · finalizar cadastro
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => openVehiclesPanel(client)}
