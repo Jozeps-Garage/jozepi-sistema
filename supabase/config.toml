@@ -1,0 +1,13 @@
+# Configuração das Edge Functions.
+#
+# whatsapp          → exige login (a própria função descobre a oficina pelo perfil de quem chamou).
+# whatsapp-dispatch → SEM login: é o pg_cron que chama, e ele não tem usuário.
+#                     A autenticação dela é o cabeçalho x-dispatch-token.
+
+project_id = "jozepi-sistema"
+
+[functions.whatsapp]
+verify_jwt = true
+
+[functions.whatsapp-dispatch]
+verify_jwt = false

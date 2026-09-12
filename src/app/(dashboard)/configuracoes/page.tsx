@@ -4,6 +4,8 @@ import { AccountCredentialsCard } from "@/components/settings/account-credential
 import { CompanyInfoCard } from "@/components/settings/company-info-card";
 import { TimezoneCard } from "@/components/settings/timezone-card";
 import { InviteUsersCard } from "@/components/settings/invite-users-card";
+import { WhatsappCard } from "@/components/settings/whatsapp-card";
+import { WhatsappFlowsCard } from "@/components/settings/whatsapp-flows-card";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
@@ -34,6 +36,14 @@ export default async function ConfiguracoesPage() {
 
       <div className="mb-6">
         <TimezoneCard />
+      </div>
+
+      <div className="mb-6">
+        <WhatsappCard />
+      </div>
+
+      <div className="mb-6">
+        <WhatsappFlowsCard />
       </div>
 
       <div className="mb-6">
