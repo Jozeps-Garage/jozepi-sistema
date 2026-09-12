@@ -37,6 +37,8 @@ async function sign(
 
 export type GatewayResponse = { status: number; data: any };
 
+export class GatewayNotConfigured extends Error {}
+
 export async function callGateway(
   method: string,
   path: string,
@@ -44,7 +46,14 @@ export async function callGateway(
 ): Promise<GatewayResponse> {
   const baseUrl = Deno.env.get("WHATSAPP_GATEWAY_URL");
   const secret = Deno.env.get("WHATSAPP_GATEWAY_SECRET");
-  if (!baseUrl || !secret) throw new Error("gateway não configurado");
+  // Erro específico de propósito: secret vazio já se escondeu atrás de um 502 genérico
+  // (2026-09-12) e custou duas rodadas de teste pra achar.
+  if (!baseUrl || !secret) {
+    const faltando = [!baseUrl && "WHATSAPP_GATEWAY_URL", !secret && "WHATSAPP_GATEWAY_SECRET"]
+      .filter(Boolean)
+      .join(", ");
+    throw new GatewayNotConfigured(`secret ausente ou vazio: ${faltando}`);
+  }
 
   const body = payload === undefined ? "" : JSON.stringify(payload);
   const ts = String(Math.floor(Date.now() / 1000));

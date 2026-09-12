@@ -7,7 +7,7 @@
 // Secrets: WHATSAPP_GATEWAY_URL, WHATSAPP_GATEWAY_SECRET.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { callGateway, corsHeaders, json } from "../_shared/gateway.ts";
+import { callGateway, corsHeaders, GatewayNotConfigured, json } from "../_shared/gateway.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -80,6 +80,9 @@ Deno.serve(async (req) => {
     return json(400, { error: "acao_invalida" });
   } catch (e) {
     console.error("falha ao falar com o gateway:", (e as Error).message);
+    if (e instanceof GatewayNotConfigured) {
+      return json(503, { error: "gateway_nao_configurado", detalhe: (e as Error).message });
+    }
     return json(502, { error: "gateway_indisponivel" });
   }
 });
