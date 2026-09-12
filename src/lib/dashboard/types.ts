@@ -60,6 +60,7 @@ export type DashboardData = {
   dateLabel: string;
   stats: DashboardStats;
   weekAppointments: AppointmentRow[];
+  todayDateKey: string;
   nextTodayAppointment: NextAppointment | null;
   lowStockProducts: ProductRow[];
   unpaidOrders: UnpaidOrderRow[];

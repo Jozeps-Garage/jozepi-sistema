@@ -129,6 +129,10 @@ h3 {
   }
 }
 
+.dashboard-page .card-surface {
+  padding: 0.75rem 1rem;
+}
+
 .badge-premium {
   display: inline-flex;
   align-items: center;

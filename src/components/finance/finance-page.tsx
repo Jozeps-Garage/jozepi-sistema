@@ -9,6 +9,7 @@ import {
   ChartBar,
   ChartDonut,
   ChartLineUp,
+  Check,
   CheckCircle,
   CircleHalf,
   Funnel,
@@ -165,10 +166,7 @@ function mergeFixedCosts(current: FixedCost[], incoming: FixedCost[]) {
       ...existing,
       ...cost,
       // Keep local payment_day when DB/legacy rows omit the column (comes back as null).
-      payment_day:
-        cost.kind === "estimated"
-          ? null
-          : cost.payment_day ?? existing.payment_day,
+      payment_day: cost.payment_day ?? existing.payment_day,
     });
   });
   return applyStoredPaymentDays(sortFixedCosts(Array.from(byId.values())));
@@ -232,10 +230,6 @@ function writeStoredPaymentDay(id: string, day: number | null) {
 function applyStoredPaymentDays(costs: FixedCost[]): FixedCost[] {
   const days = readStoredPaymentDays();
   return costs.map((cost) => {
-    if (cost.kind === "estimated") {
-      return { ...cost, payment_day: null };
-    }
-
     return {
       ...cost,
       payment_day: cost.payment_day ?? days[cost.id] ?? null,
@@ -436,6 +430,8 @@ const paymentDayOptions = Array.from({ length: 31 }, (_, index) => {
   return { value: day, label: `Dia ${day}` };
 });
 
+const FIXED_COST_GRID_COLUMNS = "minmax(0, 1fr) 88px 80px 136px 88px 72px";
+
 function normalizeFixedCost(row: Record<string, unknown>): FixedCost {
   const paymentDayRaw = row.payment_day;
   const paymentDay =
@@ -464,6 +460,75 @@ function normalizeFixedCost(row: Record<string, unknown>): FixedCost {
 
 function fixedCostExpenseSource(costId: string, yearMonth: string) {
   return `fixed_cost:${costId}:${yearMonth}`;
+}
+
+function getFixedCostTransactionsBySource(transactions: FinancialTransaction[]) {
+  return new Map(
+    transactions
+      .filter((tx) => tx.source?.startsWith("fixed_cost:"))
+      .map((tx) => [tx.source as string, tx])
+  );
+}
+
+function getPendingEstimatedLaunch(
+  cost: FixedCost,
+  existingSources: Map<string, unknown>,
+  today: Date
+) {
+  if (!cost.active || cost.kind !== "estimated" || !cost.payment_day) return null;
+
+  const createdAt = cost.created_at ? new Date(cost.created_at) : today;
+
+  for (let offset = 11; offset >= 0; offset -= 1) {
+    const monthDate = new Date(today.getFullYear(), today.getMonth() - offset, 1);
+    const paymentDate = paymentDateForMonth(
+      monthDate.getFullYear(),
+      monthDate.getMonth(),
+      cost.payment_day
+    );
+    const paymentDateObj = startOfDay(parseLocalDate(paymentDate));
+
+    if (paymentDateObj > today) continue;
+    if (monthDate < startOfMonth(createdAt)) continue;
+
+    const source = fixedCostExpenseSource(
+      cost.id,
+      yearMonthKey(monthDate.getFullYear(), monthDate.getMonth())
+    );
+    if (!existingSources.has(source)) {
+      return {
+        paymentDate,
+        source,
+        monthLabel: `${getMonthLabel(monthDate)} ${monthDate.getFullYear()}`,
+      };
+    }
+  }
+
+  return null;
+}
+
+function getLastLaunchedEstimatedAmount(
+  cost: FixedCost,
+  bySource: Map<string, FinancialTransaction>
+) {
+  const prefix = `fixed_cost:${cost.id}:`;
+  let latestKey = "";
+  let latestAmount = 0;
+
+  bySource.forEach((tx, source) => {
+    if (!source.startsWith(prefix) || source <= latestKey) return;
+    latestKey = source;
+    latestAmount = toCurrencyNumber(tx.amount);
+  });
+
+  return latestAmount;
+}
+
+function formatMoneyInput(value: number) {
+  return value.toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function paymentDateForMonth(year: number, monthIndex: number, paymentDay: number) {
@@ -593,6 +658,11 @@ function parseMoney(value: string) {
   }
 
   return amount;
+}
+
+function parseOptionalMoney(value: string) {
+  if (!value.trim()) return 0;
+  return parseMoney(value);
 }
 
 function firstRelation<T>(value: T | T[] | null | undefined) {
@@ -1882,7 +1952,7 @@ export function FinancePage() {
       normalizeFixedCost(cost as unknown as Record<string, unknown>)
     );
     stored.forEach((cost) => {
-      if (cost.kind === "real" && cost.payment_day) {
+      if (cost.payment_day) {
         writeStoredPaymentDay(cost.id, cost.payment_day);
       }
     });
@@ -1920,6 +1990,9 @@ export function FinancePage() {
   const [fixedCostForm, setFixedCostForm] = useState<FixedCostForm>(initialFixedCostForm);
   const [fixedCostError, setFixedCostError] = useState<string | null>(null);
   const [savingFixedCost, setSavingFixedCost] = useState(false);
+  const [launchDrafts, setLaunchDrafts] = useState<Record<string, string>>({});
+  const [launchingCostId, setLaunchingCostId] = useState<string | null>(null);
+  const [launchErrors, setLaunchErrors] = useState<Record<string, string>>({});
   const [overviewChartInterval, setOverviewChartInterval] = useState<ChartInterval>("6m");
 
   const loadFinanceData = useCallback(async () => {
@@ -2442,19 +2515,31 @@ export function FinancePage() {
   );
   const todayProfit = todayRevenue - todayExpenses;
   const activeFixedCosts = fixedCosts.filter((cost) => cost.active);
-  const fixedRealTotal = activeFixedCosts
-    .filter((cost) => cost.kind === "real")
-    .reduce((total, cost) => total + toCurrencyNumber(cost.amount), 0);
-  const fixedEstimatedTotal = activeFixedCosts
-    .filter((cost) => cost.kind === "estimated")
-    .reduce((total, cost) => total + toCurrencyNumber(cost.amount), 0);
-  const fixedMonthlyTotal = fixedRealTotal + fixedEstimatedTotal;
-  const monthlyWashCount = reportOrders.filter((order) => {
+  const fixedCostTransactionsBySource = useMemo(
+    () => getFixedCostTransactionsBySource(transactions),
+    [transactions]
+  );
+  const currentMonthSourceKey = yearMonthKey(today.getFullYear(), today.getMonth());
+  const fixedMonthlyTotal = activeFixedCosts.reduce((total, cost) => {
+    if (cost.kind === "estimated") {
+      const launched = fixedCostTransactionsBySource.get(
+        fixedCostExpenseSource(cost.id, currentMonthSourceKey)
+      );
+      return (
+        total +
+        (launched
+          ? toCurrencyNumber(launched.amount)
+          : toCurrencyNumber(cost.amount))
+      );
+    }
+    return total + toCurrencyNumber(cost.amount);
+  }, 0);
+  const monthlyServiceCount = reportOrders.filter((order) => {
     const orderDate = getOrderDate(order);
     return orderDate ? isDateInRange(orderDate, currentMonthRange) : false;
   }).length;
-  const fixedCostPerWash =
-    monthlyWashCount > 0 ? fixedMonthlyTotal / monthlyWashCount : 0;
+  const costPerService =
+    monthlyServiceCount > 0 ? monthExpenseTotal / monthlyServiceCount : 0;
 
   function resetForm(type: TransactionType) {
     if (type === "receita") {
@@ -2787,13 +2872,11 @@ export function FinancePage() {
 
   function handleEditFixedCost(cost: FixedCost) {
     setEditingFixedCostId(cost.id);
+    const storedAmount = toCurrencyNumber(cost.amount);
     setFixedCostForm({
       name: cost.name,
       kind: cost.kind,
-      amount: toCurrencyNumber(cost.amount).toLocaleString("pt-BR", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }),
+      amount: storedAmount > 0 ? formatMoneyInput(storedAmount) : "",
       notes: cost.notes ?? "",
       paymentDay: String(cost.payment_day ?? 1),
     });
@@ -2814,19 +2897,21 @@ export function FinancePage() {
       return;
     }
 
-    let amount: number;
+    let amount = 0;
     try {
-      amount = parseMoney(fixedCostForm.amount);
+      amount =
+        fixedCostForm.kind === "real"
+          ? parseMoney(fixedCostForm.amount)
+          : parseOptionalMoney(fixedCostForm.amount);
     } catch (err) {
-      setFixedCostError(err instanceof Error ? err.message : "Informe um valor válido.");
+      setFixedCostError(
+        err instanceof Error ? err.message : "Informe um valor válido."
+      );
       return;
     }
 
     const paymentDay = Number(fixedCostForm.paymentDay);
-    if (
-      fixedCostForm.kind === "real" &&
-      (!Number.isFinite(paymentDay) || paymentDay < 1 || paymentDay > 31)
-    ) {
+    if (!Number.isFinite(paymentDay) || paymentDay < 1 || paymentDay > 31) {
       setFixedCostError("Informe o dia de pagamento (1 a 31).");
       return;
     }
@@ -2844,7 +2929,7 @@ export function FinancePage() {
       amount,
       active: existingCost?.active ?? true,
       notes: fixedCostForm.notes.trim() || null,
-      payment_day: fixedCostForm.kind === "real" ? paymentDay : null,
+      payment_day: paymentDay,
       created_at: existingCost?.created_at ?? now,
       updated_at: now,
     };
@@ -2971,6 +3056,116 @@ export function FinancePage() {
     }
 
     resetFixedCostForm();
+  }
+
+  async function handleLaunchEstimatedCost(cost: FixedCost) {
+    if (!workshopId) {
+      setLaunchErrors((prev) => ({
+        ...prev,
+        [cost.id]: "Oficina não encontrada.",
+      }));
+      return;
+    }
+
+    const pending = getPendingEstimatedLaunch(
+      cost,
+      fixedCostTransactionsBySource,
+      today
+    );
+    if (!pending) {
+      setLaunchErrors((prev) => ({
+        ...prev,
+        [cost.id]: "Nenhum lançamento pendente.",
+      }));
+      return;
+    }
+
+    const lastAmount = getLastLaunchedEstimatedAmount(
+      cost,
+      fixedCostTransactionsBySource
+    );
+    const draft =
+      launchDrafts[cost.id] ??
+      (lastAmount > 0 ? formatMoneyInput(lastAmount) : "");
+
+    let amount: number;
+    try {
+      amount = parseMoney(draft);
+    } catch (err) {
+      setLaunchErrors((prev) => ({
+        ...prev,
+        [cost.id]:
+          err instanceof Error ? err.message : "Informe um valor válido.",
+      }));
+      return;
+    }
+
+    setLaunchingCostId(cost.id);
+    setLaunchErrors((prev) => {
+      const next = { ...prev };
+      delete next[cost.id];
+      return next;
+    });
+
+    const { data, error } = await supabase
+      .from("financial_transactions")
+      .insert({
+        workshop_id: workshopId,
+        type: "despesa",
+        description: cost.name,
+        amount,
+        category: "Custo Fixo",
+        transaction_date: pending.paymentDate,
+        source: pending.source,
+      })
+      .select(TRANSACTION_SELECT_WITH_PAYMENT)
+      .single();
+
+    let saved = data;
+    let saveError = error;
+
+    if (saveError) {
+      const legacyInsert = await supabase
+        .from("financial_transactions")
+        .insert({
+          workshop_id: workshopId,
+          type: "despesa",
+          description: cost.name,
+          amount,
+          category: "Custo Fixo",
+          transaction_date: pending.paymentDate,
+          source: pending.source,
+        })
+        .select(TRANSACTION_SELECT_FULL)
+        .single();
+
+      saved = legacyInsert.data;
+      saveError = legacyInsert.error;
+    }
+
+    setLaunchingCostId(null);
+
+    if (saveError || !saved) {
+      setLaunchErrors((prev) => ({
+        ...prev,
+        [cost.id]: saveError?.message ?? "Não foi possível lançar a despesa.",
+      }));
+      return;
+    }
+
+    const normalized = normalizeTransactionRow(
+      saved as unknown as Record<string, unknown>
+    );
+    setTransactions((prev) => {
+      const byId = new Map(prev.map((item) => [item.id, item]));
+      byId.set(normalized.id, normalized);
+      return Array.from(byId.values());
+    });
+    setLaunchDrafts((prev) => {
+      const next = { ...prev };
+      delete next[cost.id];
+      return next;
+    });
   }
 
   async function handleToggleFixedCost(cost: FixedCost) {
@@ -3587,27 +3782,12 @@ export function FinancePage() {
                   Custos Fixos
                 </h2>
                 <p className="mt-1 text-sm text-muted">
-                  Custos reais entram como despesa todo mês na data de pagamento escolhida.
+                  Custo fixo lança sozinho no dia. Estimado pede o valor na hora do
+                  lançamento.
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-lg border border-border bg-card shadow-card px-4 py-3 shadow-card">
-                  <p className="text-xs font-semibold uppercase tracking-widest text-muted">
-                    Total fixos reais
-                  </p>
-                  <p className="mt-1 text-xl font-bold text-foreground">
-                    {formatCurrency(fixedRealTotal)}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-border bg-card shadow-card px-4 py-3 shadow-card">
-                  <p className="text-xs font-semibold uppercase tracking-widest text-muted">
-                    Total estimados
-                  </p>
-                  <p className="mt-1 text-xl font-bold text-primary">
-                    {formatCurrency(fixedEstimatedTotal)}
-                  </p>
-                </div>
+              <div className="grid max-w-3xl grid-cols-1 gap-3 md:grid-cols-2">
                 <div className="rounded-lg border border-border bg-card shadow-card px-4 py-3 shadow-card">
                   <p className="text-xs font-semibold uppercase tracking-widest text-muted">
                     Total mensal
@@ -3618,13 +3798,14 @@ export function FinancePage() {
                 </div>
                 <div className="rounded-lg border border-border bg-card shadow-card px-4 py-3 shadow-card">
                   <p className="text-xs font-semibold uppercase tracking-widest text-muted">
-                    Custo por lavagem
+                    Custo por serviço
                   </p>
-                  <p className="mt-1 text-xl font-bold text-success">
-                    {formatCurrency(fixedCostPerWash)}
+                  <p className="mt-1 text-xl font-bold text-danger">
+                    {formatCurrency(costPerService)}
                   </p>
                   <p className="mt-1 text-xs font-semibold text-muted">
-                    {monthlyWashCount} {monthlyWashCount === 1 ? "lavagem" : "lavagens"} no mês
+                    {monthlyServiceCount}{" "}
+                    {monthlyServiceCount === 1 ? "serviço" : "serviços"} no mês
                   </p>
                 </div>
               </div>
@@ -3657,7 +3838,9 @@ export function FinancePage() {
                       {editingFixedCostId ? "Editar custo fixo" : "Novo custo fixo"}
                     </h2>
                     <p className="mt-1 text-sm text-muted">
-                      Custos reais geram despesa automática todo mês na data de pagamento.
+                      {fixedCostForm.kind === "estimated"
+                        ? "Informe o dia e, se quiser, um valor estipulado. Na hora do lançamento você confirma ou ajusta."
+                        : "Custos fixos geram despesa automática todo mês na data de pagamento."}
                     </p>
                   </div>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -3676,8 +3859,8 @@ export function FinancePage() {
                       label="Tipo"
                       value={fixedCostForm.kind}
                       options={[
-                        { value: "real", label: "Custo Fixo Real" },
-                        { value: "estimated", label: "Média Estimada" },
+                        { value: "real", label: "Custo Fixo" },
+                        { value: "estimated", label: "Estimado" },
                       ]}
                       onChange={(kind) =>
                         setFixedCostForm((prev) => ({
@@ -3687,7 +3870,11 @@ export function FinancePage() {
                       }
                     />
                     <Input
-                      label="Valor mensal"
+                      label={
+                        fixedCostForm.kind === "estimated"
+                          ? "Valor estipulado (opcional)"
+                          : "Valor mensal"
+                      }
                       prefix="R$"
                       value={fixedCostForm.amount}
                       onChange={(event) =>
@@ -3696,27 +3883,23 @@ export function FinancePage() {
                           amount: event.target.value,
                         }))
                       }
-                      placeholder="250,00"
-                    />
-                    {fixedCostForm.kind === "real" && (
-                      <Dropdown
-                        label="Dia de pagamento"
-                        value={fixedCostForm.paymentDay}
-                        options={paymentDayOptions}
-                        onChange={(paymentDay) =>
-                          setFixedCostForm((prev) => ({
-                            ...prev,
-                            paymentDay,
-                          }))
-                        }
-                      />
-                    )}
-                    <Input
-                      label={
-                        fixedCostForm.kind === "estimated"
-                          ? "Observação"
-                          : "Observação (opcional)"
+                      placeholder={
+                        fixedCostForm.kind === "estimated" ? "180,00" : "250,00"
                       }
+                    />
+                    <Dropdown
+                      label="Dia de pagamento"
+                      value={fixedCostForm.paymentDay}
+                      options={paymentDayOptions}
+                      onChange={(paymentDay) =>
+                        setFixedCostForm((prev) => ({
+                          ...prev,
+                          paymentDay,
+                        }))
+                      }
+                    />
+                    <Input
+                      label="Observação (opcional)"
                       value={fixedCostForm.notes}
                       onChange={(event) =>
                         setFixedCostForm((prev) => ({
@@ -3726,7 +3909,7 @@ export function FinancePage() {
                       }
                       placeholder={
                         fixedCostForm.kind === "estimated"
-                          ? "Baseado nos últimos 3 meses"
+                          ? "Energia, água, fatura variável..."
                           : "Contrato, vencimento, referência..."
                       }
                     />
@@ -3759,8 +3942,11 @@ export function FinancePage() {
               )}
 
               <div className="w-full overflow-x-auto">
-                <div className="min-w-[860px]">
-                  <div className="grid grid-cols-[minmax(200px,1fr)_110px_110px_120px_110px_112px] gap-4 border-b border-border px-3 py-3 text-xs font-semibold text-muted">
+                <div className="min-w-[40rem]">
+                  <div
+                    className="grid items-center gap-x-4 border-b border-border px-3 py-3 text-xs font-semibold text-muted"
+                    style={{ gridTemplateColumns: FIXED_COST_GRID_COLUMNS }}
+                  >
                     <span>Nome</span>
                     <span>Tipo</span>
                     <span>Dia</span>
@@ -3773,19 +3959,39 @@ export function FinancePage() {
                       Nenhum custo fixo cadastrado
                     </p>
                   ) : (
-                    fixedCosts.map((cost) => (
+                    fixedCosts.map((cost) => {
+                      const pendingLaunch = getPendingEstimatedLaunch(
+                        cost,
+                        fixedCostTransactionsBySource,
+                        today
+                      );
+                      const lastLaunched = getLastLaunchedEstimatedAmount(
+                        cost,
+                        fixedCostTransactionsBySource
+                      );
+                      const launchedThisMonth = fixedCostTransactionsBySource.get(
+                        fixedCostExpenseSource(cost.id, currentMonthSourceKey)
+                      );
+                      const launchHint =
+                        lastLaunched > 0 ? lastLaunched : toCurrencyNumber(cost.amount);
+                      const launchValue =
+                        launchDrafts[cost.id] ??
+                        (launchHint > 0 ? formatMoneyInput(launchHint) : "");
+
+                      return (
                       <article
                         key={cost.id}
-                        className="grid grid-cols-[minmax(200px,1fr)_110px_110px_120px_110px_112px] items-center gap-4 border-b border-border/70 px-3 py-3 transition-colors hover:bg-background/70"
+                        className="grid items-center gap-x-4 border-b border-border/70 px-3 py-3 transition-colors hover:bg-background/70"
+                        style={{ gridTemplateColumns: FIXED_COST_GRID_COLUMNS }}
                       >
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="truncate text-sm font-semibold text-foreground">
                               {cost.name}
                             </p>
-                            {cost.kind === "estimated" && (
-                              <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
-                                Estimado
+                            {pendingLaunch && (
+                              <span className="rounded-full bg-warning/10 px-2.5 py-1 text-[11px] font-semibold text-warning">
+                                A lançar
                               </span>
                             )}
                           </div>
@@ -3794,18 +4000,68 @@ export function FinancePage() {
                               {cost.notes}
                             </p>
                           )}
+                          {launchErrors[cost.id] && (
+                            <p className="mt-1 text-xs text-danger">
+                              {launchErrors[cost.id]}
+                            </p>
+                          )}
                         </div>
                         <p className="text-sm font-medium text-foreground">
-                          {cost.kind === "real" ? "Real" : "Média"}
+                          {cost.kind === "real" ? "Fixo" : "Estimado"}
                         </p>
                         <p className="text-sm font-medium text-foreground">
-                          {cost.kind === "real" && cost.payment_day
-                            ? `Dia ${cost.payment_day}`
-                            : "—"}
+                          {cost.payment_day ? `Dia ${cost.payment_day}` : "—"}
                         </p>
-                        <p className="text-sm font-bold text-foreground">
-                          {formatCurrency(toCurrencyNumber(cost.amount))}
-                        </p>
+                        {pendingLaunch ? (
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <div className="relative min-w-0 flex-1">
+                                <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-muted">
+                                  R$
+                                </span>
+                                <input
+                                  aria-label={`Valor para lançar ${cost.name}`}
+                                  value={launchValue}
+                                  onChange={(event) =>
+                                    setLaunchDrafts((prev) => ({
+                                      ...prev,
+                                      [cost.id]: event.target.value,
+                                    }))
+                                  }
+                                  placeholder="0,00"
+                                  className="w-full rounded-md border border-border bg-input py-1.5 pl-8 pr-2 text-sm text-foreground placeholder:text-muted/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => void handleLaunchEstimatedCost(cost)}
+                                disabled={launchingCostId === cost.id}
+                                title={`Lançar ${pendingLaunch.monthLabel}`}
+                                className="flex h-8 shrink-0 items-center justify-center rounded-md bg-success px-2 text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                <Check size={16} weight="bold" aria-hidden />
+                                <span className="sr-only">
+                                  Lançar {pendingLaunch.monthLabel}
+                                </span>
+                              </button>
+                            </div>
+                            <p className="mt-1 text-[11px] text-muted">
+                              {pendingLaunch.monthLabel}
+                            </p>
+                          </div>
+                        ) : (
+                          <p className="text-sm font-bold text-foreground">
+                            {cost.kind === "estimated"
+                              ? launchedThisMonth
+                                ? formatCurrency(
+                                    toCurrencyNumber(launchedThisMonth.amount)
+                                  )
+                                : toCurrencyNumber(cost.amount) > 0
+                                  ? formatCurrency(toCurrencyNumber(cost.amount))
+                                  : "Aguardando"
+                              : formatCurrency(toCurrencyNumber(cost.amount))}
+                          </p>
+                        )}
                         <button
                           type="button"
                           onClick={() => void handleToggleFixedCost(cost)}
@@ -3838,7 +4094,8 @@ export function FinancePage() {
                           </button>
                         </div>
                       </article>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>

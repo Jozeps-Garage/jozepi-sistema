@@ -4,9 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   CalendarBlank,
-  CheckCircle,
   Clock,
-  Funnel,
   PencilSimple,
   Plus,
   Power,
@@ -17,6 +15,7 @@ import {
 import {
   COATING_PACKAGES,
   ensurePackageServicesInCatalog,
+  getPackageDurationMinutes,
   loadCoatingPackages,
   loadStagePackages,
   packageCatalogName,
@@ -32,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { assertMutationRows } from "@/lib/supabase/mutations";
+import { cn } from "@/lib/utils/cn";
 import { formatCurrency } from "@/lib/utils/format";
 import {
   calculateProductUsageCost,
@@ -111,7 +111,20 @@ const LEGACY_SERVICE_CATEGORIES_STORAGE_KEY = "auto-estetica-service-categories"
 const SERVICE_CATEGORY_OPTIONS_STORAGE_KEY =
   "auto-estetica-service-category-options";
 
-type ServiceStatusFilter = "all" | "active" | "inactive";
+type CatalogKind = "coating" | "stage" | "servico";
+type CatalogTypeFilter = "all" | CatalogKind;
+
+interface CatalogRow {
+  id: string;
+  kind: CatalogKind;
+  name: string;
+  summary: string;
+  price: number;
+  durationMinutes: number | null;
+  active: boolean;
+  package?: ServicePackage;
+  service?: ServiceItem;
+}
 
 interface ServiceCategoryOption {
   value: string;
@@ -128,11 +141,90 @@ const defaultServiceCategoryOptions: ServiceCategoryOption[] = [
   { value: "Outros", label: "Outros" },
 ];
 
-const statusFilterOptions = [
-  { value: "all", label: "Todos" },
-  { value: "active", label: "Ativo" },
-  { value: "inactive", label: "Inativo" },
+const CATALOG_KIND_LABEL: Record<CatalogKind, string> = {
+  coating: "Coating",
+  stage: "Stage",
+  servico: "Serviço",
+};
+
+const CATALOG_KIND_BADGE: Record<CatalogKind, string> = {
+  coating: "bg-premium/10 text-premium",
+  stage: "bg-primary/10 text-primary",
+  servico: "bg-background text-muted",
+};
+
+const CATALOG_TYPE_FILTERS: { id: CatalogTypeFilter; label: string }[] = [
+  { id: "all", label: "Todos" },
+  { id: "coating", label: "Coating" },
+  { id: "stage", label: "Stages" },
+  { id: "servico", label: "Serviços" },
 ];
+
+function CatalogTypeBadge({ kind }: { kind: CatalogKind }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
+        CATALOG_KIND_BADGE[kind]
+      )}
+    >
+      {CATALOG_KIND_LABEL[kind]}
+    </span>
+  );
+}
+
+function kindFromCategory(category: string): CatalogKind {
+  const normalized = category.trim().toLowerCase();
+  if (normalized === "coating") return "coating";
+  if (normalized === "stage" || normalized === "stages") return "stage";
+  return "servico";
+}
+
+function categoryFromKind(kind: CatalogKind) {
+  if (kind === "coating") return "Coating";
+  if (kind === "stage") return "Stages";
+  return "Outros";
+}
+
+const SERVICE_TYPE_OPTIONS: { id: CatalogKind; label: string }[] = [
+  { id: "coating", label: "Coating" },
+  { id: "stage", label: "Stage" },
+  { id: "servico", label: "Serviço" },
+];
+
+function ServiceTypePicker({
+  value,
+  onChange,
+}: {
+  value: CatalogKind;
+  onChange: (kind: CatalogKind) => void;
+}) {
+  return (
+    <div className="mb-4">
+      <p className="label-caps mb-2 text-muted">Tipo</p>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {SERVICE_TYPE_OPTIONS.map((option) => {
+          const selected = value === option.id;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => onChange(option.id)}
+              className={cn(
+                "rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
+                selected
+                  ? "border-primary bg-primary text-white"
+                  : "border-border bg-card text-muted hover:border-primary/30 hover:text-foreground"
+              )}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function parsePrice(value: string) {
   const normalized = value.replace(/\./g, "").replace(",", ".");
@@ -156,7 +248,7 @@ function parseDuration(value: string) {
 }
 
 function formatDuration(minutes: number | null) {
-  if (!minutes) return "0h";
+  if (!minutes) return "";
 
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
@@ -164,6 +256,145 @@ function formatDuration(minutes: number | null) {
   if (hours === 0) return `${remainingMinutes} min`;
   if (remainingMinutes === 0) return `${hours}h`;
   return `${hours}h${String(remainingMinutes).padStart(2, "0")}`;
+}
+
+function coatingProtectionSummary(pkg: ServicePackage) {
+  const subtitle = pkg.subtitle ?? "";
+  const untilMatch = subtitle.match(/até\s+\d+\s+anos?/i)?.[0];
+  if (untilMatch) return untilMatch.replace(/^até/i, "Até");
+  const yearsMatch = subtitle.match(/\d+\+?\s+anos?/i)?.[0];
+  return yearsMatch ?? "";
+}
+
+function stageInclusionSummary(pkg: ServicePackage) {
+  const items = pkg.newItems
+    .map((item) => item.replace(/^tudo do stage \d+\+?\s*/i, "").trim())
+    .filter(Boolean);
+  if (items.length === 0) return "";
+  if (items.length <= 2) return items.join(" · ");
+  return `${items.slice(0, 2).join(" · ")} · +${items.length - 2}`;
+}
+
+function PackageEditForm({
+  pkg,
+  kind,
+  price,
+  items,
+  newItem,
+  onPriceChange,
+  onItemChange,
+  onRemoveItem,
+  onNewItemChange,
+  onAddItem,
+  onSave,
+  onCancel,
+}: {
+  pkg: ServicePackage;
+  kind: "coating" | "stage";
+  price: string;
+  items: string[];
+  newItem: string;
+  onPriceChange: (value: string) => void;
+  onItemChange: (index: number, value: string) => void;
+  onRemoveItem: (index: number) => void;
+  onNewItemChange: (value: string) => void;
+  onAddItem: () => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="p-4 sm:p-5">
+      <div className="mb-4 flex items-center gap-3">
+        <CatalogTypeBadge kind={kind} />
+        <span className="text-sm font-semibold text-foreground">
+          Editar {pkg.badge}
+        </span>
+      </div>
+
+      <div className="mb-4">
+        <label className="mb-1 block text-xs font-semibold text-muted">
+          Preço (R$)
+        </label>
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={price}
+          onChange={(event) => onPriceChange(event.target.value)}
+          className="w-40 rounded-lg border border-border bg-background px-3 py-2 text-sm font-bold text-foreground outline-none [appearance:textfield] focus:border-primary focus:ring-1 focus:ring-primary/30 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        />
+      </div>
+
+      <div className="mb-4">
+        <label className="mb-2 block text-xs font-semibold text-muted">
+          {kind === "coating"
+            ? "Itens incluídos neste coating"
+            : "Serviços incluídos neste stage"}
+        </label>
+        <div className="space-y-2">
+          {items.map((item, idx) => (
+            <div key={`${pkg.id}-${idx}`} className="flex items-center gap-2">
+              <input
+                type="text"
+                value={item}
+                onChange={(event) => onItemChange(idx, event.target.value)}
+                className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary/30"
+              />
+              <button
+                type="button"
+                onClick={() => onRemoveItem(idx)}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-danger/10 text-danger transition-colors hover:bg-danger hover:text-white"
+                aria-label="Remover item"
+              >
+                <Trash size={13} weight={SERVICE_ICON_WEIGHT} aria-hidden />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            type="text"
+            value={newItem}
+            onChange={(event) => onNewItemChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && newItem.trim()) {
+                event.preventDefault();
+                onAddItem();
+              }
+            }}
+            placeholder="Novo item... (Enter para adicionar)"
+            className="min-w-0 flex-1 rounded-lg border border-dashed border-border bg-background px-3 py-1.5 text-sm text-foreground outline-none placeholder:text-muted focus:border-primary focus:ring-1 focus:ring-primary/30"
+          />
+          <button
+            type="button"
+            onClick={onAddItem}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-success/10 text-success transition-colors hover:bg-success hover:text-white"
+            aria-label="Adicionar item"
+          >
+            <Plus size={13} weight="bold" aria-hidden />
+          </button>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 border-t border-border pt-4">
+        <button
+          type="button"
+          onClick={onSave}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-success px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-success/90"
+        >
+          Salvar alterações
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-4 py-2 text-xs font-semibold text-muted transition-colors hover:bg-card"
+        >
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function getServiceCategory(service: Pick<ServiceItem, "category">) {
@@ -269,17 +500,7 @@ export function ServicesPage() {
   const [pkgEditPrice, setPkgEditPrice] = useState("");
   const [pkgEditItems, setPkgEditItems] = useState<string[]>([]);
   const [pkgEditNewItem, setPkgEditNewItem] = useState("");
-  const [activeTab, setActiveTab] = useState<"coating" | "stages" | "servicos">(
-    "stages"
-  );
-  const servicesTabs = [
-    { id: "coating", label: "Coating" },
-    { id: "stages", label: "Stages" },
-    { id: "servicos", label: "Serviços" },
-  ] as const;
-  const tabButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const tabsRowRef = useRef<HTMLDivElement | null>(null);
-  const [tabIndicator, setTabIndicator] = useState({ left: 0, width: 0 });
+  const [typeFilter, setTypeFilter] = useState<CatalogTypeFilter>("all");
 
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [products, setProducts] = useState<ProductItem[]>([]);
@@ -294,8 +515,6 @@ export function ServicesPage() {
   const [serviceCategoryOptionsLoaded, setServiceCategoryOptionsLoaded] =
     useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<ServiceStatusFilter>("active");
-  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [workshopId, setWorkshopId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -357,22 +576,6 @@ export function ServicesPage() {
 
     setLoading(false);
   }
-
-  useEffect(() => {
-    function updateTabIndicator() {
-      const button = tabButtonRefs.current[activeTab];
-      const row = tabsRowRef.current;
-      if (!button || !row) return;
-      setTabIndicator({
-        left: button.offsetLeft,
-        width: button.offsetWidth,
-      });
-    }
-
-    updateTabIndicator();
-    window.addEventListener("resize", updateTabIndicator);
-    return () => window.removeEventListener("resize", updateTabIndicator);
-  }, [activeTab]);
 
   useEffect(() => {
     setStagePackages(loadStagePackages());
@@ -481,19 +684,19 @@ export function ServicesPage() {
     setFormAnimationKey((current) => current + 1);
   }
 
-  function openCreateForm(presetCategory?: string) {
+  function setFormKind(kind: CatalogKind) {
+    setForm((prev) => {
+      const currentKind = kindFromCategory(prev.category);
+      if (kind === currentKind) return prev;
+      return { ...prev, category: categoryFromKind(kind) };
+    });
+  }
+
+  function openCreateForm() {
+    setEditingPackageId(null);
     setEditingService(null);
-    const category = presetCategory?.trim() || emptyForm.category;
-    if (
-      presetCategory &&
-      !serviceCategoryOptions.some((option) => option.value === category)
-    ) {
-      setServiceCategoryOptions((prev) => [
-        ...prev,
-        { value: category, label: category, custom: true },
-      ]);
-    }
-    setForm({ ...emptyForm, category });
+    const kind = typeFilter === "all" ? "servico" : typeFilter;
+    setForm({ ...emptyForm, category: categoryFromKind(kind) });
     setError(null);
     setAddingProduct(false);
     setProductFormOpen(false);
@@ -501,6 +704,9 @@ export function ServicesPage() {
   }
 
   function openEditForm(service: ServiceItem) {
+    setEditingPackageId(null);
+    setFormOpen(false);
+    setFormClosing(false);
     setEditingService(service);
     setForm({
       name: service.name,
@@ -513,7 +719,6 @@ export function ServicesPage() {
     setError(null);
     setAddingProduct(false);
     setProductFormOpen(false);
-    // do not open the top form — editing is inline in the card
   }
 
   function closeForm() {
@@ -885,51 +1090,64 @@ export function ServicesPage() {
     return product ? total + calculateProductUsageCost(product, usage.amount) : total;
   }, 0);
 
-  // Cost is informational only (how much is spent on products for this
-  // service) — it must never be netted against/subtracted from the
-  // service's price shown to the user.
-  function getServiceFinancials(serviceId: string) {
-    const usages = serviceProductUsages[serviceId] ?? [];
-    const cost = usages.reduce((total, usage) => {
-      const product = products.find((item) => item.id === usage.productId);
-      return product ? total + calculateProductUsageCost(product, usage.amount) : total;
-    }, 0);
-    const hasCost = usages.some((usage) => {
-      const product = products.find((item) => item.id === usage.productId);
-      return product ? calculateProductUsageCost(product, usage.amount) > 0 : false;
-    });
-
-    return { cost, hasCost };
-  }
-
   const normalizedSearchTerm = searchTerm.trim().toLowerCase();
-  const filteredServices = services.filter((service) => {
+  const packageCatalogNames = new Set(
+    [
+      ...coatingPackages.map((pkg) => packageCatalogName(pkg, "coating")),
+      ...stagePackages.map((pkg) => packageCatalogName(pkg, "stage")),
+    ].map((name) => name.trim().toLowerCase())
+  );
+  const standaloneServices = services.filter((service) => {
+    const normalizedName = service.name.trim().toLowerCase();
+    return !packageCatalogNames.has(normalizedName);
+  });
+  const customServiceRows: CatalogRow[] = standaloneServices.map((service) => ({
+    id: service.id,
+    kind: kindFromCategory(getServiceCategory(service)),
+    name: service.name,
+    summary: service.description?.trim() || "",
+    price: Number(service.price) || 0,
+    durationMinutes: service.duration_minutes,
+    active: service.active,
+    service,
+  }));
+  const catalogRows: CatalogRow[] = [
+    ...coatingPackages.map((pkg) => ({
+      id: pkg.id,
+      kind: "coating" as const,
+      name: pkg.badge,
+      summary: coatingProtectionSummary(pkg),
+      price: pkg.price,
+      durationMinutes: getPackageDurationMinutes(pkg.id),
+      active: true,
+      package: pkg,
+    })),
+    ...customServiceRows.filter((row) => row.kind === "coating"),
+    ...stagePackages.map((pkg) => ({
+      id: pkg.id,
+      kind: "stage" as const,
+      name: pkg.badge,
+      summary: stageInclusionSummary(pkg),
+      price: pkg.price,
+      durationMinutes: getPackageDurationMinutes(pkg.id),
+      active: true,
+      package: pkg,
+    })),
+    ...customServiceRows.filter((row) => row.kind === "stage"),
+    ...customServiceRows.filter((row) => row.kind === "servico"),
+  ];
+  const visibleCatalogRows = catalogRows.filter((row) => {
+    const matchesType = typeFilter === "all" || row.kind === typeFilter;
     const matchesSearch =
       !normalizedSearchTerm ||
-      service.name.toLowerCase().includes(normalizedSearchTerm);
-    const matchesStatus =
-      statusFilter === "all" ||
-      (statusFilter === "active" && service.active) ||
-      (statusFilter === "inactive" && !service.active);
-
-    return matchesSearch && matchesStatus;
+      row.name.toLowerCase().includes(normalizedSearchTerm);
+    return matchesType && matchesSearch;
   });
-  const servicesByCategory = filteredServices.reduce<Record<string, ServiceItem[]>>(
-    (acc, service) => {
-      const category = getServiceCategory(service);
-      acc[category] = [...(acc[category] ?? []), service];
-      return acc;
-    },
-    {}
-  );
-  const orderedCategories = Array.from(
-    new Set([
-      ...serviceCategoryOptions.map((option) => option.value),
-      ...Object.keys(servicesByCategory),
-    ])
-  ).filter((category) => servicesByCategory[category]?.length > 0);
 
   function openPackageEdit(pkg: ServicePackage) {
+    setEditingService(null);
+    setFormOpen(false);
+    setFormClosing(false);
     setEditingPackageId(pkg.id);
     setPkgEditPrice(String(pkg.price));
     setPkgEditItems([...pkg.newItems]);
@@ -979,7 +1197,8 @@ export function ServicesPage() {
           }))
         );
         const matched = synced.find(
-          (service) => service.name.trim().toLowerCase() === catalogName.toLowerCase()
+          (service) =>
+            service.name.trim().toLowerCase() === catalogName.toLowerCase()
         );
         if (matched) {
           router.push(`/agenda?packageServices=${matched.id}`);
@@ -991,7 +1210,8 @@ export function ServicesPage() {
     }
 
     const existing = services.find(
-      (service) => service.name.trim().toLowerCase() === catalogName.toLowerCase()
+      (service) =>
+        service.name.trim().toLowerCase() === catalogName.toLowerCase()
     );
     router.push(
       existing ? `/agenda?packageServices=${existing.id}` : "/agenda"
@@ -1002,505 +1222,126 @@ export function ServicesPage() {
     router.push(`/agenda?packageServices=${serviceId}`);
   }
 
+  const isCreating = formOpen && !editingService;
+
   return (
     <>
-      <nav className="mb-6 overflow-x-auto" aria-label="Seções de serviços">
-        <div
-          ref={tabsRowRef}
-          className="relative flex min-w-max items-center gap-8 border-b border-border pb-0 sm:gap-10"
-        >
-          {servicesTabs.map((tab) => {
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                ref={(node) => {
-                  tabButtonRefs.current[tab.id] = node;
-                }}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={`relative pb-3 text-sm font-medium tracking-wide transition-colors ${
-                  isActive
-                    ? "text-foreground"
-                    : "text-muted hover:text-foreground"
-                }`}
-                aria-current={isActive ? "page" : undefined}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
-          <span
-            aria-hidden
-            className="pointer-events-none absolute bottom-0 h-0.5 rounded-full bg-foreground transition-all duration-300 ease-out"
-            style={{
-              left: tabIndicator.left,
-              width: tabIndicator.width,
-            }}
-          />
-        </div>
-      </nav>
-
       {error && (
         <div className="mb-4 rounded-lg border border-danger/20 bg-danger/5 px-4 py-3 text-sm text-danger">
           {error}
         </div>
       )}
 
-      {activeTab === "coating" && (
-<section className="mb-10 space-y-5">
-        <div>
-          <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-muted">
-            Coatings Cerâmicos — CarPro
-          </h2>
+      <div className="sticky top-0 z-20 mb-5 flex flex-col gap-3 bg-background/95 py-2 backdrop-blur-sm sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex min-w-0 flex-1 flex-col gap-3">
+          <div className="max-w-md">
+            <Input
+              label="Buscar"
+              value={searchTerm}
+              autoComplete="off"
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="Buscar por nome"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {CATALOG_TYPE_FILTERS.map((filter) => {
+              const selected = typeFilter === filter.id;
+              return (
+                <button
+                  key={filter.id}
+                  type="button"
+                  onClick={() => setTypeFilter(filter.id)}
+                  className={cn(
+                    "rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
+                    selected
+                      ? "border-primary bg-primary text-white"
+                      : "border-border bg-card text-muted hover:border-primary/30 hover:text-foreground"
+                  )}
+                >
+                  {filter.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
-
-        {coatingPackages.map((pkg) => {
-          const isGold = pkg.id === "coating-dquartz-go";
-          const isEditing = editingPackageId === pkg.id;
-
-          return (
-            <div
-              key={pkg.id}
-              className={`relative overflow-hidden rounded-xl bg-card shadow-card ${
-                isGold
-                  ? "border border-[#c9a84c]/50 shadow-[0_2px_16px_0_rgba(201,168,76,0.10)]"
-                  : "border border-border"
-              }`}
-            >
-              {/* Edit toggle button */}
-              <button
-                type="button"
-                onClick={() => isEditing ? cancelPackageEdit() : openPackageEdit(pkg)}
-                className="absolute right-4 top-4 z-10 flex h-7 w-7 items-center justify-center rounded-lg border border-border bg-background text-muted transition-colors hover:border-primary/30 hover:bg-primary/10 hover:text-primary"
-                title={isEditing ? "Cancelar edição" : "Editar pacote"}
-                aria-label={isEditing ? "Cancelar edição" : "Editar pacote"}
-              >
-                {isEditing
-                  ? <X size={13} weight="bold" aria-hidden />
-                  : <PencilSimple size={13} weight={SERVICE_ICON_WEIGHT} aria-hidden />
-                }
-              </button>
-
-              {isEditing ? (
-                /* ── Edit form ─────────────────────────────────────── */
-                <div className="p-5">
-                  <div className="mb-4 flex items-center gap-3">
-                    <span
-                      className="rounded-md px-2.5 py-1 text-[11px] font-bold tracking-[0.18em]"
-                      style={{ background: pkg.badgeBg, color: pkg.badgeText }}
-                    >
-                      {pkg.badge}
-                    </span>
-                    <span className="text-sm font-semibold text-foreground">Editar pacote</span>
-                  </div>
-
-                  {/* Price */}
-                  <div className="mb-4">
-                    <label className="mb-1 block text-xs font-semibold text-muted">
-                      Preço (R$)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={pkgEditPrice}
-                      onChange={(e) => setPkgEditPrice(e.target.value)}
-                      className="w-40 rounded-lg border border-border bg-background px-3 py-2 text-sm font-bold text-foreground outline-none [appearance:textfield] focus:border-primary focus:ring-1 focus:ring-primary/30 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                    />
-                  </div>
-
-                  {/* Items */}
-                  <div className="mb-4">
-                    <label className="mb-2 block text-xs font-semibold text-muted">
-                      Itens incluídos neste coating
-                    </label>
-                    <div className="space-y-2">
-                      {pkgEditItems.map((item, idx) => (
-                        <div key={idx} className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            value={item}
-                            onChange={(e) => {
-                              const next = [...pkgEditItems];
-                              next[idx] = e.target.value;
-                              setPkgEditItems(next);
-                            }}
-                            className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary/30"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setPkgEditItems((prev) => prev.filter((_, i) => i !== idx))}
-                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-danger/10 text-danger transition-colors hover:bg-danger hover:text-white"
-                            aria-label="Remover item"
-                          >
-                            <Trash size={13} weight={SERVICE_ICON_WEIGHT} aria-hidden />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Add new item */}
-                    <div className="mt-2 flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={pkgEditNewItem}
-                        onChange={(e) => setPkgEditNewItem(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && pkgEditNewItem.trim()) {
-                            e.preventDefault();
-                            setPkgEditItems((prev) => [...prev, pkgEditNewItem.trim()]);
-                            setPkgEditNewItem("");
-                          }
-                        }}
-                        placeholder="Novo serviço... (Enter para adicionar)"
-                        className="min-w-0 flex-1 rounded-lg border border-dashed border-border bg-background px-3 py-1.5 text-sm text-foreground outline-none placeholder:text-muted focus:border-primary focus:ring-1 focus:ring-primary/30"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!pkgEditNewItem.trim()) return;
-                          setPkgEditItems((prev) => [...prev, pkgEditNewItem.trim()]);
-                          setPkgEditNewItem("");
-                        }}
-                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-success/10 text-success transition-colors hover:bg-success hover:text-white"
-                        aria-label="Adicionar item"
-                      >
-                        <Plus size={13} weight="bold" aria-hidden />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-2 border-t border-border pt-4">
-                    <button
-                      type="button"
-                      onClick={() => savePackageEdit(pkg)}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-success px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-success/90"
-                    >
-                      Salvar alterações
-                    </button>
-                    <button
-                      type="button"
-                      onClick={cancelPackageEdit}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-4 py-2 text-xs font-semibold text-muted transition-colors hover:bg-card"
-                    >
-                      Cancelar
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                /* ── Normal view ────────────────────────────────────── */
-                <div className="flex flex-col gap-0 sm:flex-row">
-                  {/* LEFT — badge + price */}
-                  <div
-                    className="flex shrink-0 flex-col justify-between gap-6 rounded-tl-xl rounded-bl-xl p-5 sm:w-52 sm:rounded-tr-none sm:rounded-bl-xl"
-                    style={isGold ? { background: "rgba(201,168,76,0.07)" } : { background: "var(--color-background, transparent)" }}
-                  >
-                    <div className="flex flex-col gap-2">
-                      <span
-                        className="self-start rounded-md px-2.5 py-1 text-[11px] font-bold tracking-[0.18em]"
-                        style={{ background: pkg.badgeBg, color: pkg.badgeText }}
-                      >
-                        {pkg.badge}
-                      </span>
-                    </div>
-                    <div>
-                      <p
-                        className="whitespace-nowrap text-xl font-extrabold leading-tight tracking-tight tabular-nums sm:text-2xl"
-                        style={isGold ? { color: "#c9a84c" } : undefined}
-                      >
-                        {formatCurrency(pkg.price)}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => handleBookPackage(pkg)}
-                        className={`mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${
-                          isGold
-                            ? "border-[#c9a84c]/60 bg-[#c9a84c]/10 text-[#a07830] hover:bg-[#c9a84c]/20"
-                            : "border-success/30 bg-success/10 text-success hover:bg-success/20"
-                        }`}
-                      >
-                        <CalendarBlank size={13} weight="bold" aria-hidden />
-                        Agendar
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* RIGHT — items list */}
-                  <div className="flex-1 p-5">
-                    {pkg.subtitle && (
-                      <p className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-muted">
-                        {pkg.subtitle}
-                      </p>
-                    )}
-                    <ul className="grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
-                      {pkg.newItems.map((item) => (
-                        <li key={item} className="flex items-start gap-2 text-sm text-foreground">
-                          <CheckCircle
-                            size={15}
-                            weight="fill"
-                            className="mt-0.5 shrink-0 text-success"
-                            aria-hidden
-                          />
-                          <span>{item}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </section>
-      )}
-
-      {activeTab === "stages" && (
-<section className="mb-10 space-y-5">
-        <div>
-          <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-muted">
-            Pacotes — Lavagem Detalhada por Stages
-          </h2>
-        </div>
-
-        {stagePackages.map((pkg) => {
-          const isGold = pkg.id === "stage-4";
-          const isEditing = editingPackageId === pkg.id;
-
-          return (
-            <div
-              key={pkg.id}
-              className={`relative overflow-hidden rounded-xl bg-card shadow-card ${
-                isGold
-                  ? "border border-[#c9a84c]/50 shadow-[0_2px_16px_0_rgba(201,168,76,0.10)]"
-                  : "border border-border"
-              }`}
-            >
-              {/* Edit toggle button */}
-              <button
-                type="button"
-                onClick={() => isEditing ? cancelPackageEdit() : openPackageEdit(pkg)}
-                className="absolute right-4 top-4 z-10 flex h-7 w-7 items-center justify-center rounded-lg border border-border bg-background text-muted transition-colors hover:border-primary/30 hover:bg-primary/10 hover:text-primary"
-                title={isEditing ? "Cancelar edição" : "Editar pacote"}
-                aria-label={isEditing ? "Cancelar edição" : "Editar pacote"}
-              >
-                {isEditing
-                  ? <X size={13} weight="bold" aria-hidden />
-                  : <PencilSimple size={13} weight={SERVICE_ICON_WEIGHT} aria-hidden />
-                }
-              </button>
-
-              {isEditing ? (
-                /* ── Edit form ─────────────────────────────────────── */
-                <div className="p-5">
-                  <div className="mb-4 flex items-center gap-3">
-                    <span
-                      className="rounded-md px-2.5 py-1 text-[11px] font-bold tracking-[0.18em]"
-                      style={{ background: pkg.badgeBg, color: pkg.badgeText }}
-                    >
-                      {pkg.badge}
-                    </span>
-                    <span className="text-sm font-semibold text-foreground">Editar pacote</span>
-                  </div>
-
-                  {/* Price */}
-                  <div className="mb-4">
-                    <label className="mb-1 block text-xs font-semibold text-muted">
-                      Preço (R$)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={pkgEditPrice}
-                      onChange={(e) => setPkgEditPrice(e.target.value)}
-                      className="w-40 rounded-lg border border-border bg-background px-3 py-2 text-sm font-bold text-foreground outline-none [appearance:textfield] focus:border-primary focus:ring-1 focus:ring-primary/30 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                    />
-                  </div>
-
-                  {/* Items */}
-                  <div className="mb-4">
-                    <label className="mb-2 block text-xs font-semibold text-muted">
-                      Serviços incluídos neste stage
-                    </label>
-                    <div className="space-y-2">
-                      {pkgEditItems.map((item, idx) => (
-                        <div key={idx} className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            value={item}
-                            onChange={(e) => {
-                              const next = [...pkgEditItems];
-                              next[idx] = e.target.value;
-                              setPkgEditItems(next);
-                            }}
-                            className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary/30"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setPkgEditItems((prev) => prev.filter((_, i) => i !== idx))}
-                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-danger/10 text-danger transition-colors hover:bg-danger hover:text-white"
-                            aria-label="Remover item"
-                          >
-                            <Trash size={13} weight={SERVICE_ICON_WEIGHT} aria-hidden />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Add new item */}
-                    <div className="mt-2 flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={pkgEditNewItem}
-                        onChange={(e) => setPkgEditNewItem(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && pkgEditNewItem.trim()) {
-                            e.preventDefault();
-                            setPkgEditItems((prev) => [...prev, pkgEditNewItem.trim()]);
-                            setPkgEditNewItem("");
-                          }
-                        }}
-                        placeholder="Novo serviço... (Enter para adicionar)"
-                        className="min-w-0 flex-1 rounded-lg border border-dashed border-border bg-background px-3 py-1.5 text-sm text-foreground outline-none placeholder:text-muted focus:border-primary focus:ring-1 focus:ring-primary/30"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!pkgEditNewItem.trim()) return;
-                          setPkgEditItems((prev) => [...prev, pkgEditNewItem.trim()]);
-                          setPkgEditNewItem("");
-                        }}
-                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-success/10 text-success transition-colors hover:bg-success hover:text-white"
-                        aria-label="Adicionar item"
-                      >
-                        <Plus size={13} weight="bold" aria-hidden />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-2 border-t border-border pt-4">
-                    <button
-                      type="button"
-                      onClick={() => savePackageEdit(pkg)}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-success px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-success/90"
-                    >
-                      Salvar alterações
-                    </button>
-                    <button
-                      type="button"
-                      onClick={cancelPackageEdit}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-4 py-2 text-xs font-semibold text-muted transition-colors hover:bg-card"
-                    >
-                      Cancelar
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                /* ── Normal view ────────────────────────────────────── */
-                <div className="flex flex-col gap-0 sm:flex-row">
-                  {/* LEFT — badge + price */}
-                  <div
-                    className="flex shrink-0 flex-col justify-between gap-6 rounded-tl-xl rounded-bl-xl p-5 sm:w-52 sm:rounded-tr-none sm:rounded-bl-xl"
-                    style={isGold ? { background: "rgba(201,168,76,0.07)" } : { background: "var(--color-background, transparent)" }}
-                  >
-                    <div className="flex flex-col gap-2">
-                      <span
-                        className="self-start rounded-md px-2.5 py-1 text-[11px] font-bold tracking-[0.18em]"
-                        style={{ background: pkg.badgeBg, color: pkg.badgeText }}
-                      >
-                        {pkg.badge}
-                      </span>
-                    </div>
-                    <div>
-                      <p
-                        className="whitespace-nowrap text-xl font-extrabold leading-tight tracking-tight tabular-nums sm:text-2xl"
-                        style={isGold ? { color: "#c9a84c" } : undefined}
-                      >
-                        {formatCurrency(pkg.price)}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => handleBookPackage(pkg)}
-                        className={`mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${
-                          isGold
-                            ? "border-[#c9a84c]/60 bg-[#c9a84c]/10 text-[#a07830] hover:bg-[#c9a84c]/20"
-                            : "border-success/30 bg-success/10 text-success hover:bg-success/20"
-                        }`}
-                      >
-                        <CalendarBlank size={13} weight="bold" aria-hidden />
-                        Agendar
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* RIGHT — items list */}
-                  <div className="flex-1 p-5">
-                    {pkg.subtitle && (
-                      <p className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-muted">
-                        {pkg.subtitle}
-                      </p>
-                    )}
-                    <ul className="grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
-                      {pkg.newItems.map((item) => (
-                        <li key={item} className="flex items-start gap-2 text-sm text-foreground">
-                          <CheckCircle
-                            size={15}
-                            weight="fill"
-                            className="mt-0.5 shrink-0 text-success"
-                            aria-hidden
-                          />
-                          <span>{item}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </section>
-      )}
-
-      {activeTab === "servicos" && (
-        <>
-      <div className="mb-5 flex justify-stretch sm:mb-6 sm:justify-end">
-        <Button variant="success" onClick={() => openCreateForm()} className="w-full sm:w-auto">
+        <Button
+          variant="success"
+          onClick={() => openCreateForm()}
+          className="w-full shrink-0 sm:w-auto"
+        >
           <Plus size={16} weight={SERVICE_ICON_WEIGHT} aria-hidden />
           Novo serviço
         </Button>
       </div>
 
-      {formOpen && !editingService && (
+      {loading && visibleCatalogRows.length === 0 && !isCreating ? (
+        <div className="rounded-lg border border-border bg-card py-16 text-center text-sm text-muted shadow-card">
+          Carregando serviços...
+        </div>
+      ) : visibleCatalogRows.length === 0 && !loading && !isCreating ? (
+        <div className="flex flex-col items-center justify-center rounded-lg border border-border bg-card py-16 text-center shadow-card">
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-success/10">
+            <Wrench
+              size={28}
+              weight={SERVICE_ICON_WEIGHT}
+              className="text-success"
+              aria-hidden
+            />
+          </div>
+          <p className="font-medium text-foreground">Nenhum item encontrado</p>
+          <p className="mt-1 text-sm text-muted">
+            {searchTerm.trim() || typeFilter !== "all"
+              ? "Ajuste a busca ou o filtro para ver outros resultados."
+              : "Crie um serviço avulso para usar na agenda."}
+          </p>
+          {typeFilter === "all" && !searchTerm.trim() && (
+            <Button
+              variant="success"
+              className="mt-4 w-full sm:w-auto"
+              onClick={() => openCreateForm()}
+            >
+              <Plus size={16} weight={SERVICE_ICON_WEIGHT} aria-hidden />
+              Novo serviço
+            </Button>
+          )}
+        </div>
+      ) : (
+        <div className="divide-y divide-border border-y border-border">
+          {isCreating && (
+            <div
+              className={cn(
+                "bg-background/50",
+                formClosing ? "service-form-exit" : "service-form-enter"
+              )}
+            >
         <form
           key={formAnimationKey}
           onSubmit={handleSaveService}
           autoComplete="off"
-          className={`mb-6 rounded-lg border border-border bg-card shadow-card p-4 shadow-card sm:p-6 ${
-            formClosing ? "service-form-exit" : "service-form-enter"
-          }`}
+          className="w-full p-4 sm:p-5"
         >
-          <div className="mb-5 flex items-start justify-between gap-4">
+          <div className="mb-4 flex items-start justify-between gap-4">
             <div>
-              <h2 className="text-lg font-semibold text-foreground">
-                {editingService ? "Editar serviço" : "Novo serviço"}
-              </h2>
-              <p className="mt-1 text-sm text-muted">
-                Cadastre os serviços que poderão ser usados na agenda.
+              <h3 className="text-sm font-semibold text-foreground">
+                Novo serviço
+              </h3>
+              <p className="mt-0.5 text-xs text-muted">
+                Preencha este item para adicionar ao catálogo.
               </p>
             </div>
             <button
               type="button"
               onClick={closeForm}
-              className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-muted transition-colors hover:bg-background hover:text-foreground sm:min-h-0 sm:min-w-0 sm:p-2"
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-card hover:text-foreground"
               aria-label="Fechar formulário"
             >
-              <X size={20} weight={SERVICE_ICON_WEIGHT} aria-hidden />
+              <X size={16} weight={SERVICE_ICON_WEIGHT} aria-hidden />
             </button>
           </div>
+          <ServiceTypePicker
+            value={kindFromCategory(form.category)}
+            onChange={setFormKind}
+          />
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Input
@@ -1815,126 +1656,57 @@ export function ServicesPage() {
             </Button>
           </div>
         </form>
-      )}
+            </div>
+          )}
+          {visibleCatalogRows.map((row) => {
+            const pkg = row.package;
+            const service = row.service;
+            const isPackageEditing = Boolean(pkg && editingPackageId === pkg.id);
+            const isServiceEditing = Boolean(
+              service && editingService?.id === service.id
+            );
+            if (isPackageEditing && pkg) {
+              return (
+                <div
+                  key={row.id}
+                  className="border-b border-border/70 bg-background/60 last:border-b-0"
+                >
+                  <PackageEditForm
+                    pkg={pkg}
+                    kind={row.kind === "coating" ? "coating" : "stage"}
+                    price={pkgEditPrice}
+                    items={pkgEditItems}
+                    newItem={pkgEditNewItem}
+                    onPriceChange={setPkgEditPrice}
+                    onItemChange={(index, value) => {
+                      const next = [...pkgEditItems];
+                      next[index] = value;
+                      setPkgEditItems(next);
+                    }}
+                    onRemoveItem={(index) =>
+                      setPkgEditItems((prev) =>
+                        prev.filter((_, itemIndex) => itemIndex !== index)
+                      )
+                    }
+                    onNewItemChange={setPkgEditNewItem}
+                    onAddItem={() => {
+                      if (!pkgEditNewItem.trim()) return;
+                      setPkgEditItems((prev) => [...prev, pkgEditNewItem.trim()]);
+                      setPkgEditNewItem("");
+                    }}
+                    onSave={() => savePackageEdit(pkg)}
+                    onCancel={cancelPackageEdit}
+                  />
+                </div>
+              );
+            }
 
-      {activeTab === "servicos" && (
-        <>
-      <div className="mb-5 rounded-lg border border-border bg-card p-3 shadow-card">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-          <div className="min-w-0 flex-1">
-            <Input
-              label="Buscar serviço"
-              value={searchTerm}
-              autoComplete="off"
-              onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Digite o nome do serviço"
-            />
-          </div>
-          <div className="flex shrink-0 items-center gap-2 self-end sm:pb-0.5">
-            <span className="hidden text-xs font-medium text-muted sm:inline">
-              {filteredServices.length} serviço
-              {filteredServices.length !== 1 ? "s" : ""}
-            </span>
-            <button
-              type="button"
-              onClick={() => setFiltersExpanded((open) => !open)}
-              aria-expanded={filtersExpanded}
-              className={`inline-flex min-h-11 items-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold transition-colors sm:min-h-0 ${
-                filtersExpanded || statusFilter !== "all"
-                  ? "border-premium/40 bg-premium/10 text-premium"
-                  : "border-border bg-input text-foreground hover:bg-background"
-              }`}
-            >
-              <Funnel size={16} weight={SERVICE_ICON_WEIGHT} aria-hidden />
-              Filtros
-              {statusFilter !== "all" && (
-                <span className="flex h-2 w-2 rounded-full bg-premium" aria-hidden />
-              )}
-            </button>
-          </div>
-        </div>
-
-        {!filtersExpanded && (
-          <p className="mt-2 text-xs font-medium text-muted sm:hidden">
-            {filteredServices.length} serviço
-            {filteredServices.length !== 1 ? "s" : ""} encontrado
-            {filteredServices.length !== 1 ? "s" : ""}
-          </p>
-        )}
-
-        {filtersExpanded && (
-          <div className="mt-3 grid grid-cols-1 gap-3 border-t border-border pt-3 sm:grid-cols-2">
-            <Dropdown
-              label="Status"
-              value={statusFilter}
-              options={statusFilterOptions}
-              onChange={(status) => setStatusFilter(status as ServiceStatusFilter)}
-            />
-            <p className="text-xs font-medium text-muted sm:col-span-2">
-              {filteredServices.length} serviço
-              {filteredServices.length !== 1 ? "s" : ""} encontrado
-              {filteredServices.length !== 1 ? "s" : ""}
-            </p>
-          </div>
-        )}
-      </div>
-
-        </>
-      )}
-
-      {loading ? (
-        <div className="rounded-lg border border-border bg-card shadow-card py-16 text-center text-sm text-muted shadow-card">
-          Carregando serviços...
-        </div>
-      ) : services.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-border bg-card shadow-card py-16 text-center shadow-card">
-          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-success/10">
-            <Wrench size={28} weight={SERVICE_ICON_WEIGHT} className="text-success" aria-hidden />
-          </div>
-          <p className="font-medium text-foreground">
-            Nenhum serviço cadastrado
-          </p>
-          <p className="mt-1 text-sm text-muted">
-            Crie sua lista para usar os serviços na agenda.
-          </p>
-          <Button
-            variant="success"
-            className="mt-4 w-full sm:w-auto"
-            onClick={() => openCreateForm()}
-          >
-            <Plus size={16} weight={SERVICE_ICON_WEIGHT} aria-hidden />
-            Novo serviço
-          </Button>
-        </div>
-      ) : filteredServices.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border bg-card py-14 text-center shadow-card">
-          <p className="font-medium text-foreground">
-            Nenhum serviço encontrado
-          </p>
-          <p className="mt-1 text-sm text-muted">
-            Ajuste a busca ou os filtros para ver outros resultados.
-          </p>
-        </div>
-      ) : (
-        <div>
-          {/* Service cards — single container with dividers */}
-          <div className="overflow-hidden rounded-xl border border-border bg-card shadow-card divide-y divide-border">
-            {filteredServices.map((service) => {
-                  const financials = getServiceFinancials(service.id);
-
-                  const isEditingThis = editingService?.id === service.id;
-
-                  return (
-                    <article
-                      key={service.id}
-                      className={`transition-colors ${
-                        isEditingThis
-                          ? "bg-background/60"
-                          : `flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start sm:gap-4 sm:px-5 sm:py-4 hover:bg-background/40 ${service.active ? "" : "opacity-60"}`
-                      }`}
-                    >
-                      {isEditingThis ? (
-                        /* ── Inline edit form ───────────────────────────────────── */
+            if (isServiceEditing && service) {
+              return (
+                <div
+                  key={row.id}
+                  className="border-b border-border/70 bg-background/60 last:border-b-0"
+                >
                         <form onSubmit={handleSaveService} autoComplete="off" className="w-full p-4 sm:p-5">
                           {/* Header */}
                           <div className="mb-4 flex items-center justify-between gap-4">
@@ -1953,6 +1725,10 @@ export function ServicesPage() {
                               <X size={16} weight={SERVICE_ICON_WEIGHT} aria-hidden />
                             </button>
                           </div>
+                          <ServiceTypePicker
+                            value={kindFromCategory(form.category)}
+                            onChange={setFormKind}
+                          />
 
                           {/* Fields */}
                           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -2118,104 +1894,137 @@ export function ServicesPage() {
                             </Button>
                           </div>
                         </form>
-                      ) : (
-                        /* ── Normal card view ───────────────────────────────────── */
+
+                </div>
+              );
+            }
+
+            const durationLabel = formatDuration(row.durationMinutes);
+
+            return (
+              <div
+                key={row.id}
+                className={cn(
+                  "px-1 py-4 transition-colors sm:px-2",
+                  !row.active && "opacity-60"
+                )}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <CatalogTypeBadge kind={row.kind} />
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                      <h3 className="text-base font-bold leading-tight text-foreground">
+                        {row.name}
+                      </h3>
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                          row.active
+                            ? "bg-success/10 text-success"
+                            : "bg-muted/15 text-muted"
+                        )}
+                      >
+                        {row.active ? "Ativo" : "Inativo"}
+                      </span>
+                    </div>
+                    {durationLabel && (
+                      <div className="mt-1.5 flex items-center gap-1 text-xs text-muted">
+                        <Clock
+                          size={12}
+                          weight={SERVICE_ICON_WEIGHT}
+                          aria-hidden
+                        />
+                        {durationLabel}
+                      </div>
+                    )}
+                    {row.summary && (
+                      <p className="mt-1.5 line-clamp-2 text-sm leading-5 text-muted">
+                        {row.summary}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex shrink-0 flex-col items-end gap-2">
+                    <p className="text-sm font-semibold tabular-nums leading-tight text-foreground">
+                      {formatCurrency(row.price)}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (pkg) {
+                          void handleBookPackage(pkg);
+                          return;
+                        }
+                        if (service) handleBookService(service.id);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-lg border border-success/30 bg-success/10 px-2.5 py-1.5 text-[11px] font-semibold text-success transition-colors hover:bg-success/20"
+                      title="Agendar"
+                      aria-label={`Agendar ${row.name}`}
+                    >
+                      <CalendarBlank size={12} weight="bold" aria-hidden />
+                      Agendar
+                    </button>
+                    <div className="flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (pkg) {
+                            openPackageEdit(pkg);
+                            return;
+                          }
+                          if (service) openEditForm(service);
+                        }}
+                        className="flex h-6 w-6 items-center justify-center rounded text-muted/60 transition-colors hover:bg-background hover:text-foreground"
+                        title="Editar"
+                        aria-label={`Editar ${row.name}`}
+                      >
+                        <PencilSimple
+                          size={13}
+                          weight={SERVICE_ICON_WEIGHT}
+                          aria-hidden
+                        />
+                      </button>
+                      {service && (
                         <>
-                          {/* Left: name, badges, duration, description */}
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <h3 className="font-sans text-sm font-semibold text-foreground">
-                                {service.name}
-                              </h3>
-                              <span
-                                className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                                  service.active
-                                    ? "bg-success/10 text-success"
-                                    : "bg-muted/10 text-muted"
-                                }`}
-                              >
-                                {service.active ? "Ativo" : "Inativo"}
-                              </span>
-                            </div>
-                            <div className="mt-1 flex items-center gap-1 text-xs text-muted">
-                              <Clock size={12} weight={SERVICE_ICON_WEIGHT} aria-hidden />
-                              {formatDuration(service.duration_minutes)}
-                            </div>
-                            {service.description && (
-                              <p className="mt-1.5 line-clamp-2 text-xs text-muted">
-                                {service.description}
-                              </p>
-                            )}
-                          </div>
-
-                          {/* Right: price block + agendar + icon actions */}
-                          <div className="flex shrink-0 flex-row items-center justify-between gap-3 sm:flex-col sm:items-end sm:gap-2">
-                            {/* Financials */}
-                            <div className="text-right">
-                              <p className="text-base font-bold leading-tight text-foreground">
-                                {formatCurrency(Number(service.price))}
-                              </p>
-                              {financials.hasCost && (
-                                <p className="text-[11px] leading-tight text-muted">
-                                  Custo em produtos {formatCurrency(financials.cost)}
-                                </p>
-                              )}
-                            </div>
-
-                            {/* Agendar + icon actions stacked */}
-                            <div className="flex flex-col items-end gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => handleBookService(service.id)}
-                                className="inline-flex items-center gap-1 rounded-lg border border-success/30 bg-success/10 px-2.5 py-1.5 text-[11px] font-semibold text-success transition-colors hover:bg-success/20"
-                                title="Agendar serviço"
-                                aria-label="Agendar serviço"
-                              >
-                                <CalendarBlank size={12} weight="bold" aria-hidden />
-                                Agendar
-                              </button>
-                              <div className="flex items-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => openEditForm(service)}
-                                  className="flex h-6 w-6 items-center justify-center rounded text-muted/60 transition-colors hover:bg-background hover:text-foreground"
-                                  title="Editar"
-                                  aria-label="Editar serviço"
-                                >
-                                  <PencilSimple size={13} weight={SERVICE_ICON_WEIGHT} aria-hidden />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleToggleActive(service)}
-                                  className={`flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-background ${
-                                    service.active ? "text-muted/60 hover:text-primary" : "text-muted/60 hover:text-foreground"
-                                  }`}
-                                  title={service.active ? "Desativar" : "Ativar"}
-                                  aria-label={service.active ? "Desativar serviço" : "Ativar serviço"}
-                                >
-                                  <Power size={13} weight={SERVICE_ICON_WEIGHT} aria-hidden />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => requestDeleteService(service)}
-                                  className="flex h-6 w-6 items-center justify-center rounded text-muted/60 transition-colors hover:bg-background hover:text-danger"
-                                  title="Excluir"
-                                  aria-label="Excluir serviço"
-                                >
-                                  <Trash size={13} weight={SERVICE_ICON_WEIGHT} aria-hidden />
-                                </button>
-                              </div>
-                            </div>
-                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleActive(service)}
+                            className="flex h-6 w-6 items-center justify-center rounded text-muted/60 transition-colors hover:bg-background hover:text-foreground"
+                            title={service.active ? "Desativar" : "Ativar"}
+                            aria-label={
+                              service.active
+                                ? "Desativar serviço"
+                                : "Ativar serviço"
+                            }
+                          >
+                            <Power
+                              size={13}
+                              weight={SERVICE_ICON_WEIGHT}
+                              aria-hidden
+                            />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => requestDeleteService(service)}
+                            className="flex h-6 w-6 items-center justify-center rounded text-muted/60 transition-colors hover:bg-background hover:text-danger"
+                            title="Excluir"
+                            aria-label={`Excluir ${row.name}`}
+                          >
+                            <Trash
+                              size={13}
+                              weight={SERVICE_ICON_WEIGHT}
+                              aria-hidden
+                            />
+                          </button>
                         </>
                       )}
-                    </article>
-                  );
-                })}
-          </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
-      )}
-        </>
       )}
 
       <style>{`

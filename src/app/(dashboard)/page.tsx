@@ -76,6 +76,7 @@ export default async function DashboardPage() {
   let maxChartValue = 1;
 
   let timeZone = DEFAULT_TIME_ZONE;
+  let todayDateKey = dateKeyInTimeZone(now, timeZone);
 
   if (profile?.workshop_id) {
     const workshopId = profile.workshop_id;
@@ -93,6 +94,7 @@ export default async function DashboardPage() {
     }
 
     const todayStr = dateKeyInTimeZone(now, timeZone);
+    todayDateKey = todayStr;
     const weekEndStr = addDaysToDateKey(todayStr, 6);
     const { start: monthStart, end: monthEnd } = monthRangeKeys(now, timeZone);
     const zonedNow = getZonedDateTime(now, timeZone);
@@ -257,6 +259,7 @@ export default async function DashboardPage() {
     dateLabel: formatZonedDate(now, timeZone),
     stats,
     weekAppointments,
+    todayDateKey,
     nextTodayAppointment,
     lowStockProducts,
     unpaidOrders,

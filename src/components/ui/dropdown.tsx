@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CaretDown, MagnifyingGlass, Plus } from "@phosphor-icons/react";
+import { CaretDown, Check, MagnifyingGlass, Plus, Trash } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils/cn";
 
 export interface DropdownOption {
@@ -134,7 +134,7 @@ export function Dropdown({
       return;
     }
 
-    closeDropdown();
+    cancelCreating();
   }
 
   useEffect(() => {
@@ -207,12 +207,13 @@ export function Dropdown({
             )}
             {visibleOptions.map((option) => {
               const selected = option.value === value;
+              const canDelete = Boolean(option.custom && onDeleteOption);
 
               return (
                 <div
                   key={option.value}
                   className={cn(
-                    "flex items-center gap-2 rounded-md transition-colors duration-300",
+                    "group flex items-center rounded-md transition-colors duration-300",
                     selected ? "bg-premium/10" : "hover:bg-background"
                   )}
                 >
@@ -228,18 +229,18 @@ export function Dropdown({
                   >
                     {option.label}
                   </button>
-                  {option.custom && onDeleteOption && (
+                  {canDelete && (
                     <button
                       type="button"
                       onClick={(event) => {
                         event.stopPropagation();
-                        onDeleteOption(option.value);
+                        onDeleteOption?.(option.value);
                       }}
-                      className="mr-1 min-h-11 rounded-lg px-3 py-2 text-sm font-semibold text-danger transition-colors hover:bg-danger/10 sm:min-h-0 sm:px-2 sm:py-1.5 sm:text-xs"
-                      aria-label={`Apagar ${option.label}`}
-                      title={`Apagar ${option.label}`}
+                      className="mr-1.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted opacity-100 transition-all duration-200 hover:bg-danger/10 hover:text-danger sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
+                      aria-label={`Excluir ${option.label}`}
+                      title={`Excluir ${option.label}`}
                     >
-                      Apagar
+                      <Trash size={14} weight={DROPDOWN_ICON_WEIGHT} aria-hidden />
                     </button>
                   )}
                 </div>
@@ -247,48 +248,45 @@ export function Dropdown({
             })}
           </div>
           {creating && onCreateOption ? (
-            <div className="mt-2 rounded-lg border border-dashed border-success/30 bg-success/5 p-2">
-              <input
-                value={createValue}
-                onChange={(event) => {
-                  setCreateValue(event.target.value);
-                  setCreateError(null);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    submitCreatedOption();
-                  }
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    cancelCreating();
-                  }
-                }}
-                autoFocus
-                placeholder={createPlaceholder}
-                className="w-full rounded-md border border-border bg-input px-3 py-3 text-base font-medium text-foreground placeholder:text-muted/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 sm:py-2 sm:text-sm"
-              />
-              {createError && (
-                <p className="mt-2 text-xs font-medium text-danger">
-                  {createError}
-                </p>
-              )}
-              <div className="mt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={cancelCreating}
-                  className="min-h-11 rounded-lg border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-background sm:min-h-0 sm:text-xs"
-                >
-                  Cancelar
-                </button>
+            <div className="mt-1">
+              <div className="flex items-center gap-1 rounded-md border border-border bg-input pr-1">
+                <input
+                  value={createValue}
+                  onChange={(event) => {
+                    setCreateValue(event.target.value);
+                    setCreateError(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      submitCreatedOption();
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      cancelCreating();
+                    }
+                  }}
+                  autoFocus
+                  placeholder={createPlaceholder}
+                  className="min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-foreground placeholder:text-muted/60 focus:outline-none"
+                />
                 <button
                   type="button"
                   onClick={submitCreatedOption}
-                  className="min-h-11 rounded-lg bg-success px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-success/90 sm:min-h-0 sm:text-xs"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-emerald-600 transition-colors hover:bg-emerald-600/10"
+                  aria-label="Salvar"
+                  title="Salvar"
                 >
-                  Adicionar
+                  <Check size={14} weight={DROPDOWN_ICON_WEIGHT} aria-hidden />
                 </button>
               </div>
+              {createError && (
+                <p className="mt-1.5 px-1 text-xs font-medium text-danger">
+                  {createError}
+                </p>
+              )}
             </div>
           ) : actionLabel && (onAction || onCreateOption) && (
             <button
@@ -302,9 +300,9 @@ export function Dropdown({
                 onAction?.();
                 closeDropdown();
               }}
-              className="mt-2 flex min-h-11 w-full items-center gap-2 rounded-lg border border-dashed border-success/30 px-3 py-3 text-left text-base font-semibold tracking-wide text-success transition-colors duration-300 hover:bg-success/10 sm:min-h-0 sm:py-2.5 sm:text-sm"
+              className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold text-muted transition-colors duration-200 hover:bg-background hover:text-foreground"
             >
-              <Plus size={16} weight={DROPDOWN_ICON_WEIGHT} aria-hidden />
+              <Plus size={14} weight={DROPDOWN_ICON_WEIGHT} aria-hidden />
               {actionLabel}
             </button>
           )}

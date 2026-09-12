@@ -264,6 +264,10 @@ const PACKAGE_DURATION_MINUTES: Record<string, number> = {
   "coating-dquartz-go": 720,
 };
 
+export function getPackageDurationMinutes(packageId: string) {
+  return PACKAGE_DURATION_MINUTES[packageId] ?? null;
+}
+
 export function packageCatalogName(
   pkg: Pick<ServicePackage, "badge">,
   kind: BookablePackageKind

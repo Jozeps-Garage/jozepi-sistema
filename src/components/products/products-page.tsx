@@ -62,7 +62,7 @@ import {
 const PRODUCT_FORM_EXIT_MS = 180;
 const PRODUCT_ICON_WEIGHT = "light" as const;
 
-type ProductTypeFilter = "all" | "liquid" | "utensil";
+type ProductTypeFilter = string;
 type ProductPageTab = "products" | "suppliers";
 type ProductSortColumn = "name" | "value" | "stock";
 type ProductSortDirection = "asc" | "desc";
@@ -112,6 +112,12 @@ const PRODUCT_FILTER_EXIT_MS = 300;
 const PRODUCTS_TABLE_GRID_TEMPLATE =
   "minmax(220px, 1fr) 110px 120px 190px 172px";
 
+function filterLabelForType(option: ProductTypeOption) {
+  if (option.value === "liquid") return "Líquidos";
+  if (option.value === "utensil") return "Utensílios";
+  return option.label;
+}
+
 function ProductInlineFilterButton({
   value,
   options,
@@ -120,14 +126,18 @@ function ProductInlineFilterButton({
   onClose,
   onChange,
   onClear,
+  onCreateOption,
+  onDeleteOption,
 }: {
   value: ProductTypeFilter;
-  options: { value: string; label: string }[];
+  options: { value: string; label: string; custom?: boolean }[];
   open: boolean;
   onToggle: () => void;
   onClose: () => void;
   onChange: (value: ProductTypeFilter) => void;
   onClear: () => void;
+  onCreateOption: (label: string) => string | void;
+  onDeleteOption: (value: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [closing, setClosing] = useState(false);
@@ -234,6 +244,10 @@ function ProductInlineFilterButton({
               value={value}
               options={options}
               onChange={(nextValue) => onChange(nextValue as ProductTypeFilter)}
+              actionLabel="Adicionar"
+              createPlaceholder="Ex: Cera, Equipamento, Químico"
+              onCreateOption={onCreateOption}
+              onDeleteOption={onDeleteOption}
               className="min-w-[14rem] flex-1 space-y-2"
             />
             <div className="flex shrink-0 flex-col gap-2 border-l border-border pl-5">
@@ -260,11 +274,6 @@ function ProductInlineFilterButton({
   );
 }
 
-const productTypeFilterOptions = [
-  { value: "all", label: "Todos" },
-  { value: "liquid", label: "Líquidos" },
-  { value: "utensil", label: "Utensílios" },
-];
 const productPageTabs: { id: ProductPageTab; label: string }[] = [
   { id: "products", label: "Produtos" },
   { id: "suppliers", label: "Fornecedores" },
@@ -1051,7 +1060,7 @@ export function ProductsPage() {
     }
   }
 
-  function handleAddType(label: string) {
+  function handleAddType(label: string, selectIn?: "form" | "filter") {
     const alreadyExists = typeOptions.some(
       (option) => option.label.toLowerCase() === label.toLowerCase()
     );
@@ -1067,8 +1076,12 @@ export function ProductsPage() {
     };
 
     setTypeOptions((prev) => [...prev, nextType]);
-    updateForm({ type: nextType.value });
-    setTypeError(null);
+    if (selectIn === "filter") {
+      setTypeFilter(nextType.value);
+    } else {
+      updateForm({ type: nextType.value });
+      setTypeError(null);
+    }
   }
 
   function handleDeleteType(type: string) {
@@ -1077,13 +1090,19 @@ export function ProductsPage() {
 
     const typeInUse = products.some((product) => product.type === type);
     if (typeInUse) {
-      setTypeError("Não é possível apagar um tipo usado em produtos cadastrados.");
+      const message =
+        "Não é possível apagar um tipo usado em produtos cadastrados.";
+      setTypeError(message);
+      setError(message);
       return;
     }
 
     setTypeOptions((prev) => prev.filter((item) => item.value !== type));
     if (form.type === type) {
       updateForm({ type: "liquid" });
+    }
+    if (typeFilter === type) {
+      setTypeFilter("all");
     }
     setTypeError(null);
   }
@@ -1389,8 +1408,7 @@ export function ProductsPage() {
 
   const filteredProducts = products.filter((product) => {
     if (typeFilter === "all") return true;
-    if (typeFilter === "liquid") return product.type === "liquid";
-    return product.type !== "liquid";
+    return product.type === typeFilter;
   });
   const sortedProducts = [...filteredProducts].sort((a, b) => {
     let comparison = 0;
@@ -1404,13 +1422,20 @@ export function ProductsPage() {
     }
     return sortDirection === "asc" ? comparison : -comparison;
   });
-  const totalInvested = products.reduce(
+  const totalInvested = filteredProducts.reduce(
     (total, product) => total + parseMoney(product.totalCost || "0"),
     0
   );
-  const stockProducts = products.filter((product) => product.type === "liquid");
   const selectedSupplier =
     suppliers.find((supplier) => supplier.id === selectedSupplierId) ?? null;
+  const productTypeFilterOptions = [
+    { value: "all", label: "Todos" },
+    ...typeOptions.map((option) => ({
+      value: option.value,
+      label: filterLabelForType(option),
+      custom: option.custom,
+    })),
+  ];
 
   return (
     <>
@@ -1447,6 +1472,8 @@ export function ProductsPage() {
           onClose={() => setShowProductFilter(false)}
           onChange={setTypeFilter}
           onClear={() => setTypeFilter("all")}
+          onCreateOption={(label) => handleAddType(label, "filter")}
+          onDeleteOption={handleDeleteType}
         />
 
         {products.length > 0 && (
@@ -1459,7 +1486,7 @@ export function ProductsPage() {
               />
               <ProductStatChip
                 label="Produtos no estoque"
-                value={String(stockProducts.length)}
+                value={String(filteredProducts.length)}
                 icon={<Package size={16} weight={PRODUCT_ICON_WEIGHT} aria-hidden />}
               />
             </div>
