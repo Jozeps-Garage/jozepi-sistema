@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "pnpm@9.7.0",
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "scripts": {
     "predev": "node -e \"const fs=require('fs'); if(!fs.existsSync('node_modules/next')){require('child_process').execSync('pnpm install',{stdio:'inherit'})}\"",

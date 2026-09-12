@@ -3121,7 +3121,7 @@ export function FinancePage() {
       .select(TRANSACTION_SELECT_WITH_PAYMENT)
       .single();
 
-    let saved = data;
+    let saved: unknown = data;
     let saveError = error;
 
     if (saveError) {
@@ -3153,9 +3153,7 @@ export function FinancePage() {
       return;
     }
 
-    const normalized = normalizeTransactionRow(
-      saved as unknown as Record<string, unknown>
-    );
+    const normalized = normalizeTransactionRow(saved as Record<string, unknown>);
     setTransactions((prev) => {
       const byId = new Map(prev.map((item) => [item.id, item]));
       byId.set(normalized.id, normalized);
