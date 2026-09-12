@@ -66,8 +66,23 @@ export async function callGateway(
   return { status: res.status, data: await res.json().catch(() => null) };
 }
 
+// O navegador manda um preflight OPTIONS antes do POST (por causa do Authorization).
+// Sem estes cabeçalhos a chamada morre no navegador e nem chega na função.
+// Origem liberada é aceitável aqui porque a função exige JWT válido de usuário logado:
+// quem não tem login não passa do primeiro if, venha de onde vier.
+export const corsHeaders = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-headers": "authorization, x-client-info, apikey, content-type",
+  "access-control-allow-methods": "POST, OPTIONS",
+  "access-control-max-age": "86400",
+};
+
 export const json = (status: number, data: unknown) =>
   new Response(JSON.stringify(data), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+    headers: {
+      ...corsHeaders,
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+    },
   });

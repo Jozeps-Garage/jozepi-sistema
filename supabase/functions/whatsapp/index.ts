@@ -7,13 +7,15 @@
 // Secrets: WHATSAPP_GATEWAY_URL, WHATSAPP_GATEWAY_SECRET.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { callGateway, json } from "../_shared/gateway.ts";
+import { callGateway, corsHeaders, json } from "../_shared/gateway.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 Deno.serve(async (req) => {
+  // Preflight do navegador: responde antes de qualquer coisa, sem tocar em login.
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== "POST") return json(405, { error: "metodo_nao_permitido" });
 
   const authHeader = req.headers.get("Authorization") ?? "";
