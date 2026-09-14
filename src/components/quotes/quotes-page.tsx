@@ -648,15 +648,16 @@ export function QuotesPage() {
 
   useEffect(() => {
     if (!openStatusId) return;
+    const quoteId = openStatusId;
 
     function handlePointerDown(event: PointerEvent) {
       const target = event.target as HTMLElement | null;
       if (target?.closest("[data-quote-status-menu]")) return;
-      closeStatusMenu(openStatusId);
+      closeStatusMenu(quoteId);
     }
 
     function handleEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") closeStatusMenu(openStatusId);
+      if (event.key === "Escape") closeStatusMenu(quoteId);
     }
 
     window.addEventListener("pointerdown", handlePointerDown);
