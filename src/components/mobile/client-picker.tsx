@@ -28,14 +28,14 @@ export function ClientPicker({
 
   const results = useMemo(() => {
     const term = query.trim().toLowerCase();
-    const base = term
-      ? clients.filter(
-          (client) =>
-            client.name.toLowerCase().includes(term) ||
-            (client.phone ?? "").replace(/\D/g, "").includes(term.replace(/\D/g, ""))
-        )
-      : clients;
-    return base.slice(0, 8);
+    if (!term) return clients;
+    const digits = term.replace(/\D/g, "");
+    return clients.filter(
+      (client) =>
+        client.name.toLowerCase().includes(term) ||
+        (digits.length > 0 &&
+          (client.phone ?? "").replace(/\D/g, "").includes(digits))
+    );
   }, [clients, query]);
 
   if (selected) {
@@ -100,10 +100,10 @@ export function ClientPicker({
   }
 
   return (
-    <div className="space-y-2">
-      <div className="relative">
+    <div className="overflow-hidden rounded-lg border border-border bg-card shadow-card">
+      <div className="relative border-b border-border">
         <MagnifyingGlass
-          size={18}
+          size={16}
           weight="light"
           className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
           aria-hidden
@@ -112,12 +112,12 @@ export function ClientPicker({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Buscar cliente por nome ou telefone"
-          className="w-full rounded-md border border-border bg-input py-3 pl-10 pr-3 text-base text-foreground placeholder:text-muted/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 sm:text-sm"
+          className="w-full bg-input py-2.5 pl-10 pr-3 text-sm text-foreground placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-accent/20"
         />
       </div>
-      <div className="max-h-56 space-y-1 overflow-y-auto">
+      <div className="max-h-44 space-y-0.5 overflow-y-auto p-1.5">
         {results.length === 0 ? (
-          <p className="px-1 py-3 text-sm text-muted">
+          <p className="px-3 py-3 text-sm text-muted">
             {clients.length === 0
               ? "Nenhum cliente cadastrado ainda."
               : "Nenhum cliente encontrado."}
@@ -128,9 +128,9 @@ export function ClientPicker({
               key={client.id}
               type="button"
               onClick={() => onSelectClient(client)}
-              className="tap-press flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-background"
+              className="tap-press flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-left hover:bg-background"
             >
-              <UserCircle size={26} weight="light" className="shrink-0 text-muted" aria-hidden />
+              <UserCircle size={24} weight="light" className="shrink-0 text-muted" aria-hidden />
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-foreground">
                   {client.name}

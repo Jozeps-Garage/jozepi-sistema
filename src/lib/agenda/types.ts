@@ -40,6 +40,7 @@ export interface AgendaService {
   price: number | string;
   duration_minutes: number | null;
   active: boolean;
+  category?: string | null;
 }
 
 export type ServiceOrderStatus =

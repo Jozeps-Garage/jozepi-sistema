@@ -151,7 +151,7 @@ function VehicleEditorModal({
   if (typeof document === "undefined") return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 sm:p-6">
+    <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 sm:p-6">
       <button
         type="button"
         aria-label="Fechar formulário de veículo"
@@ -162,7 +162,7 @@ function VehicleEditorModal({
       />
       <form
         onSubmit={handleSubmit}
-        className={`relative z-[111] max-h-[82vh] w-full max-w-lg overflow-y-auto rounded-lg border border-border bg-card shadow-card p-4 shadow-2xl sm:p-5 ${
+        className={`relative z-[131] max-h-[82vh] w-full max-w-lg overflow-y-auto rounded-lg border border-border bg-card shadow-card p-4 shadow-2xl sm:p-5 ${
           closing ? "client-vehicle-card-exit" : "client-vehicle-card-enter"
         }`}
       >
@@ -393,7 +393,7 @@ export function ClientFormModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
       <div
         className="absolute inset-0 bg-foreground/40 backdrop-blur-sm"
         onClick={onClose}

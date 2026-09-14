@@ -1,6 +1,5 @@
 "use client";
 
-import { Plus } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
@@ -9,7 +8,11 @@ import { Input } from "@/components/ui/input";
 import { BottomSheet } from "@/components/mobile/bottom-sheet";
 import { ClientPicker } from "@/components/mobile/client-picker";
 import { MoneyField } from "@/components/mobile/sheets/fields";
-import { ServiceSheet } from "@/components/mobile/sheets/service-sheet";
+import {
+  SelectedCatalogItems,
+  ServiceCatalogDialog,
+  type ResolvedCatalogItem,
+} from "@/components/quotes/service-catalog-dialog";
 import {
   insertAppointmentOrder,
   saveAppointmentItems,
@@ -17,7 +20,6 @@ import {
 import {
   buildServiceOrderItems,
   calculateServicesTotal,
-  getServicePrice,
 } from "@/lib/agenda/utils";
 import {
   BUSINESS_END_TIME,
@@ -25,6 +27,7 @@ import {
   SLOT_INTERVAL_MINUTES,
 } from "@/lib/agenda/constants";
 import type { AgendaService } from "@/lib/agenda/types";
+import type { QuoteServiceRow } from "@/lib/quotes/catalog";
 import type { Client } from "@/types/client";
 import { formatCurrency } from "@/lib/utils/format";
 import { parseCurrencyInput } from "@/lib/utils/money";
@@ -73,13 +76,13 @@ export function AppointmentSheet({
 }: AppointmentSheetProps) {
   const [clientId, setClientId] = useState("");
   const [vehicleId, setVehicleId] = useState("");
-  const [serviceIds, setServiceIds] = useState<string[]>([]);
+  const [selectedItems, setSelectedItems] = useState<ResolvedCatalogItem[]>([]);
+  const [catalogOpen, setCatalogOpen] = useState(false);
   const [date, setDate] = useState(todayKey());
   const [startTime, setStartTime] = useState("08:00");
   const [endTime, setEndTime] = useState("09:00");
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
-  const [serviceSheetOpen, setServiceSheetOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -95,17 +98,39 @@ export function AppointmentSheet({
     return out;
   }, []);
 
+  const serviceIds = useMemo(
+    () => selectedItems.map((item) => item.serviceId),
+    [selectedItems]
+  );
+  const addedServiceIds = useMemo(() => new Set(serviceIds), [serviceIds]);
+  const catalogServices = services as QuoteServiceRow[];
+
   const selectedServices = useMemo(
-    () => services.filter((service) => serviceIds.includes(service.id)),
-    [services, serviceIds]
+    () =>
+      selectedItems.map((item) => {
+        const existing = services.find((service) => service.id === item.serviceId);
+        return (
+          existing ?? {
+            id: item.serviceId,
+            name: item.name,
+            price: item.price,
+            duration_minutes: null,
+            active: true,
+            category: item.kind,
+          }
+        );
+      }),
+    [selectedItems, services]
   );
 
   const computedTotal = useMemo(
-    () => calculateServicesTotal(serviceIds, services),
-    [serviceIds, services]
+    () =>
+      selectedItems.length > 0
+        ? selectedItems.reduce((sum, item) => sum + item.price, 0)
+        : calculateServicesTotal(serviceIds, services),
+    [selectedItems, serviceIds, services]
   );
 
-  // Duração total (min) para um conjunto de serviços — mínimo de um slot.
   function durationForIds(ids: string[]) {
     const sum = services
       .filter((service) => ids.includes(service.id))
@@ -116,7 +141,6 @@ export function AppointmentSheet({
     return Math.max(SLOT_INTERVAL_MINUTES, sum);
   }
 
-  // Deriva a hora de fim a partir de um início + serviços selecionados.
   function deriveEnd(start: string, ids: string[]) {
     return minutesToTime(timeToMinutes(start) + durationForIds(ids));
   }
@@ -129,7 +153,8 @@ export function AppointmentSheet({
   function reset() {
     setClientId("");
     setVehicleId("");
-    setServiceIds([]);
+    setSelectedItems([]);
+    setCatalogOpen(false);
     setDate(todayKey());
     setStartTime("08:00");
     setAmount("");
@@ -143,12 +168,37 @@ export function AppointmentSheet({
     onClose();
   }
 
-  function toggleService(id: string) {
-    const next = serviceIds.includes(id)
-      ? serviceIds.filter((value) => value !== id)
-      : [...serviceIds, id];
-    setServiceIds(next);
-    setEndTime(deriveEnd(startTime, next));
+  function removeService(serviceId: string) {
+    const next = selectedItems.filter((item) => item.serviceId !== serviceId);
+    setSelectedItems(next);
+    setEndTime(deriveEnd(startTime, next.map((item) => item.serviceId)));
+  }
+
+  function handleCatalogAdded(
+    items: ResolvedCatalogItem[],
+    latestServices: QuoteServiceRow[]
+  ) {
+    const next = [
+      ...selectedItems,
+      ...items.filter(
+        (item) => !selectedItems.some((row) => row.serviceId === item.serviceId)
+      ),
+    ];
+    setSelectedItems(next);
+    setEndTime(deriveEnd(startTime, next.map((item) => item.serviceId)));
+
+    for (const item of items) {
+      if (services.some((service) => service.id === item.serviceId)) continue;
+      const synced = latestServices.find((service) => service.id === item.serviceId);
+      onServiceCreated({
+        id: item.serviceId,
+        name: item.name,
+        price: item.price,
+        duration_minutes: synced?.duration_minutes ?? null,
+        active: true,
+        category: item.kind,
+      });
+    }
   }
 
   async function handleSubmit(event: React.FormEvent) {
@@ -254,44 +304,12 @@ export function AppointmentSheet({
             />
           </div>
 
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <span className="label-caps">Serviços</span>
-              <button
-                type="button"
-                onClick={() => setServiceSheetOpen(true)}
-                className="tap-press flex items-center gap-1 text-xs font-semibold text-primary"
-              >
-                <Plus size={14} weight="bold" aria-hidden />
-                Novo serviço
-              </button>
-            </div>
-            {services.length === 0 ? (
-              <p className="text-xs text-muted">
-                Nenhum serviço no catálogo. Toque em “Novo serviço” para criar.
-              </p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {services.map((service) => {
-                  const active = serviceIds.includes(service.id);
-                  return (
-                    <button
-                      key={service.id}
-                      type="button"
-                      onClick={() => toggleService(service.id)}
-                      className={`tap-press rounded-full border px-3 py-2 text-xs font-semibold transition-colors ${
-                        active
-                          ? "border-primary bg-primary text-white"
-                          : "border-border bg-card text-foreground"
-                      }`}
-                    >
-                      {service.name} · {formatCurrency(getServicePrice(service))}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+          <SelectedCatalogItems
+            label="Serviços"
+            items={selectedItems}
+            onSelect={() => setCatalogOpen(true)}
+            onRemove={removeService}
+          />
 
           <Input
             label="Data"
@@ -334,27 +352,15 @@ export function AppointmentSheet({
         </form>
       </BottomSheet>
 
-      <ServiceSheet
-        open={serviceSheetOpen}
-        onClose={() => setServiceSheetOpen(false)}
+      <ServiceCatalogDialog
+        open={catalogOpen}
+        onClose={() => setCatalogOpen(false)}
+        services={catalogServices}
+        excludedServiceIds={addedServiceIds}
         supabase={supabase}
         workshopId={workshopId}
-        onDone={onDone}
-        onCreated={(service) => {
-          onServiceCreated(service);
-          const next = [...serviceIds, service.id];
-          setServiceIds(next);
-          setEndTime(
-            minutesToTime(
-              timeToMinutes(startTime) +
-                Math.max(
-                  SLOT_INTERVAL_MINUTES,
-                  durationForIds(serviceIds) +
-                    (service.duration_minutes || SLOT_INTERVAL_MINUTES)
-                )
-            )
-          );
-        }}
+        description="Marque quantos quiser e confirme para adicionar ao agendamento."
+        onAdded={handleCatalogAdded}
       />
     </>
   );

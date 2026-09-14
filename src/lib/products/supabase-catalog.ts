@@ -24,6 +24,7 @@ interface ProductRow {
   supplier_id: string | null;
   stock_remaining: string | null;
   price_history: ProductPriceHistoryEntry[] | null;
+  created_at?: string | null;
 }
 
 interface ProductTypeRow {
@@ -64,6 +65,7 @@ function productFromRow(row: ProductRow): ProductItem {
     supplierId: row.supplier_id ?? undefined,
     stockRemaining: row.stock_remaining ?? undefined,
     priceHistory: Array.isArray(row.price_history) ? row.price_history : [],
+    createdAt: row.created_at ?? undefined,
   });
 }
 
@@ -125,7 +127,7 @@ export async function loadSupabaseCatalog(
   const productsQuery = supabase
     .from("products")
     .select(
-      "id, name, type, volume_ml, usage_per_wash_ml, quantity, durability_washes, total_cost, photo_url, supplier_id, stock_remaining, price_history"
+      "id, name, type, volume_ml, usage_per_wash_ml, quantity, durability_washes, total_cost, photo_url, supplier_id, stock_remaining, price_history, created_at"
     );
   const typesQuery = supabase
     .from("product_types")

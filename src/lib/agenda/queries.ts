@@ -50,7 +50,7 @@ export async function fetchServices(
 ) {
   return supabase
     .from("services")
-    .select("id, name, price, duration_minutes, active")
+    .select("id, name, price, duration_minutes, active, category")
     .eq("workshop_id", workshopId)
     .eq("active", true)
     .order("name", { ascending: true });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   CalendarBlank,
   CalendarX,
@@ -659,11 +659,13 @@ function AgendaDropdown({
 
 export function AgendaCalendar() {
   const supabase = useMemo(() => createClient(), []);
+  const router = useRouter();
   const searchParams = useSearchParams();
   const linkedClientId = searchParams.get("clientId");
   const linkedClientHandledRef = useRef<string | null>(null);
   const linkedServiceIds = searchParams.get("packageServices");
   const linkedServicesHandledRef = useRef<string | null>(null);
+  const linkedQuoteId = searchParams.get("quoteId");
   const [timeZone, setTimeZone] = useState(DEFAULT_TIME_ZONE);
   const [now, setNow] = useState(() =>
     wallClockInTimeZone(new Date(), DEFAULT_TIME_ZONE)
@@ -1828,6 +1830,28 @@ export function AgendaCalendar() {
         insertItemsError,
         "salvar os serviços do agendamento"
       );
+
+      if (!editingAppointmentId && linkedQuoteId) {
+        const { error: quoteError } = await supabase
+          .from("quotes")
+          .update({
+            status: "convertido",
+            service_order_id: savedAppointmentId,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", linkedQuoteId)
+          .eq("workshop_id", workshopId)
+          .in("status", ["pendente", "aprovado"]);
+
+        if (quoteError) {
+          setError(
+            quoteError.message ||
+              "Agendamento salvo, mas o orçamento não foi marcado como convertido."
+          );
+        }
+
+        router.replace("/agenda");
+      }
 
       const savedAppointment: Appointment = {
         id: savedAppointmentId,

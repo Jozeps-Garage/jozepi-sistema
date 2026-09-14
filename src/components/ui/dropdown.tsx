@@ -11,7 +11,7 @@ export interface DropdownOption {
 }
 
 interface DropdownProps {
-  label: string;
+  label?: string;
   value: string;
   options: DropdownOption[];
   onChange: (value: string) => void;
@@ -26,6 +26,7 @@ interface DropdownProps {
   onDeleteOption?: (value: string) => void;
   searchable?: boolean;
   searchPlaceholder?: string;
+  compact?: boolean;
 }
 
 const DROPDOWN_EXIT_MS = 160;
@@ -47,6 +48,7 @@ export function Dropdown({
   onDeleteOption,
   searchable = false,
   searchPlaceholder = "Buscar...",
+  compact = false,
 }: DropdownProps) {
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -146,10 +148,12 @@ export function Dropdown({
   }, []);
 
   return (
-    <div className={cn("relative space-y-1.5", className)}>
-      <label htmlFor={inputId} className="label-caps">
-        {label}
-      </label>
+    <div className={cn("relative", compact ? "space-y-1" : "space-y-1.5", className)}>
+      {label?.trim() ? (
+        <label htmlFor={inputId} className="label-caps">
+          {label}
+        </label>
+      ) : null}
       <button
         id={inputId}
         type="button"
@@ -157,7 +161,12 @@ export function Dropdown({
         aria-haspopup="listbox"
         aria-expanded={open && !closing}
         onClick={toggleDropdown}
-        className="flex min-h-11 w-full items-center justify-between gap-3 rounded-md border border-border bg-input px-4 py-3 text-left text-base text-foreground transition-colors duration-300 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0 sm:py-2.5 sm:text-sm"
+        className={cn(
+          "flex w-full items-center justify-between gap-3 rounded-md border border-border bg-input text-left text-foreground transition-colors duration-300 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-50",
+          compact
+            ? "min-h-10 px-3 py-2 text-sm"
+            : "min-h-11 px-4 py-3 text-base sm:min-h-0 sm:py-2.5 sm:text-sm"
+        )}
       >
         <span
           className={cn(
@@ -180,12 +189,12 @@ export function Dropdown({
       {open && !disabled && (
         <div
           className={cn(
-            "absolute left-0 right-0 top-full z-40 mt-2 max-h-64 overflow-y-auto rounded-lg border border-border bg-card p-2 shadow-card-hover",
+            "absolute left-0 right-0 top-full z-40 mt-2 flex max-h-64 flex-col overflow-hidden rounded-lg border border-border bg-card p-2 shadow-card-hover",
             closing ? "dropdown-menu-exit" : "dropdown-menu-enter"
           )}
         >
           {searchable && (
-            <div className="relative mb-2">
+            <div className="relative mb-2 shrink-0">
               <MagnifyingGlass
                 size={15}
                 weight={DROPDOWN_ICON_WEIGHT}
@@ -201,7 +210,7 @@ export function Dropdown({
               />
             </div>
           )}
-          <div role="listbox" aria-labelledby={inputId} className="space-y-1">
+          <div role="listbox" aria-labelledby={inputId} className="min-h-0 flex-1 space-y-1 overflow-y-auto">
             {searchable && visibleOptions.length === 0 && (
               <p className="px-3 py-2 text-sm text-muted">Nenhum resultado encontrado.</p>
             )}

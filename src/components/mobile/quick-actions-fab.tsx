@@ -2,16 +2,13 @@
 
 import {
   CalendarPlus,
-  Car,
-  Package,
   Plus,
   TrendDown,
   TrendUp,
   UserPlus,
-  Wrench,
   type Icon,
 } from "@phosphor-icons/react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { fetchClients, fetchServices } from "@/lib/agenda/queries";
 import type { AgendaService } from "@/lib/agenda/types";
@@ -19,20 +16,10 @@ import type { Client } from "@/types/client";
 import { BottomSheet } from "@/components/mobile/bottom-sheet";
 import { Toast, type ToastState } from "@/components/mobile/toast";
 import { ClientSheet } from "@/components/mobile/sheets/client-sheet";
-import { VehicleSheet } from "@/components/mobile/sheets/vehicle-sheet";
 import { AppointmentSheet } from "@/components/mobile/sheets/appointment-sheet";
 import { TransactionSheet } from "@/components/mobile/sheets/transaction-sheet";
-import { ServiceSheet } from "@/components/mobile/sheets/service-sheet";
-import { ProductSheet } from "@/components/mobile/sheets/product-sheet";
 
-type SheetKey =
-  | "client"
-  | "vehicle"
-  | "appointment"
-  | "expense"
-  | "revenue"
-  | "service"
-  | "product";
+type SheetKey = "client" | "appointment" | "expense" | "revenue";
 
 interface ActionConfig {
   key: SheetKey;
@@ -47,15 +34,10 @@ const ACTIONS: ActionConfig[] = [
   { key: "appointment", label: "Agendamento", hint: "Nova OS", icon: CalendarPlus, chip: "bg-premium/15 text-premium" },
   { key: "expense", label: "Despesa", hint: "Lançar gasto", icon: TrendDown, chip: "bg-danger/10 text-danger" },
   { key: "revenue", label: "Receita", hint: "Entrada avulsa", icon: TrendUp, chip: "bg-success/10 text-success" },
-  { key: "vehicle", label: "Veículo", hint: "A um cliente", icon: Car, chip: "bg-primary/10 text-primary" },
-  { key: "service", label: "Serviço", hint: "Catálogo", icon: Wrench, chip: "bg-premium/15 text-premium" },
-  { key: "product", label: "Produto", hint: "Estoque", icon: Package, chip: "bg-primary/10 text-primary" },
 ];
 
 /**
  * Botão flutuante de ações rápidas — presente em todas as páginas do sistema.
- * Cliente, veículo, agendamento, despesa, receita, serviço e produto sem
- * sair da tela em que o usuário está.
  */
 export function QuickActionsFab({ workshopId }: { workshopId: string }) {
   const supabase = useMemo(() => createClient(), []);
@@ -63,31 +45,22 @@ export function QuickActionsFab({ workshopId }: { workshopId: string }) {
   const [services, setServices] = useState<AgendaService[]>([]);
   const [openSheet, setOpenSheet] = useState<SheetKey | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [fabBurst, setFabBurst] = useState(0);
+  const [fabPressing, setFabPressing] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
 
-  const reloadClients = useMemo(
-    () => async () => {
-      const { data } = await fetchClients(supabase, workshopId);
-      if (data) setClients(data as unknown as Client[]);
-    },
-    [supabase, workshopId]
-  );
+  const loadLookups = useCallback(async () => {
+    const [clientsRes, servicesRes] = await Promise.all([
+      fetchClients(supabase, workshopId),
+      fetchServices(supabase, workshopId),
+    ]);
+    if (clientsRes.data) setClients(clientsRes.data as unknown as Client[]);
+    if (servicesRes.data) setServices(servicesRes.data as unknown as AgendaService[]);
+  }, [supabase, workshopId]);
 
   useEffect(() => {
-    let active = true;
-    (async () => {
-      const [clientsRes, servicesRes] = await Promise.all([
-        fetchClients(supabase, workshopId),
-        fetchServices(supabase, workshopId),
-      ]);
-      if (!active) return;
-      if (clientsRes.data) setClients(clientsRes.data as unknown as Client[]);
-      if (servicesRes.data) setServices(servicesRes.data as unknown as AgendaService[]);
-    })();
-    return () => {
-      active = false;
-    };
-  }, [supabase, workshopId]);
+    void loadLookups();
+  }, [loadLookups]);
 
   function notify(tone: "success" | "error", message: string) {
     setToast({ id: Date.now(), tone, message });
@@ -96,6 +69,7 @@ export function QuickActionsFab({ workshopId }: { workshopId: string }) {
   function openAction(key: SheetKey) {
     setMenuOpen(false);
     setOpenSheet(key);
+    if (key === "appointment") void loadLookups();
   }
 
   return (
@@ -103,11 +77,32 @@ export function QuickActionsFab({ workshopId }: { workshopId: string }) {
       {/* FAB no canto inferior direito, sempre acima da barra de navegação inferior no mobile */}
       <button
         type="button"
-        onClick={() => setMenuOpen(true)}
-        aria-label="Adicionar"
-        className="fab-pop tap-press fixed bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] right-5 z-50 flex h-16 w-16 items-center justify-center rounded-full bg-primary text-white shadow-card-hover ring-4 ring-background md:bottom-8 md:right-8"
+        onClick={() => {
+          setFabPressing(false);
+          setFabBurst((n) => n + 1);
+          setMenuOpen((open) => !open);
+          requestAnimationFrame(() => setFabPressing(true));
+        }}
+        aria-label={menuOpen ? "Fechar" : "Adicionar"}
+        aria-expanded={menuOpen}
+        className={`tap-press fixed bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] right-5 z-50 flex h-16 w-16 items-center justify-center overflow-visible rounded-full bg-primary text-white shadow-card-hover ring-4 ring-background md:bottom-8 md:right-8 ${
+          fabBurst === 0 ? "fab-pop" : fabPressing ? "fab-press" : ""
+        }`}
       >
-        <Plus size={30} weight="bold" aria-hidden />
+        {fabBurst > 0 ? (
+          <span
+            key={fabBurst}
+            className="pointer-events-none absolute inset-0 rounded-full bg-white/25 fab-ring"
+          />
+        ) : null}
+        <Plus
+          size={30}
+          weight="bold"
+          aria-hidden
+          className={`relative transition-transform duration-300 ease-out ${
+            menuOpen ? "rotate-45" : "rotate-0"
+          }`}
+        />
       </button>
 
       {/* Menu de ações do FAB */}
@@ -154,15 +149,6 @@ export function QuickActionsFab({ workshopId }: { workshopId: string }) {
         onDone={notify}
         onCreated={(client) => setClients((prev) => [client, ...prev])}
       />
-      <VehicleSheet
-        open={openSheet === "vehicle"}
-        onClose={() => setOpenSheet(null)}
-        supabase={supabase}
-        workshopId={workshopId}
-        clients={clients}
-        onDone={notify}
-        onChanged={reloadClients}
-      />
       <AppointmentSheet
         open={openSheet === "appointment"}
         onClose={() => setOpenSheet(null)}
@@ -189,22 +175,6 @@ export function QuickActionsFab({ workshopId }: { workshopId: string }) {
         type="receita"
         onDone={notify}
       />
-      <ServiceSheet
-        open={openSheet === "service"}
-        onClose={() => setOpenSheet(null)}
-        supabase={supabase}
-        workshopId={workshopId}
-        onDone={notify}
-        onCreated={(service) => setServices((prev) => [...prev, service])}
-      />
-      <ProductSheet
-        open={openSheet === "product"}
-        onClose={() => setOpenSheet(null)}
-        supabase={supabase}
-        workshopId={workshopId}
-        onDone={notify}
-      />
-
       <Toast toast={toast} onDone={() => setToast(null)} />
     </>
   );

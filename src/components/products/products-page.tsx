@@ -32,16 +32,21 @@ import {
   createProductId,
   createProductPriceHistoryId,
   createProductTypeId,
+  DEPRECIATION_MODE_OPTIONS,
   emptyProductForm,
+  encodeUtensilDepreciation,
   formatStockAmount,
   getProductInitialStock,
   getProductRemainingStock,
   getProductStockPercent,
   getProductStockUnit,
   getProductTypeLabel,
+  getUtensilAcquiredAt,
+  getUtensilDepreciationMode,
   parseMoney,
   parsePositiveNumber,
   productTypeOptions,
+  type DepreciationMode,
   type ProductForm,
   type ProductItem,
   type ProductPriceHistoryReason,
@@ -49,6 +54,7 @@ import {
   type ProductType,
   type ProductTypeOption,
 } from "@/lib/products/catalog";
+import { getDepreciatedValue, isUtensilProduct } from "@/lib/products/depreciation";
 import {
   clearLocalCatalogStorage,
   deleteSupabaseProduct,
@@ -110,7 +116,7 @@ const PRODUCT_FILTER_EXIT_MS = 300;
 // inline style to both the header row and every product row so they can
 // never drift out of alignment regardless of CSS class generation.
 const PRODUCTS_TABLE_GRID_TEMPLATE =
-  "minmax(220px, 1fr) 110px 120px 190px 172px";
+  "minmax(220px, 1fr) 110px 150px 190px 172px";
 
 function filterLabelForType(option: ProductTypeOption) {
   if (option.value === "liquid") return "Líquidos";
@@ -388,6 +394,38 @@ function dateKey(date: Date) {
   const day = String(date.getDate()).padStart(2, "0");
 
   return `${year}-${month}-${day}`;
+}
+
+function ProductCostDisplay({
+  product,
+  align = "right",
+  compact = false,
+}: {
+  product: ProductItem;
+  align?: "left" | "right";
+  compact?: boolean;
+}) {
+  const purchase = formatCurrency(parseMoney(product.totalCost || "0"));
+  const currentValue = getDepreciatedValue(product);
+
+  return (
+    <div className={align === "right" ? "text-right" : "text-left"}>
+      <p
+        className={
+          compact
+            ? "text-sm font-semibold text-foreground"
+            : "mt-1 font-bold text-foreground"
+        }
+      >
+        {purchase}
+      </p>
+      {currentValue !== null && (
+        <p className="mt-0.5 text-[11px] font-medium text-muted">
+          Valor atual: {formatCurrency(currentValue)}
+        </p>
+      )}
+    </div>
+  );
 }
 
 function SortableColumnHeader({
@@ -686,8 +724,10 @@ export function ProductsPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [formClosing, setFormClosing] = useState(false);
   const [formAnimationKey, setFormAnimationKey] = useState(0);
+  const [mounted, setMounted] = useState(false);
   const [editingProduct, setEditingProduct] = useState<ProductItem | null>(null);
   const [form, setForm] = useState<ProductForm>(emptyProductForm);
+  const [incrementingUse, setIncrementingUse] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<ProductDeleteConfirm>(null);
   const [deletingItem, setDeletingItem] = useState(false);
@@ -715,6 +755,10 @@ export function ProductsPage() {
       closeFormTimeoutRef.current = null;
     }
   }
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -857,6 +901,8 @@ export function ProductsPage() {
       totalCost: product.totalCost,
       photoUrl: product.photoUrl ?? "",
       supplierId: product.supplierId ?? "",
+      depreciationMode: getUtensilDepreciationMode(product),
+      acquiredAt: getUtensilAcquiredAt(product),
     });
     setError(null);
     setTypeError(null);
@@ -889,6 +935,26 @@ export function ProductsPage() {
       closeFormTimeoutRef.current = null;
     }, PRODUCT_FORM_EXIT_MS);
   }
+
+  useEffect(() => {
+    if (!formOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape" || formClosing) return;
+      if (replenishingProductId || editingStockProductId) return;
+      event.preventDefault();
+      closeForm();
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [editingStockProductId, formClosing, formOpen, replenishingProductId]);
 
   function updateForm(patch: Partial<ProductForm>) {
     setForm((prev) => ({ ...prev, ...patch }));
@@ -1152,6 +1218,17 @@ export function ProductsPage() {
     }
 
     parsePositiveNumber(form.quantity);
+
+    if (form.type !== "utensil" || form.depreciationMode === "none") {
+      return;
+    }
+
+    if (form.depreciationMode === "time") {
+      if (!form.acquiredAt) {
+        throw new Error("Informe a data de aquisição.");
+      }
+      parsePositiveNumber(form.durabilityWashes);
+    }
   }
 
   async function handleSaveProduct(event: React.FormEvent<HTMLFormElement>) {
@@ -1183,18 +1260,24 @@ export function ProductsPage() {
       return;
     }
 
+    const isUtensil = form.type === "utensil";
+    const depreciationMode = isUtensil ? form.depreciationMode : "none";
     const baseProduct: ProductItem = {
       id: editingProduct?.id ?? createProductId(),
       name: form.name.trim(),
       type: form.type,
       volumeMl: form.type === "liquid" ? form.volumeMl : "",
-      usagePerWashMl: "",
-      quantity: form.type === "utensil" ? form.quantity : "",
-      durabilityWashes: "",
+      usagePerWashMl: isUtensil
+        ? encodeUtensilDepreciation(depreciationMode, form.acquiredAt)
+        : "",
+      quantity: form.type === "liquid" ? "" : form.quantity,
+      durabilityWashes:
+        isUtensil && depreciationMode === "time" ? form.durabilityWashes : "",
       totalCost: form.totalCost,
       photoUrl: form.photoUrl || undefined,
       supplierId: persistedSupplierId,
       priceHistory: editingProduct?.priceHistory ?? [],
+      createdAt: editingProduct?.createdAt,
     };
     const previousPrice = editingProduct
       ? parseMoney(editingProduct.totalCost || "0")
@@ -1211,10 +1294,13 @@ export function ProductsPage() {
       ];
     }
     const initialStock = getProductInitialStock(baseProduct);
-    const preservedRemaining =
-      editingProduct && editingProduct.type === baseProduct.type
-        ? getProductRemainingStock(editingProduct)
-        : initialStock;
+    const modeUnchanged =
+      Boolean(editingProduct) &&
+      editingProduct.type === baseProduct.type &&
+      getUtensilDepreciationMode(editingProduct) === depreciationMode;
+    const preservedRemaining = modeUnchanged
+      ? getProductRemainingStock(editingProduct)
+      : initialStock;
     const nextProduct: ProductItem = {
       ...baseProduct,
       stockRemaining: String(Math.min(initialStock, preservedRemaining)),
@@ -1239,6 +1325,38 @@ export function ProductsPage() {
         : [nextProduct, ...prev]
     );
     closeForm();
+  }
+
+  async function handleIncrementUse() {
+    if (!workshopId || !editingProduct || incrementingUse) return;
+    if (!isUtensilProduct(editingProduct)) return;
+    if (getUtensilDepreciationMode(editingProduct) !== "usage") return;
+
+    const nextRemaining = Math.max(0, getProductRemainingStock(editingProduct) - 1);
+    const updatedProduct: ProductItem = {
+      ...editingProduct,
+      stockRemaining: String(nextRemaining),
+    };
+
+    setIncrementingUse(true);
+    setError(null);
+    try {
+      await saveSupabaseProduct(supabase, workshopId, updatedProduct);
+      setProducts((prev) =>
+        prev.map((product) =>
+          product.id === updatedProduct.id ? updatedProduct : product
+        )
+      );
+      setEditingProduct(updatedProduct);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? `Não foi possível registrar o uso: ${err.message}`
+          : "Não foi possível registrar o uso."
+      );
+    } finally {
+      setIncrementingUse(false);
+    }
   }
 
   function requestDeleteProduct(product: ProductItem) {
@@ -1337,6 +1455,10 @@ export function ProductsPage() {
       stockRemaining: String(initialStock),
       totalCost: newPrice || product.totalCost,
       priceHistory: product.priceHistory ?? [],
+      usagePerWashMl:
+        getUtensilDepreciationMode(product) === "time"
+          ? encodeUtensilDepreciation("time", dateKey(new Date()))
+          : product.usagePerWashMl,
     };
 
     try {
@@ -1502,18 +1624,13 @@ export function ProductsPage() {
         )}
       </div>
 
-      {error && (
+      {error && !formOpen && (
         <div className="mb-4 rounded-lg border border-danger/20 bg-danger/5 px-4 py-3 text-sm text-danger">
           {error}
         </div>
       )}
 
-      <div
-        className={`grid grid-cols-1 items-start gap-6 ${
-          formOpen ? "lg:grid-cols-[minmax(0,1fr)_320px]" : ""
-        }`}
-      >
-        <section className="order-2 lg:order-1">
+      <section>
           {isCatalogLoading ? (
             <div className="rounded-lg border border-border bg-card shadow-card py-16 text-center text-sm text-muted shadow-card">
               Carregando produtos...
@@ -1653,12 +1770,12 @@ export function ProductsPage() {
                           </div>
 
                           <p className="text-sm text-foreground">
-                            {isLiquid ? `${product.volumeMl} ml` : product.quantity}
+                            {isLiquid
+                              ? `${product.volumeMl} ml`
+                              : `${formatStockAmount(initialStock)} ${stockUnit}`}
                           </p>
 
-                          <p className="text-right text-sm font-semibold text-foreground">
-                            {formatCurrency(parseMoney(product.totalCost || "0"))}
-                          </p>
+                          <ProductCostDisplay product={product} compact />
 
                           <div className="min-w-0">
                             <p className="truncate text-xs text-muted">
@@ -1808,17 +1925,21 @@ export function ProductsPage() {
                       <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
                         <div className="rounded-lg bg-background px-4 py-3">
                           <span className="font-medium text-muted">
-                            {isLiquid ? "Volume total" : "Quantidade"}
+                            {isLiquid
+                              ? "Volume total"
+                              : getUtensilDepreciationMode(product) === "none"
+                                ? "Quantidade"
+                                : "Vida útil"}
                           </span>
                           <p className="mt-1 font-bold text-foreground">
-                            {isLiquid ? `${product.volumeMl} ml` : product.quantity}
+                            {isLiquid
+                              ? `${product.volumeMl} ml`
+                              : `${formatStockAmount(initialStock)} ${stockUnit}`}
                           </p>
                         </div>
                         <div className="rounded-lg bg-background px-4 py-3">
                           <span className="font-medium text-muted">Valor</span>
-                          <p className="mt-1 font-bold text-foreground">
-                            {formatCurrency(parseMoney(product.totalCost || "0"))}
-                          </p>
+                          <ProductCostDisplay product={product} align="left" />
                         </div>
                       </div>
 
@@ -1843,162 +1964,306 @@ export function ProductsPage() {
               </div>
             </>
           )}
-        </section>
+      </section>
 
-        <aside className="order-1 w-full lg:order-2 lg:sticky lg:top-4 lg:w-[320px] lg:shrink-0 lg:self-start">
-          {formOpen ? (
+      {formOpen &&
+        mounted &&
+        createPortal(
+          <div
+            className={`fixed inset-0 z-[110] flex items-center justify-center bg-foreground/25 px-4 py-6 backdrop-blur-sm ${
+              formClosing ? "product-form-overlay-exit" : "product-form-overlay-enter"
+            }`}
+            onMouseDown={(event) => {
+              if (event.target !== event.currentTarget) return;
+              if (formClosing) return;
+              closeForm();
+            }}
+          >
             <form
               key={formAnimationKey}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="product-form-title"
               onSubmit={handleSaveProduct}
+              onClick={(event) => event.stopPropagation()}
               autoComplete="off"
-              className={`rounded-lg border border-border bg-card shadow-card p-6 shadow-card ${
-                formClosing ? "product-form-exit" : "product-form-enter"
+              className={`flex max-h-[92vh] w-full max-w-xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-card-hover ${
+                formClosing ? "product-form-card-exit" : "product-form-card-enter"
               }`}
             >
-              <div className="mb-5 flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-semibold text-foreground">
+              <div className="flex shrink-0 items-start justify-between gap-3 px-5 pt-4 pb-1 sm:px-6">
+                <div className="min-w-0">
+                  <h2
+                    id="product-form-title"
+                    className="text-base font-semibold text-foreground"
+                  >
                     {editingProduct ? "Editar produto" : "Novo produto"}
                   </h2>
-                  <p className="mt-1 text-sm text-muted">
+                  <p className="mt-0.5 text-xs text-muted">
                     Cadastre o catálogo geral usado nos serviços.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={closeForm}
-                  className="rounded-lg p-2 text-muted transition-colors hover:bg-background hover:text-foreground"
-                  aria-label="Fechar formulário"
+                  className="rounded-lg p-1.5 text-muted transition-colors hover:bg-background hover:text-foreground"
+                  aria-label="Fechar"
                 >
-                  <X size={20} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
+                  <X size={18} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 gap-4">
-                <div className="rounded-lg border border-border bg-background shadow-card p-4">
-                  <div className="flex items-center gap-4">
-                    <div
-                      className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-card shadow-card bg-cover bg-center text-muted"
-                      style={
-                        form.photoUrl
-                          ? { backgroundImage: `url(${form.photoUrl})` }
-                          : undefined
-                      }
-                    >
-                      {!form.photoUrl && (
-                        <Camera size={24} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-foreground">
-                        Foto do produto
-                      </p>
-                      <p className="mt-1 text-xs text-muted">
-                        Opcional. Use uma imagem para identificar o produto.
-                      </p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-success/10 px-3 py-2 text-xs font-semibold text-success transition-colors hover:bg-success hover:text-white">
-                          <Camera size={14} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-                          {form.photoUrl ? "Trocar foto" : "Adicionar foto"}
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="sr-only"
-                            onChange={handleProductPhotoChange}
-                          />
-                        </label>
-                        {form.photoUrl && (
-                          <button
-                            type="button"
-                            onClick={() => updateForm({ photoUrl: "" })}
-                            className="rounded-lg bg-danger/10 px-3 py-2 text-xs font-semibold text-danger transition-colors hover:bg-danger hover:text-white"
-                          >
-                            Remover
-                          </button>
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3 sm:px-6">
+                {error && (
+                  <div className="mb-3 rounded-md border border-danger/20 bg-danger/5 px-3 py-2 text-sm text-danger">
+                    {error}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="rounded-lg border border-border bg-background p-4 sm:col-span-2">
+                    <div className="flex items-center gap-4">
+                      <div
+                        className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-card bg-cover bg-center text-muted shadow-card"
+                        style={
+                          form.photoUrl
+                            ? { backgroundImage: `url(${form.photoUrl})` }
+                            : undefined
+                        }
+                      >
+                        {!form.photoUrl && (
+                          <Camera size={24} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
                         )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-foreground">
+                          Foto do produto
+                        </p>
+                        <p className="mt-1 text-xs text-muted">
+                          Opcional. Use uma imagem para identificar o produto.
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-success/10 px-3 py-2 text-xs font-semibold text-success transition-colors hover:bg-success hover:text-white">
+                            <Camera size={14} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
+                            {form.photoUrl ? "Trocar foto" : "Adicionar foto"}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="sr-only"
+                              onChange={handleProductPhotoChange}
+                            />
+                          </label>
+                          {form.photoUrl && (
+                            <button
+                              type="button"
+                              onClick={() => updateForm({ photoUrl: "" })}
+                              className="rounded-lg bg-danger/10 px-3 py-2 text-xs font-semibold text-danger transition-colors hover:bg-danger hover:text-white"
+                            >
+                              Remover
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
+
+                  <div className="sm:col-span-2">
+                    <Input
+                      label="Nome do produto"
+                      value={form.name}
+                      autoComplete="off"
+                      onChange={(event) => updateForm({ name: event.target.value })}
+                      placeholder="Shampoo automotivo"
+                    />
+                  </div>
+                  <Dropdown
+                    label="Tipo"
+                    value={form.type}
+                    options={typeOptions}
+                    onChange={(type) => {
+                      const nextType = type as ProductType;
+                      updateForm(
+                        nextType === "utensil"
+                          ? { type: nextType }
+                          : {
+                              type: nextType,
+                              depreciationMode: "none",
+                              acquiredAt: "",
+                              durabilityWashes: "",
+                            }
+                      );
+                      setTypeError(null);
+                    }}
+                    actionLabel="Adicionar"
+                    createPlaceholder="Ex: Cera, Equipamento, Químico"
+                    onCreateOption={handleAddType}
+                    onDeleteOption={handleDeleteType}
+                  />
+                  <Dropdown
+                    label="Fornecedor"
+                    value={form.supplierId}
+                    options={supplierOptions}
+                    onChange={(supplierId) => updateForm({ supplierId })}
+                    disabled={!suppliersLoaded}
+                  />
+                  {typeError && (
+                    <p className="text-xs font-medium text-danger sm:col-span-2">
+                      {typeError}
+                    </p>
+                  )}
+
+                  {form.type === "liquid" ? (
+                    <Input
+                      label="Volume total (ml)"
+                      type="number"
+                      min="0"
+                      step="1"
+                      className="number-input-no-spinner"
+                      value={form.volumeMl}
+                      onChange={(event) =>
+                        updateForm({ volumeMl: event.target.value })
+                      }
+                      placeholder="5000"
+                      suffix={
+                        <CaretUpDown
+                          size={16}
+                          weight={PRODUCT_ICON_WEIGHT}
+                          aria-hidden
+                        />
+                      }
+                    />
+                  ) : (
+                    <Input
+                      label={
+                        form.type === "utensil" && form.depreciationMode === "usage"
+                          ? "Vida útil (usos)"
+                          : "Quantidade"
+                      }
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={form.quantity}
+                      onChange={(event) =>
+                        updateForm({ quantity: event.target.value })
+                      }
+                      placeholder={
+                        form.type === "utensil" && form.depreciationMode === "usage"
+                          ? "200"
+                          : "3"
+                      }
+                    />
+                  )}
+
+                  <Input
+                    label="Custo total do produto"
+                    value={form.totalCost}
+                    autoComplete="off"
+                    onChange={(event) =>
+                      updateForm({ totalCost: event.target.value })
+                    }
+                    placeholder="80,00"
+                  />
+
+                  {form.type === "utensil" && (
+                    <>
+                      <div className="sm:col-span-2">
+                        <Dropdown
+                          label="Depreciação"
+                          value={form.depreciationMode}
+                          options={DEPRECIATION_MODE_OPTIONS}
+                          onChange={(mode) => {
+                            const depreciationMode = mode as DepreciationMode;
+                            updateForm({
+                              depreciationMode,
+                              acquiredAt:
+                                depreciationMode === "time" && !form.acquiredAt
+                                  ? dateKey(today)
+                                  : form.acquiredAt,
+                            });
+                          }}
+                        />
+                      </div>
+
+                      {form.depreciationMode === "time" && (
+                        <>
+                          <Input
+                            label="Data de aquisição"
+                            type="date"
+                            value={form.acquiredAt}
+                            onChange={(event) =>
+                              updateForm({ acquiredAt: event.target.value })
+                            }
+                          />
+                          <Input
+                            label="Vida útil estimada (meses)"
+                            type="number"
+                            min="1"
+                            step="1"
+                            className="number-input-no-spinner"
+                            value={form.durabilityWashes}
+                            onChange={(event) =>
+                              updateForm({ durabilityWashes: event.target.value })
+                            }
+                            placeholder="24"
+                          />
+                        </>
+                      )}
+
+                      {form.depreciationMode === "usage" && editingProduct && (
+                        <div className="flex items-end justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2.5 sm:col-span-2">
+                          <div>
+                            <p className="label-caps text-muted">Estoque restante</p>
+                            <p className="mt-1 text-sm font-semibold tabular-nums text-foreground">
+                              {formatStockAmount(getProductRemainingStock(editingProduct))}{" "}
+                              de {formatStockAmount(getProductInitialStock(editingProduct))}{" "}
+                              usos
+                            </p>
+                          </div>
+                          {getUtensilDepreciationMode(editingProduct) === "usage" && (
+                            <button
+                              type="button"
+                              onClick={() => void handleIncrementUse()}
+                              disabled={incrementingUse}
+                              className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary transition-colors duration-200 hover:bg-primary hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <Plus size={12} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
+                              +1 uso
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {form.depreciationMode !== "none" && (
+                        <p className="text-xs text-muted sm:col-span-2">
+                          Valor atual:{" "}
+                          {(() => {
+                            const preview = getDepreciatedValue({
+                              id: editingProduct?.id ?? "draft",
+                              name: form.name,
+                              type: "utensil",
+                              volumeMl: "",
+                              usagePerWashMl: encodeUtensilDepreciation(
+                                form.depreciationMode,
+                                form.acquiredAt
+                              ),
+                              quantity: form.quantity,
+                              durabilityWashes: form.durabilityWashes,
+                              totalCost: form.totalCost,
+                              stockRemaining: editingProduct?.stockRemaining,
+                              createdAt: editingProduct?.createdAt,
+                            });
+                            return preview === null
+                              ? "preencha os campos para calcular"
+                              : formatCurrency(preview);
+                          })()}
+                        </p>
+                      )}
+                    </>
+                  )}
                 </div>
-
-                <Input
-                  label="Nome do produto"
-                  value={form.name}
-                  autoComplete="off"
-                  onChange={(event) => updateForm({ name: event.target.value })}
-                  placeholder="Shampoo automotivo"
-                />
-                <Dropdown
-                  label="Tipo"
-                  value={form.type}
-                  options={typeOptions}
-                  onChange={(type) => {
-                    updateForm({ type: type as ProductType });
-                    setTypeError(null);
-                  }}
-                  actionLabel="Adicionar"
-                  createPlaceholder="Ex: Cera, Equipamento, Químico"
-                  onCreateOption={handleAddType}
-                  onDeleteOption={handleDeleteType}
-                />
-                {typeError && (
-                  <p className="text-xs font-medium text-danger">{typeError}</p>
-                )}
-
-                <Dropdown
-                  label="Fornecedor"
-                  value={form.supplierId}
-                  options={supplierOptions}
-                  onChange={(supplierId) => updateForm({ supplierId })}
-                  disabled={!suppliersLoaded}
-                />
-
-                {form.type === "liquid" ? (
-                  <Input
-                    label="Volume total (ml)"
-                    type="number"
-                    min="0"
-                    step="1"
-                    className="number-input-no-spinner"
-                    value={form.volumeMl}
-                    onChange={(event) =>
-                      updateForm({ volumeMl: event.target.value })
-                    }
-                    placeholder="5000"
-                    suffix={
-                      <CaretUpDown
-                        size={16}
-                        weight={PRODUCT_ICON_WEIGHT}
-                        aria-hidden
-                      />
-                    }
-                  />
-                ) : (
-                  <Input
-                    label="Quantidade"
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={form.quantity}
-                    onChange={(event) =>
-                      updateForm({ quantity: event.target.value })
-                    }
-                    placeholder="3"
-                  />
-                )}
-
-                <Input
-                  label="Custo total do produto"
-                  value={form.totalCost}
-                  autoComplete="off"
-                  onChange={(event) =>
-                    updateForm({ totalCost: event.target.value })
-                  }
-                  placeholder="80,00"
-                />
               </div>
 
-              <div className="mt-5 flex justify-end gap-3">
+              <div className="flex shrink-0 flex-col-reverse gap-2 px-5 py-4 sm:flex-row sm:justify-end sm:px-6">
                 <Button type="button" variant="secondary" onClick={closeForm}>
                   Cancelar
                 </Button>
@@ -2007,9 +2272,9 @@ export function ProductsPage() {
                 </Button>
               </div>
             </form>
-          ) : null}
-        </aside>
-      </div>
+          </div>,
+          document.body
+        )}
         </div>
       )}
 
@@ -2259,14 +2524,21 @@ export function ProductsPage() {
       )}
       <style>{`
         @media (prefers-reduced-motion: no-preference) {
-          .product-form-enter {
-            animation: product-form-enter 220ms ease-out both;
-            transform-origin: top center;
+          .product-form-overlay-enter {
+            animation: product-form-fade-in 220ms ease-out both;
           }
 
-          .product-form-exit {
-            animation: product-form-exit ${PRODUCT_FORM_EXIT_MS}ms ease-in both;
-            transform-origin: top center;
+          .product-form-overlay-exit {
+            animation: product-form-fade-out ${PRODUCT_FORM_EXIT_MS}ms ease-in both;
+            pointer-events: none;
+          }
+
+          .product-form-card-enter {
+            animation: product-form-card-enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+          }
+
+          .product-form-card-exit {
+            animation: product-form-card-exit ${PRODUCT_FORM_EXIT_MS}ms ease-in both;
             pointer-events: none;
           }
 
@@ -2327,10 +2599,20 @@ export function ProductsPage() {
           }
         }
 
-        @keyframes product-form-enter {
+        @keyframes product-form-fade-in {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        @keyframes product-form-fade-out {
+          from { opacity: 1; }
+          to { opacity: 0; }
+        }
+
+        @keyframes product-form-card-enter {
           from {
             opacity: 0;
-            transform: translateY(-10px) scale(0.98);
+            transform: translateY(14px) scale(0.96);
           }
           to {
             opacity: 1;
@@ -2338,14 +2620,14 @@ export function ProductsPage() {
           }
         }
 
-        @keyframes product-form-exit {
+        @keyframes product-form-card-exit {
           from {
             opacity: 1;
             transform: translateY(0) scale(1);
           }
           to {
             opacity: 0;
-            transform: translateY(-8px) scale(0.98);
+            transform: translateY(10px) scale(0.97);
           }
         }
 

@@ -1,5 +1,16 @@
 export type ProductType = string;
 
+export type DepreciationMode = "none" | "time" | "usage";
+
+export const DEPRECIATION_MODE_OPTIONS: {
+  value: DepreciationMode;
+  label: string;
+}[] = [
+  { value: "none", label: "Sem depreciação" },
+  { value: "time", label: "Por tempo" },
+  { value: "usage", label: "Por uso" },
+];
+
 export interface ProductTypeOption {
   value: string;
   label: string;
@@ -28,6 +39,7 @@ export interface ProductItem {
   supplierId?: string;
   stockRemaining?: string;
   priceHistory?: ProductPriceHistoryEntry[];
+  createdAt?: string;
 }
 
 export interface ProductForm {
@@ -40,6 +52,8 @@ export interface ProductForm {
   totalCost: string;
   photoUrl: string;
   supplierId: string;
+  depreciationMode: DepreciationMode;
+  acquiredAt: string;
 }
 
 export interface ServiceProductUsage {
@@ -64,6 +78,8 @@ export const emptyProductForm: ProductForm = {
   totalCost: "",
   photoUrl: "",
   supplierId: "",
+  depreciationMode: "none",
+  acquiredAt: "",
 };
 
 export const productTypeOptions: ProductTypeOption[] = [
@@ -119,20 +135,73 @@ export function formatStockAmount(value: number) {
   }).format(value);
 }
 
-export function getProductInitialStock(product: ProductItem) {
-  return product.type === "liquid"
-    ? parseStockNumber(product.volumeMl)
-    : parseStockNumber(product.quantity);
+export function getUtensilDepreciationMode(product: {
+  type: string;
+  usagePerWashMl?: string;
+}): DepreciationMode {
+  if (product.type !== "utensil") return "none";
+  const raw = product.usagePerWashMl?.trim() ?? "";
+  if (raw === "usage" || raw.startsWith("usage:")) return "usage";
+  if (raw === "time" || raw.startsWith("time:")) return "time";
+  return "none";
 }
 
-export function getProductRemainingStock(product: ProductItem) {
+export function getUtensilAcquiredAt(product: ProductItem) {
+  const raw = product.usagePerWashMl?.trim() ?? "";
+  const match = raw.match(/^time:(\d{4}-\d{2}-\d{2})$/);
+  if (match?.[1]) return match[1];
+  return product.createdAt?.slice(0, 10) ?? "";
+}
+
+export function encodeUtensilDepreciation(
+  mode: DepreciationMode,
+  acquiredAt = ""
+) {
+  if (mode === "usage") return "usage";
+  if (mode === "time") {
+    return acquiredAt ? `time:${acquiredAt}` : "time";
+  }
+  return "";
+}
+
+export function monthsElapsed(acquiredAt: string, now = new Date()) {
+  const [year, month, day] = acquiredAt.split("-").map(Number);
+  if (!year || !month || !day) return 0;
+
+  const start = new Date(year, month - 1, day);
+  if (Number.isNaN(start.getTime()) || start > now) return 0;
+
+  let months =
+    (now.getFullYear() - start.getFullYear()) * 12 +
+    (now.getMonth() - start.getMonth());
+  if (now.getDate() < start.getDate()) months -= 1;
+
+  return Math.max(0, months);
+}
+
+export function getProductInitialStock(product: ProductItem) {
+  if (product.type === "liquid") return parseStockNumber(product.volumeMl);
+
+  if (getUtensilDepreciationMode(product) === "time") {
+    return parseStockNumber(product.durabilityWashes);
+  }
+
+  return parseStockNumber(product.quantity);
+}
+
+export function getProductRemainingStock(product: ProductItem, now = new Date()) {
   const initialStock = getProductInitialStock(product);
+  if (initialStock <= 0) return 0;
+
+  if (getUtensilDepreciationMode(product) === "time") {
+    const remaining = initialStock - monthsElapsed(getUtensilAcquiredAt(product), now);
+    return Math.min(initialStock, Math.max(0, remaining));
+  }
+
   const remainingStock =
     product.stockRemaining === undefined
       ? initialStock
       : parseStockNumber(product.stockRemaining);
-
-  if (initialStock <= 0) return 0;
 
   return Math.min(initialStock, Math.max(0, remainingStock));
 }
@@ -145,7 +214,11 @@ export function getProductStockPercent(product: ProductItem) {
 }
 
 export function getProductStockUnit(product: ProductItem) {
-  return product.type === "liquid" ? "ml" : "un.";
+  if (product.type === "liquid") return "ml";
+  const mode = getUtensilDepreciationMode(product);
+  if (mode === "time") return "meses";
+  if (mode === "usage") return "usos";
+  return "un.";
 }
 
 export function normalizeProductStock(product: ProductItem): ProductItem {

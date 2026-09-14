@@ -4,6 +4,7 @@ import type { Icon } from "@phosphor-icons/react";
 import {
   CalendarBlank,
   ChartBar,
+  ClipboardText,
   CurrencyDollar,
   Package,
   SquaresFour,
@@ -41,6 +42,7 @@ const navigation: {
 }[] = [
   { name: "Dashboard", href: "/", icon: SquaresFour },
   { name: "Agenda", href: "/agenda", icon: CalendarBlank },
+  { name: "Orçamentos", href: "/orcamentos", icon: ClipboardText },
   { name: "Clientes", href: "/clientes", icon: UsersThree },
   { name: "Serviços", href: "/servicos", icon: Wrench },
   { name: "Produtos", href: "/produtos", icon: Package },

@@ -8,20 +8,26 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   error?: string;
   prefix?: string;
   suffix?: ReactNode;
+  compact?: boolean;
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ label, error, className, id, prefix, suffix, ...props }, ref) => {
+  ({ label, error, className, id, prefix, suffix, compact = false, ...props }, ref) => {
     const inputId = id ?? label.toLowerCase().replace(/\s/g, "-");
 
     return (
-      <div className="space-y-1.5">
+      <div className={compact ? "space-y-1" : "space-y-1.5"}>
         <label htmlFor={inputId} className="label-caps">
           {label}
         </label>
         <div className="relative">
           {prefix && (
-            <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-base font-semibold text-muted sm:text-sm">
+            <span
+              className={cn(
+                "pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 font-semibold text-muted",
+                compact ? "text-sm" : "text-base sm:text-sm"
+              )}
+            >
               {prefix}
             </span>
           )}
@@ -29,7 +35,10 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             ref={ref}
             id={inputId}
             className={cn(
-              "w-full rounded-md border border-border bg-input px-4 py-3 text-base text-foreground sm:py-2.5 sm:text-sm",
+              "w-full rounded-md border border-border bg-input text-foreground",
+              compact
+                ? "min-h-10 px-3 py-2 text-sm"
+                : "px-4 py-3 text-base sm:py-2.5 sm:text-sm",
               prefix && "pl-11",
               suffix && "pr-11",
               "placeholder:text-muted/60 transition-colors duration-300",
