@@ -57,7 +57,7 @@ export function Dropdown({
   const [createError, setCreateError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const closeTimeoutRef = useRef<number | null>(null);
-  const inputId = id ?? label.toLowerCase().replace(/\s/g, "-");
+  const inputId = id ?? label?.toLowerCase().replace(/\s/g, "-") ?? "dropdown";
   const selectedOption = options.find((option) => option.value === value);
 
   const visibleOptions = useMemo(() => {
