@@ -38,12 +38,14 @@ function useMoreContentBelow(active: boolean, watch: unknown) {
       return;
     }
 
+    function update() {
+      const node = ref.current;
+      if (!node) return;
+      setVisible(node.scrollHeight - node.scrollTop - node.clientHeight > 8);
+    }
+
     const el = ref.current;
     if (!el) return;
-
-    function update() {
-      setVisible(el.scrollHeight - el.scrollTop - el.clientHeight > 8);
-    }
 
     update();
     const frame = window.requestAnimationFrame(update);
