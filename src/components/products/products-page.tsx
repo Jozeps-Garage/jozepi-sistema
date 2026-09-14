@@ -1294,13 +1294,12 @@ export function ProductsPage() {
       ];
     }
     const initialStock = getProductInitialStock(baseProduct);
-    const modeUnchanged =
-      Boolean(editingProduct) &&
+    const preservedRemaining =
+      editingProduct &&
       editingProduct.type === baseProduct.type &&
-      getUtensilDepreciationMode(editingProduct) === depreciationMode;
-    const preservedRemaining = modeUnchanged
-      ? getProductRemainingStock(editingProduct)
-      : initialStock;
+      getUtensilDepreciationMode(editingProduct) === depreciationMode
+        ? getProductRemainingStock(editingProduct)
+        : initialStock;
     const nextProduct: ProductItem = {
       ...baseProduct,
       stockRemaining: String(Math.min(initialStock, preservedRemaining)),
