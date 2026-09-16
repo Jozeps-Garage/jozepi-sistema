@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Rajdhani } from "next/font/google";
 import "./globals.css";
+import { BodyScrollLockGuard } from "@/lib/utils/body-scroll-lock";
 import { ServiceWorkerRegister } from "@/components/mobile/service-worker-register";
 
 const geistSans = Geist({
@@ -53,6 +54,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
         {children}
+        <BodyScrollLockGuard />
         <ServiceWorkerRegister />
       </body>
     </html>

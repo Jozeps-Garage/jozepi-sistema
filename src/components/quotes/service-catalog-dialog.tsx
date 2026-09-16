@@ -17,6 +17,8 @@ import {
   type QuoteItemKind,
 } from "@/lib/quotes/types";
 import { formatCurrency } from "@/lib/utils/format";
+import { formatMoneyInput, maskCurrencyInput, parseCurrencyInput } from "@/lib/utils/money";
+import { useBodyScrollLock } from "@/lib/utils/body-scroll-lock";
 
 const ICON_WEIGHT = "light" as const;
 const CATALOG_KIND_ORDER: QuoteItemKind[] = ["coating", "stage", "servico"];
@@ -26,6 +28,57 @@ export interface ResolvedCatalogItem {
   name: string;
   kind: QuoteItemKind;
   price: number;
+}
+
+function CatalogPriceInput({
+  price,
+  onChange,
+}: {
+  price: number;
+  onChange: (price: number) => void;
+}) {
+  const [draft, setDraft] = useState(() => formatMoneyInput(price));
+
+  useEffect(() => {
+    const formatted = formatMoneyInput(price);
+    setDraft((current) => (current === formatted ? current : formatted));
+  }, [price]);
+
+  function emit(nextDraft: string) {
+    setDraft(nextDraft);
+    try {
+      onChange(nextDraft.trim() ? parseCurrencyInput(nextDraft) : 0);
+    } catch {
+      // Valor incompleto enquanto o usuário digita.
+    }
+  }
+
+  function commit() {
+    try {
+      const next = draft.trim() ? parseCurrencyInput(draft) : 0;
+      onChange(next);
+      setDraft(formatMoneyInput(next));
+    } catch {
+      setDraft(formatMoneyInput(price));
+    }
+  }
+
+  return (
+    <input
+      aria-label="Valor do item"
+      inputMode="decimal"
+      value={draft}
+      onChange={(event) => emit(maskCurrencyInput(event.target.value))}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          (event.currentTarget as HTMLInputElement).blur();
+        }
+      }}
+      className="w-full bg-transparent text-right text-xs font-semibold tabular-nums text-foreground outline-none placeholder:text-muted/50 focus:underline focus:decoration-success focus:underline-offset-4"
+    />
+  );
 }
 
 function useMoreContentBelow(active: boolean, watch: unknown) {
@@ -66,6 +119,7 @@ interface SelectedCatalogItemsProps {
   items: ResolvedCatalogItem[];
   onRemove: (serviceId: string) => void;
   onSelect: () => void;
+  onChangePrice?: (serviceId: string, price: number) => void;
   emptyText?: string;
   label?: string;
 }
@@ -74,25 +128,26 @@ export function SelectedCatalogItems({
   items,
   onRemove,
   onSelect,
+  onChangePrice,
   emptyText = "Nenhum item ainda. Selecione coatings, stages ou serviços.",
   label = "Itens",
 }: SelectedCatalogItemsProps) {
   return (
     <div>
       <div className="mb-1 flex items-center justify-between gap-2">
-        <p className="label-caps">{label}</p>
+        <p className="label-caps text-[11px]">{label}</p>
         <button
           type="button"
           onClick={onSelect}
-          className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary transition-colors duration-200 hover:bg-primary hover:text-white"
+          className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary transition-colors duration-200 hover:bg-primary hover:text-white"
         >
-          <Plus size={12} weight={ICON_WEIGHT} aria-hidden />
+          <Plus size={11} weight={ICON_WEIGHT} aria-hidden />
           Selecionar
         </button>
       </div>
       <div className="overflow-hidden rounded-lg border border-border bg-card">
         {items.length === 0 ? (
-          <p className="px-4 py-6 text-center text-sm text-muted">{emptyText}</p>
+          <p className="px-3 py-4 text-center text-xs text-muted">{emptyText}</p>
         ) : (
           <table className="w-full table-fixed">
             <colgroup>
@@ -103,13 +158,13 @@ export function SelectedCatalogItems({
             </colgroup>
             <thead>
               <tr className="border-b border-border text-left">
-                <th className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted">
+                <th className="px-2.5 py-1 text-[9px] font-semibold uppercase tracking-widest text-muted">
                   Serviço
                 </th>
-                <th className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted">
+                <th className="px-1.5 py-1 text-[9px] font-semibold uppercase tracking-widest text-muted">
                   Tipo
                 </th>
-                <th className="px-2 py-1.5 text-right text-[10px] font-semibold uppercase tracking-widest text-muted">
+                <th className="px-1.5 py-1 text-right text-[9px] font-semibold uppercase tracking-widest text-muted">
                   Valor
                 </th>
                 <th>
@@ -123,27 +178,34 @@ export function SelectedCatalogItems({
                   key={item.serviceId}
                   className="border-b border-border last:border-b-0"
                 >
-                  <td className="truncate px-3 py-2 text-sm font-medium text-foreground">
+                  <td className="truncate px-2.5 py-1.5 text-xs font-medium text-foreground">
                     {item.name}
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="px-1.5 py-1.5">
                     <span
-                      className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${quoteKindBadgeClasses(item.kind)}`}
+                      className={`inline-flex rounded-full px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide ${quoteKindBadgeClasses(item.kind)}`}
                     >
                       {QUOTE_KIND_LABEL[item.kind]}
                     </span>
                   </td>
-                  <td className="px-2 py-2 text-right text-base font-semibold tabular-nums text-foreground">
-                    {formatCurrency(item.price)}
+                  <td className="px-1.5 py-1.5 text-right text-xs font-semibold tabular-nums text-foreground">
+                    {onChangePrice ? (
+                      <CatalogPriceInput
+                        price={item.price}
+                        onChange={(price) => onChangePrice(item.serviceId, price)}
+                      />
+                    ) : (
+                      formatCurrency(item.price)
+                    )}
                   </td>
-                  <td className="px-1 py-2 text-center">
+                  <td className="px-0.5 py-1.5 text-center">
                     <button
                       type="button"
                       onClick={() => onRemove(item.serviceId)}
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-danger/10 hover:text-danger"
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted transition-colors hover:bg-danger/10 hover:text-danger"
                       aria-label={`Remover ${item.name}`}
                     >
-                      <Trash size={14} weight={ICON_WEIGHT} />
+                      <Trash size={12} weight={ICON_WEIGHT} />
                     </button>
                   </td>
                 </tr>
@@ -186,6 +248,8 @@ export function ServiceCatalogDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ignoreOverlayCloseRef = useRef(false);
+
+  useBodyScrollLock(open);
 
   useEffect(() => {
     setMounted(true);

@@ -14,15 +14,31 @@ export interface QuoteItem {
 export interface Quote {
   id: string;
   workshop_id: string;
-  client_id: string;
+  client_id: string | null;
+  guest_name?: string | null;
+  guest_contact?: string | null;
   status: QuoteStatus;
   valid_until: string | null;
   notes: string | null;
   total_amount: number;
+  adjustment_amount?: number;
   service_order_id: string | null;
   created_at: string;
   updated_at: string;
-  clients?: { id: string; name: string } | { id: string; name: string }[] | null;
+  clients?:
+    | {
+        id: string;
+        name: string;
+        phone?: string | null;
+        email?: string | null;
+      }
+    | {
+        id: string;
+        name: string;
+        phone?: string | null;
+        email?: string | null;
+      }[]
+    | null;
   quote_items?: QuoteItem[];
 }
 
@@ -65,4 +81,9 @@ export function quoteStatusClasses(status: QuoteStatus) {
   if (status === "convertido") return "bg-premium/15 text-premium";
   if (status === "expirado") return "bg-danger/10 text-danger";
   return "bg-warning/10 text-warning";
+}
+
+export function quoteClientLabel(quote: Quote) {
+  const client = Array.isArray(quote.clients) ? quote.clients[0] : quote.clients;
+  return client?.name?.trim() || quote.guest_name?.trim() || "Cliente";
 }

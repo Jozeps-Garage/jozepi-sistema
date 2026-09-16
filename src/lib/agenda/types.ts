@@ -96,7 +96,7 @@ export interface AppointmentOccurrence extends Appointment {
   durationDays: number;
 }
 
-export type AgendaSelectId = "client" | "vehicle" | "service";
+export type AgendaSelectId = "client" | "vehicle";
 
 export type AgendaPageTab = "calendar" | "serviceList";
 

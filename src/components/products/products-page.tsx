@@ -28,6 +28,7 @@ import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { formatCurrency, formatPhone, normalizeOptionalPhone } from "@/lib/utils/format";
+import { useBodyScrollLock } from "@/lib/utils/body-scroll-lock";
 import {
   createProductId,
   createProductPriceHistoryId,
@@ -936,11 +937,10 @@ export function ProductsPage() {
     }, PRODUCT_FORM_EXIT_MS);
   }
 
+  useBodyScrollLock(formOpen);
+
   useEffect(() => {
     if (!formOpen) return;
-
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape" || formClosing) return;
@@ -951,7 +951,6 @@ export function ProductsPage() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => {
-      document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [editingStockProductId, formClosing, formOpen, replenishingProductId]);

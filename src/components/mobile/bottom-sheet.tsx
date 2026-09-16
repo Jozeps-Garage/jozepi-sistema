@@ -6,6 +6,7 @@
 
 import { X } from "@phosphor-icons/react";
 import { useEffect, useState, type ReactNode } from "react";
+import { useBodyScrollLock } from "@/lib/utils/body-scroll-lock";
 
 interface BottomSheetProps {
   open: boolean;
@@ -41,14 +42,7 @@ export function BottomSheet({
     }
   }, [open, render]);
 
-  useEffect(() => {
-    if (!render) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previous;
-    };
-  }, [render]);
+  useBodyScrollLock(render);
 
   useEffect(() => {
     if (!open) return;

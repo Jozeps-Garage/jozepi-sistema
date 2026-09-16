@@ -3,6 +3,7 @@
 import { createPortal } from "react-dom";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useBodyScrollLock } from "@/lib/utils/body-scroll-lock";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -25,6 +26,8 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  useBodyScrollLock(open);
+
   if (!open || typeof document === "undefined") return null;
 
   return createPortal(

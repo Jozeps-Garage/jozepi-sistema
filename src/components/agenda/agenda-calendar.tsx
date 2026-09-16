@@ -22,6 +22,12 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { ClientFormModal } from "@/components/clients/client-form-modal";
+import {
+  SelectedCatalogItems,
+  ServiceCatalogDialog,
+  type ResolvedCatalogItem,
+} from "@/components/quotes/service-catalog-dialog";
+import { kindFromCategory, type QuoteServiceRow } from "@/lib/quotes/catalog";
 import { createClient } from "@/lib/supabase/client";
 import { assertMutationRows } from "@/lib/supabase/mutations";
 import { formatCurrency } from "@/lib/utils/format";
@@ -30,10 +36,7 @@ import {
   resolveTimeZone,
   wallClockInTimeZone,
 } from "@/lib/timezone";
-import {
-  ensurePackageServicesInCatalog,
-  isPackageCatalogServiceName,
-} from "@/lib/services/packages";
+import { ensurePackageServicesInCatalog } from "@/lib/services/packages";
 import { type Client, type ClientFormData } from "@/types/client";
 import {
   fetchWorkshopProfile,
@@ -113,7 +116,6 @@ import {
   readLocalAgendaCapacityForImport,
   clearLocalAgendaCapacity,
   mapOrderToAppointment,
-  formatServiceDuration,
   buildCalendarDays,
   formatAppointmentCount,
 } from "@/lib/agenda/utils";
@@ -677,6 +679,7 @@ export function AgendaCalendar() {
     wallClockInTimeZone(new Date(), DEFAULT_TIME_ZONE)
   );
   const [dayDrawerOpen, setDayDrawerOpen] = useState(false);
+  const [dayDrawerMotion, setDayDrawerMotion] = useState(false);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [services, setServices] = useState<AgendaService[]>([]);
@@ -689,7 +692,7 @@ export function AgendaCalendar() {
   const [clientModalOpen, setClientModalOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [formClosing, setFormClosing] = useState(false);
-  const [addingService, setAddingService] = useState(false);
+  const [catalogOpen, setCatalogOpen] = useState(false);
   const [editingTotalAmount, setEditingTotalAmount] = useState(false);
   const [openSelectId, setOpenSelectId] = useState<AgendaSelectId | null>(null);
   const [openStatusMenuId, setOpenStatusMenuId] = useState<string | null>(null);
@@ -728,14 +731,6 @@ export function AgendaCalendar() {
   const [serviceListActionsAppointment, setServiceListActionsAppointment] =
     useState<Appointment | null>(null);
   const [formFromServiceList, setFormFromServiceList] = useState(false);
-  const [creatingServiceInline, setCreatingServiceInline] = useState(false);
-  const [inlineServiceForm, setInlineServiceForm] = useState({
-    name: "",
-    price: "",
-    durationMinutes: "60",
-  });
-  const [savingInlineService, setSavingInlineService] = useState(false);
-  const [inlineServiceError, setInlineServiceError] = useState<string | null>(null);
 
   const syncFinanceRevenueForAppointment = useCallback(
     (appointment: Appointment) => syncFinanceRevenue(supabase, workshopId ?? "", appointment),
@@ -924,6 +919,11 @@ export function AgendaCalendar() {
   useEffect(() => {
     void Promise.resolve().then(loadAgendaData);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setDayDrawerMotion(true));
+    return () => window.cancelAnimationFrame(frame);
   }, []);
 
   useEffect(() => {
@@ -1152,40 +1152,14 @@ export function AgendaCalendar() {
   const selectedServices = services.filter((service) =>
     form.serviceIds.includes(service.id)
   );
-  const availableServices = services.filter(
-    (service) => !form.serviceIds.includes(service.id)
-  );
-  const availableServiceOptions = [...availableServices]
-    .sort((a, b) => {
-      const aPackage = isPackageCatalogServiceName(a.name);
-      const bPackage = isPackageCatalogServiceName(b.name);
-      if (aPackage !== bPackage) return aPackage ? -1 : 1;
-      return a.name.localeCompare(b.name);
+  const selectedCatalogItems: ResolvedCatalogItem[] = selectedServices.map(
+    (service) => ({
+      serviceId: service.id,
+      name: service.name,
+      kind: kindFromCategory(service.category),
+      price: getServicePrice(service),
     })
-    .map((service) => {
-      const duration = formatServiceDuration(service.duration_minutes);
-      const isPackage = isPackageCatalogServiceName(service.name);
-      const kindLabel = service.name.toLowerCase().startsWith("coating")
-        ? "Coating"
-        : service.name.toLowerCase().startsWith("pacote")
-          ? "Stage"
-          : null;
-      const details = [
-        kindLabel,
-        duration,
-        getServicePrice(service) > 0 ? formatCurrency(getServicePrice(service)) : null,
-      ].filter(Boolean);
-
-      return {
-        value: service.id,
-        label: service.name,
-        description: details.length > 0
-          ? details.join(" • ")
-          : isPackage
-            ? "Pacote"
-            : "Serviço cadastrado",
-      };
-    });
+  );
   const servicesTotal = selectedServices.reduce(
     (total, service) => total + getServicePrice(service),
     0
@@ -1266,7 +1240,7 @@ export function AgendaCalendar() {
       preCadastroLabel: "",
     });
     setError(null);
-    setAddingService(false);
+    setCatalogOpen(false);
     setEditingTotalAmount(false);
     setOpenSelectId(null);
     setNotesPanelOpen(false);
@@ -1317,7 +1291,7 @@ export function AgendaCalendar() {
         preCadastroLabel: "",
       });
       setError(null);
-      setAddingService(false);
+      setCatalogOpen(false);
       setEditingTotalAmount(false);
       setOpenSelectId(null);
       setFormClosing(false);
@@ -1358,7 +1332,7 @@ export function AgendaCalendar() {
         serviceIds: validIds,
       }));
       setError(null);
-      setAddingService(false);
+      setCatalogOpen(false);
       setEditingTotalAmount(false);
       setOpenSelectId(null);
       setFormClosing(false);
@@ -1392,7 +1366,7 @@ export function AgendaCalendar() {
     setEditingAppointmentId(appointment.id);
     setError(null);
     setCreating(true);
-    setAddingService(false);
+    setCatalogOpen(false);
     setEditingTotalAmount(false);
     setFormClosing(false);
     setOpenSelectId(null);
@@ -1441,18 +1415,6 @@ export function AgendaCalendar() {
     setContactAppointment(null);
   }
 
-  function addServiceToForm(serviceId: string) {
-    if (!serviceId) return;
-
-    setForm((prev) =>
-      prev.serviceIds.includes(serviceId)
-        ? prev
-        : { ...prev, serviceIds: [...prev.serviceIds, serviceId] }
-    );
-    setAddingService(false);
-    setOpenSelectId(null);
-  }
-
   function removeServiceFromForm(serviceId: string) {
     setForm((prev) => ({
       ...prev,
@@ -1460,56 +1422,39 @@ export function AgendaCalendar() {
     }));
   }
 
-  async function handleCreateInlineService() {
-    if (!workshopId) {
-      setInlineServiceError("Oficina não encontrada.");
-      return;
-    }
+  function handleCatalogAdded(
+    items: ResolvedCatalogItem[],
+    latestServices: QuoteServiceRow[]
+  ) {
+    setForm((prev) => {
+      const nextIds = [...prev.serviceIds];
+      for (const item of items) {
+        if (!nextIds.includes(item.serviceId)) nextIds.push(item.serviceId);
+      }
+      return { ...prev, serviceIds: nextIds };
+    });
 
-    const name = inlineServiceForm.name.trim();
-    if (!name) {
-      setInlineServiceError("Informe o nome do serviço.");
-      return;
-    }
-
-    const normalizedPrice = inlineServiceForm.price.replace(/\./g, "").replace(",", ".");
-    const price = Number(normalizedPrice || "0");
-    if (!Number.isFinite(price) || price < 0) {
-      setInlineServiceError("Informe um preço válido.");
-      return;
-    }
-
-    const duration = Number(inlineServiceForm.durationMinutes);
-    if (!Number.isInteger(duration) || duration <= 0) {
-      setInlineServiceError("Informe uma duração válida.");
-      return;
-    }
-
-    setSavingInlineService(true);
-    setInlineServiceError(null);
-
-    try {
-      const { data: inserted, error: insertError } = await supabase
-        .from("services")
-        .insert({ name, price, duration_minutes: duration, workshop_id: workshopId, active: true })
-        .select("id, name, price, duration_minutes, active")
-        .single();
-
-      if (insertError) throw insertError;
-
-      const newService = inserted as AgendaService;
-      setServices((prev) => [...prev, newService]);
-      setForm((prev) => ({ ...prev, serviceIds: [...prev.serviceIds, newService.id] }));
-      setCreatingServiceInline(false);
-      setInlineServiceForm({ name: "", price: "", durationMinutes: "60" });
-      setInlineServiceError(null);
-    } catch (err) {
-      setInlineServiceError(
-        err instanceof Error ? err.message : "Erro ao criar o serviço."
-      );
-    } finally {
-      setSavingInlineService(false);
-    }
+    setServices((prev) => {
+      let next = prev;
+      for (const item of items) {
+        if (next.some((service) => service.id === item.serviceId)) continue;
+        const synced = latestServices.find(
+          (service) => service.id === item.serviceId
+        );
+        next = [
+          ...next,
+          {
+            id: item.serviceId,
+            name: item.name,
+            price: item.price,
+            duration_minutes: synced?.duration_minutes ?? null,
+            active: true,
+            category: item.kind,
+          },
+        ];
+      }
+      return next;
+    });
   }
 
   function hasAppointmentConflict(
@@ -1590,6 +1535,7 @@ export function AgendaCalendar() {
 
   function closeForm() {
     setOpenSelectId(null);
+    setCatalogOpen(false);
     setNotesPanelOpen(false);
     setNotesDraft("");
     setFormClosing(true);
@@ -2323,7 +2269,7 @@ export function AgendaCalendar() {
         </div>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 items-start gap-6 md:mt-8 xl:grid-cols-[minmax(0,1fr)_22rem]">
+      <div className="mt-6 grid grid-cols-1 items-start gap-6 md:mt-8 xl:grid-cols-[minmax(0,1fr)_30rem]">
         <section className="self-start rounded-lg border border-border bg-card shadow-card shadow-card">
           <div className="flex flex-col gap-4 border-b border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
             <div>
@@ -2469,8 +2415,12 @@ export function AgendaCalendar() {
         )}
 
         <aside
-          className={`fixed inset-x-0 bottom-0 z-50 max-h-[88vh] overflow-y-auto rounded-t-3xl border border-border bg-card shadow-2xl transition-transform duration-300 md:static md:z-auto md:max-h-none md:translate-y-0 md:overflow-visible md:rounded-lg md:shadow-card ${
-            dayDrawerOpen ? "translate-y-0" : "translate-y-full"
+          className={`fixed inset-x-0 bottom-0 z-50 max-h-[88vh] overflow-y-auto rounded-t-3xl border border-border bg-card shadow-2xl md:static md:z-auto md:max-h-none md:translate-y-0 md:overflow-visible md:rounded-lg md:shadow-card md:pointer-events-auto md:visible ${
+            dayDrawerMotion ? "transition-transform duration-300" : ""
+          } ${
+            dayDrawerOpen
+              ? "translate-y-0"
+              : "pointer-events-none invisible translate-y-full md:visible"
           }`}
         >
           <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4 sm:px-6">
@@ -2494,6 +2444,7 @@ export function AgendaCalendar() {
 
           <div className="space-y-4 p-5 sm:p-6">
             <Button
+              type="button"
               variant="success"
               className="w-full"
               onClick={openCreateForm}
@@ -2752,188 +2703,19 @@ export function AgendaCalendar() {
                     </p>
                   )}
                 </div>
-                <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-3">
-                    <label className="block text-sm font-semibold text-foreground">
-                      Serviços
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAddingService(true);
-                          setOpenSelectId("service");
-                          setCreatingServiceInline(false);
-                        }}
-                        disabled={
-                          loadingServices ||
-                          services.length === 0 ||
-                          availableServices.length === 0
-                        }
-                        className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-success/10 px-3 py-2 text-sm font-semibold text-success transition-all duration-200 hover:bg-success hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0 sm:py-1.5 sm:text-xs"
-                      >
-                        <Plus size={14} weight={AGENDA_ICON_WEIGHT} aria-hidden />
-                        Adicionar serviço
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="min-h-[2.75rem]">
-                    {selectedServices.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {selectedServices.map((service) => (
-                          <span
-                            key={service.id}
-                            className="inline-flex items-center gap-2 rounded-full border border-success/20 bg-success/10 px-3 py-1.5 text-xs font-semibold text-success shadow-card"
-                          >
-                            {service.name}
-                            <button
-                              type="button"
-                              onClick={() => removeServiceFromForm(service.id)}
-                              className="rounded-full p-1 transition-colors hover:bg-success/20"
-                              aria-label={`Remover ${service.name}`}
-                            >
-                              <X size={12} weight={AGENDA_ICON_WEIGHT} aria-hidden />
-                            </button>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {addingService && (
-                    <AgendaDropdown
-                      id="agenda-service"
-                      value=""
-                      placeholder={
-                        loadingServices
-                          ? "Carregando serviços..."
-                          : availableServices.length === 0
-                            ? "Todos os serviços já adicionados"
-                            : "Selecione um serviço"
-                      }
-                      emptyMessage="Todos os serviços já foram adicionados."
-                      options={availableServiceOptions}
-                      disabled={loadingServices || availableServices.length === 0}
-                      open={openSelectId === "service"}
-                      onToggle={() =>
-                        setOpenSelectId((current) =>
-                          current === "service" ? null : "service"
-                        )
-                      }
-                      onSelect={addServiceToForm}
-                    />
-                  )}
-
-                  {creatingServiceInline && (
-                    <div className="rounded-lg border border-border bg-card p-4 shadow-card">
-                      <div className="mb-3 flex items-center justify-between">
-                        <p className="text-sm font-semibold text-foreground">
-                          Novo serviço
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCreatingServiceInline(false);
-                            setInlineServiceError(null);
-                          }}
-                          className="rounded-lg p-1.5 text-muted transition-colors hover:bg-background hover:text-foreground"
-                          aria-label="Cancelar"
-                        >
-                          <X size={16} weight={AGENDA_ICON_WEIGHT} aria-hidden />
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                        <div className="sm:col-span-1">
-                          <Input
-                            label="Nome do serviço"
-                            value={inlineServiceForm.name}
-                            autoComplete="off"
-                            onChange={(e) =>
-                              setInlineServiceForm((prev) => ({
-                                ...prev,
-                                name: e.target.value,
-                              }))
-                            }
-                            placeholder="Ex: Cristalização"
-                          />
-                        </div>
-                        <Input
-                          label="Preço (R$)"
-                          value={inlineServiceForm.price}
-                          autoComplete="off"
-                          onChange={(e) =>
-                            setInlineServiceForm((prev) => ({
-                              ...prev,
-                              price: e.target.value,
-                            }))
-                          }
-                          placeholder="150,00"
-                        />
-                        <div>
-                          <label className="mb-1.5 block text-sm font-semibold text-foreground">
-                            Duração
-                          </label>
-                          <select
-                            value={inlineServiceForm.durationMinutes}
-                            onChange={(e) =>
-                              setInlineServiceForm((prev) => ({
-                                ...prev,
-                                durationMinutes: e.target.value,
-                              }))
-                            }
-                            className="h-11 w-full rounded-md border border-border bg-input px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-premium/40"
-                          >
-                            {Array.from({ length: 16 }, (_, i) => {
-                              const mins = 30 + i * 30;
-                              const h = Math.floor(mins / 60);
-                              const m = mins % 60;
-                              const label =
-                                h === 0 ? "30 min" : m === 0 ? `${h}h` : `${h}h30`;
-                              return (
-                                <option key={mins} value={String(mins)}>
-                                  {label}
-                                </option>
-                              );
-                            })}
-                          </select>
-                        </div>
-                      </div>
-                      {inlineServiceError && (
-                        <p className="mt-2 text-xs font-medium text-danger">
-                          {inlineServiceError}
-                        </p>
-                      )}
-                      <div className="mt-3 flex justify-end gap-2">
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          onClick={() => {
-                            setCreatingServiceInline(false);
-                            setInlineServiceError(null);
-                          }}
-                          className="text-xs"
-                        >
-                          Cancelar
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="success"
-                          loading={savingInlineService}
-                          onClick={() => void handleCreateInlineService()}
-                          className="text-xs"
-                        >
-                          Criar e adicionar
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {!loadingServices && services.length === 0 && !creatingServiceInline && (
-                    <p className="text-xs text-muted">
-                      Cadastre serviços na aba Serviços para usar na agenda.
-                    </p>
-                  )}
+                <div>
+                  <SelectedCatalogItems
+                    label="Serviços"
+                    items={selectedCatalogItems}
+                    onSelect={() => setCatalogOpen(true)}
+                    onRemove={removeServiceFromForm}
+                    emptyText={
+                      loadingServices
+                        ? "Carregando serviços..."
+                        : "Nenhum serviço ainda. Selecione coatings, stages ou serviços."
+                    }
+                  />
+                </div>
 
                   <div className="rounded-lg border border-border bg-card shadow-card px-4 py-3 shadow-card">
                     <div className="flex items-start justify-between gap-3">
@@ -3092,7 +2874,6 @@ export function AgendaCalendar() {
                       </div>
                     ) : null}
                   </div>
-                </div>
                 <div className="space-y-2.5">
                   <div className="flex items-center justify-between">
                     <label className="block text-sm font-semibold text-foreground">
@@ -3672,56 +3453,17 @@ export function AgendaCalendar() {
                   </div>
 
                   {/* Serviços */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <label className="text-sm font-semibold text-foreground">Serviços</label>
-                      <div className="flex items-center gap-1.5">
-                        <button type="button" onClick={() => { setAddingService(true); setOpenSelectId("service"); setCreatingServiceInline(false); }} disabled={loadingServices || services.length === 0 || availableServices.length === 0} className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2.5 py-1 text-xs font-semibold text-success transition-all hover:bg-success hover:text-white disabled:opacity-50">
-                          <Plus size={12} weight={AGENDA_ICON_WEIGHT} aria-hidden /> Adicionar
-                        </button>
-                      </div>
-                    </div>
-                    {selectedServices.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {selectedServices.map((service) => (
-                          <span key={service.id} className="inline-flex items-center gap-1.5 rounded-full border border-success/20 bg-success/10 px-2.5 py-1 text-xs font-semibold text-success">
-                            {service.name}
-                            <button type="button" onClick={() => removeServiceFromForm(service.id)} className="rounded-full p-0.5 transition-colors hover:bg-success/20" aria-label={`Remover ${service.name}`}>
-                              <X size={10} weight={AGENDA_ICON_WEIGHT} aria-hidden />
-                            </button>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {addingService && (
-                      <AgendaDropdown id="modal-service" value="" placeholder={availableServices.length === 0 ? "Todos adicionados" : "Selecione um serviço"} emptyMessage="Todos adicionados." options={availableServiceOptions} disabled={loadingServices || availableServices.length === 0} open={openSelectId === "service"} onToggle={() => setOpenSelectId((c) => c === "service" ? null : "service")} onSelect={addServiceToForm} />
-                    )}
-                    {creatingServiceInline && (
-                      <div className="rounded-lg border border-border bg-background p-3">
-                        <div className="mb-2 flex items-center justify-between">
-                          <p className="text-xs font-semibold text-foreground">Novo serviço</p>
-                          <button type="button" onClick={() => { setCreatingServiceInline(false); setInlineServiceError(null); }} className="rounded p-1 text-muted hover:text-foreground" aria-label="Cancelar">
-                            <X size={14} weight={AGENDA_ICON_WEIGHT} aria-hidden />
-                          </button>
-                        </div>
-                        <div className="grid grid-cols-3 gap-2">
-                          <Input label="Nome" value={inlineServiceForm.name} autoComplete="off" onChange={(e) => setInlineServiceForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Cristalização" />
-                          <Input label="Preço (R$)" value={inlineServiceForm.price} autoComplete="off" onChange={(e) => setInlineServiceForm((prev) => ({ ...prev, price: e.target.value }))} placeholder="150,00" />
-                          <div>
-                            <label className="mb-1.5 block text-sm font-semibold text-foreground">Duração</label>
-                            <select value={inlineServiceForm.durationMinutes} onChange={(e) => setInlineServiceForm((prev) => ({ ...prev, durationMinutes: e.target.value }))} className="h-11 w-full rounded-md border border-border bg-input px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-premium/40">
-                              {Array.from({ length: 16 }, (_, i) => { const m = 30 + i * 30; const h = Math.floor(m / 60); const r = m % 60; const l = h === 0 ? "30min" : r === 0 ? `${h}h` : `${h}h30`; return <option key={m} value={String(m)}>{l}</option>; })}
-                            </select>
-                          </div>
-                        </div>
-                        {inlineServiceError && <p className="mt-1.5 text-xs text-danger">{inlineServiceError}</p>}
-                        <div className="mt-2 flex justify-end gap-2">
-                          <Button type="button" variant="secondary" onClick={() => { setCreatingServiceInline(false); setInlineServiceError(null); }} className="text-xs">Cancelar</Button>
-                          <Button type="button" variant="success" loading={savingInlineService} onClick={() => void handleCreateInlineService()} className="text-xs">Criar e adicionar</Button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <SelectedCatalogItems
+                    label="Serviços"
+                    items={selectedCatalogItems}
+                    onSelect={() => setCatalogOpen(true)}
+                    onRemove={removeServiceFromForm}
+                    emptyText={
+                      loadingServices
+                        ? "Carregando serviços..."
+                        : "Nenhum serviço ainda. Selecione coatings, stages ou serviços."
+                    }
+                  />
 
                   {/* Total */}
                   <div className="rounded-lg border border-border bg-background px-3 py-2.5">
@@ -3849,6 +3591,18 @@ export function AgendaCalendar() {
         onClose={() => setClientModalOpen(false)}
         onSave={handleCreateClient}
       />
+      {workshopId ? (
+        <ServiceCatalogDialog
+          open={catalogOpen}
+          onClose={() => setCatalogOpen(false)}
+          services={services as QuoteServiceRow[]}
+          excludedServiceIds={new Set(form.serviceIds)}
+          supabase={supabase}
+          workshopId={workshopId}
+          description="Marque quantos quiser e confirme para adicionar ao agendamento."
+          onAdded={handleCatalogAdded}
+        />
+      ) : null}
       <style>{`
         @media (prefers-reduced-motion: no-preference) {
           .agenda-tab-panel-enter {
@@ -3922,7 +3676,7 @@ export function AgendaCalendar() {
 
         .calendar-appointment-pill {
           display: inline-block;
-          max-width: 5.75rem;
+          max-width: 100%;
           width: auto;
           border-radius: 4px;
           padding: 3px 7px;

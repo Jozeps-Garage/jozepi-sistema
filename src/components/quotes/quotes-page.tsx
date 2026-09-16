@@ -7,6 +7,7 @@ import {
   CalendarBlank,
   CaretDown,
   ClipboardText,
+  FilePdf,
   PencilSimple,
   Plus,
   Trash,
@@ -25,9 +26,11 @@ import { Dropdown } from "@/components/ui/dropdown";
 import { Input } from "@/components/ui/input";
 import { syncVehicles } from "@/lib/clients/sync-vehicles";
 import type { QuoteServiceRow } from "@/lib/quotes/catalog";
+import { exportQuoteToPdf } from "@/lib/quotes/export-pdf";
 import {
   MANUAL_QUOTE_STATUSES,
   QUOTE_STATUS_LABEL,
+  quoteClientLabel,
   quoteStatusClasses,
   type Quote,
   type QuoteItem,
@@ -37,15 +40,20 @@ import {
 import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency, normalizePhone } from "@/lib/utils/format";
+import {
+  formatMoneyInput,
+  maskSignedCurrencyInput,
+  parseSignedCurrencyInput,
+} from "@/lib/utils/money";
 import type { Client, ClientFormData } from "@/types/client";
 
 const QUOTE_ICON_WEIGHT = "light" as const;
 const QUOTE_FORM_EXIT_MS = 180;
 const QUOTE_TABLE_COLUMNS =
-  "minmax(0,1.3fr) minmax(0,1.5fr) 6.5rem 7.5rem 6rem 6.5rem 5.5rem";
+  "minmax(0,1.3fr) minmax(0,1.5fr) 6.5rem 7.5rem 6rem 6.5rem 10.5rem";
 const DEFAULT_VALIDITY_DAYS = 15;
 const QUOTE_SELECT =
-  "id, workshop_id, client_id, status, valid_until, notes, total_amount, service_order_id, created_at, updated_at, clients(id, name), quote_items(id, quote_id, service_id, name, kind, unit_price, quantity)";
+  "id, workshop_id, client_id, guest_name, guest_contact, status, valid_until, notes, total_amount, adjustment_amount, service_order_id, created_at, updated_at, clients(id, name, phone, email), quote_items(id, quote_id, service_id, name, kind, unit_price, quantity)";
 
 type DraftItem = {
   key: string;
@@ -75,12 +83,8 @@ function formatDateKey(value: string | null | undefined) {
   return `${day}/${month}/${year}`;
 }
 
-function firstRelation<T>(value: T | T[] | null | undefined) {
-  return Array.isArray(value) ? value[0] : value ?? undefined;
-}
-
 function clientName(quote: Quote) {
-  return firstRelation(quote.clients)?.name ?? "Cliente";
+  return quoteClientLabel(quote);
 }
 
 function itemsSummary(items: QuoteItem[] | undefined) {
@@ -268,9 +272,14 @@ export function QuotesPage() {
   const [closingStatusId, setClosingStatusId] = useState<string | null>(null);
 
   const [clientId, setClientId] = useState("");
+  const [clientMode, setClientMode] = useState<"registered" | "guest">("registered");
+  const [guestName, setGuestName] = useState("");
+  const [guestContact, setGuestContact] = useState("");
+  const [adjustmentInput, setAdjustmentInput] = useState("");
   const [validUntil, setValidUntil] = useState("");
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<DraftItem[]>([]);
+  const [exportingPdfId, setExportingPdfId] = useState<string | null>(null);
   const notesRef = useRef<HTMLTextAreaElement>(null);
   const formScroll = useMoreContentBelow(formOpen, items.length);
 
@@ -278,7 +287,15 @@ export function QuotesPage() {
     () => new Set(items.map((item) => item.serviceId)),
     [items]
   );
-  const totalAmount = items.reduce((sum, item) => sum + item.unitPrice, 0);
+  const subtotal = items.reduce((sum, item) => sum + item.unitPrice, 0);
+  const adjustmentAmount = (() => {
+    try {
+      return parseSignedCurrencyInput(adjustmentInput);
+    } catch {
+      return 0;
+    }
+  })();
+  const finalTotal = subtotal + adjustmentAmount;
 
   const loadClients = useCallback(async (wid: string) => {
     const { data, error: loadError } = await supabase
@@ -313,9 +330,13 @@ export function QuotesPage() {
         .order("created_at", { ascending: false });
 
       if (loadError) {
-        if (/could not find the table/i.test(loadError.message)) {
+        if (
+          /could not find the table|guest_name does not exist|guest_contact does not exist|adjustment_amount does not exist/i.test(
+            loadError.message
+          )
+        ) {
           throw new Error(
-            "Falta aplicar a migration 028_quotes.sql no Supabase (SQL Editor)."
+            "Falta aplicar as migrations 028_quotes.sql e 029_quote_guest_and_adjustment.sql no Supabase (SQL Editor)."
           );
         }
         throw new Error(loadError.message);
@@ -324,6 +345,7 @@ export function QuotesPage() {
       const rows = ((data ?? []) as unknown as Quote[]).map((quote) => ({
         ...quote,
         total_amount: Number(quote.total_amount) || 0,
+        adjustment_amount: Number(quote.adjustment_amount) || 0,
         quote_items: (quote.quote_items ?? []).map((item) => ({
           ...item,
           unit_price: Number(item.unit_price) || 0,
@@ -400,6 +422,10 @@ export function QuotesPage() {
   function resetForm() {
     setEditingId(null);
     setClientId("");
+    setClientMode("registered");
+    setGuestName("");
+    setGuestContact("");
+    setAdjustmentInput("");
     setValidUntil(dateKey(addDays(new Date(), DEFAULT_VALIDITY_DAYS)));
     setNotes("");
     setItems([]);
@@ -449,6 +475,10 @@ export function QuotesPage() {
     armOverlayGuard();
     setEditingId(null);
     setClientId("");
+    setClientMode("registered");
+    setGuestName("");
+    setGuestContact("");
+    setAdjustmentInput("");
     setValidUntil(dateKey(addDays(new Date(), DEFAULT_VALIDITY_DAYS)));
     setNotes("");
     setItems([]);
@@ -465,7 +495,22 @@ export function QuotesPage() {
     setFormClosing(false);
     armOverlayGuard();
     setEditingId(quote.id);
-    setClientId(quote.client_id);
+    if (quote.client_id) {
+      setClientMode("registered");
+      setClientId(quote.client_id);
+      setGuestName("");
+      setGuestContact("");
+    } else {
+      setClientMode("guest");
+      setClientId("");
+      setGuestName(quote.guest_name ?? "");
+      setGuestContact(quote.guest_contact ?? "");
+    }
+    setAdjustmentInput(
+      quote.adjustment_amount
+        ? `${quote.adjustment_amount < 0 ? "-" : ""}${formatMoneyInput(Math.abs(quote.adjustment_amount))}`
+        : ""
+    );
     setValidUntil(quote.valid_until ?? dateKey(addDays(new Date(), DEFAULT_VALIDITY_DAYS)));
     setNotes(quote.notes ?? "");
     setItems(
@@ -547,7 +592,10 @@ export function QuotesPage() {
 
     await syncVehicles(supabase, workshopId, newClient.id, data.vehicles);
     await loadClients(workshopId);
+    setClientMode("registered");
     setClientId(newClient.id);
+    setGuestName("");
+    setGuestContact("");
     setClientModalOpen(false);
   }
 
@@ -557,12 +605,20 @@ export function QuotesPage() {
       setFormError("Oficina não encontrada.");
       return;
     }
-    if (!clientId) {
+    if (clientMode === "registered" && !clientId) {
       setFormError("Selecione um cliente.");
+      return;
+    }
+    if (clientMode === "guest" && !guestName.trim()) {
+      setFormError("Informe o nome do cliente avulso.");
       return;
     }
     if (items.length === 0) {
       setFormError("Adicione pelo menos um item.");
+      return;
+    }
+    if (finalTotal < 0) {
+      setFormError("O total final não pode ser negativo.");
       return;
     }
 
@@ -571,10 +627,13 @@ export function QuotesPage() {
 
     const payload = {
       workshop_id: workshopId,
-      client_id: clientId,
+      client_id: clientMode === "registered" ? clientId : null,
+      guest_name: clientMode === "guest" ? guestName.trim() : null,
+      guest_contact: clientMode === "guest" ? guestContact.trim() || null : null,
       valid_until: validUntil || null,
       notes: notes.trim() || null,
-      total_amount: totalAmount,
+      total_amount: finalTotal,
+      adjustment_amount: adjustmentAmount,
       updated_at: new Date().toISOString(),
     };
 
@@ -624,7 +683,12 @@ export function QuotesPage() {
       setSaving(false);
       closeForm();
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Não foi possível salvar o orçamento.");
+      const message = err instanceof Error ? err.message : "";
+      setFormError(
+        /could not find the table|guest_name|guest_contact|adjustment_amount/i.test(message)
+          ? "Falta aplicar as migrations 028_quotes.sql e 029_quote_guest_and_adjustment.sql no Supabase (SQL Editor)."
+          : message || "Não foi possível salvar o orçamento."
+      );
       setSaving(false);
     }
   }
@@ -685,6 +749,7 @@ export function QuotesPage() {
   }
 
   function handleConvert(quote: Quote) {
+    if (!quote.client_id) return;
     const serviceIds = (quote.quote_items ?? [])
       .map((item) => item.service_id)
       .filter((id): id is string => Boolean(id));
@@ -696,6 +761,23 @@ export function QuotesPage() {
       params.set("packageServices", serviceIds.join(","));
     }
     router.push(`/agenda?${params.toString()}`);
+  }
+
+  async function handleExportPdf(quote: Quote) {
+    if (!workshopId) return;
+    setExportingPdfId(quote.id);
+    setError(null);
+    try {
+      await exportQuoteToPdf(supabase, workshopId, quote);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Não foi possível gerar o PDF do orçamento."
+      );
+    } finally {
+      setExportingPdfId(null);
+    }
   }
 
   async function handleDeleteQuote() {
@@ -849,7 +931,17 @@ export function QuotesPage() {
                   {formatDateKey(quote.valid_until)}
                 </p>
                 <div className="flex justify-end gap-1">
-                  {canConvert(quote.status) && (
+                  <button
+                    type="button"
+                    onClick={() => void handleExportPdf(quote)}
+                    disabled={exportingPdfId === quote.id}
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-primary transition-colors hover:bg-primary/10 disabled:opacity-50"
+                    title="Baixar orçamento em PDF"
+                    aria-label={`Baixar PDF do orçamento de ${clientName(quote)}`}
+                  >
+                    <FilePdf size={16} weight={QUOTE_ICON_WEIGHT} />
+                  </button>
+                  {canConvert(quote.status) && quote.client_id && (
                     <button
                       type="button"
                       onClick={() => handleConvert(quote)}
@@ -926,7 +1018,7 @@ export function QuotesPage() {
                     {editingId ? "Editar orçamento" : "Novo orçamento"}
                   </h2>
                   <p className="mt-0.5 text-xs text-muted">
-                    Cliente, itens e validade. O total soma automaticamente.
+                    Cliente, itens e validade. O total final soma os valores editados e o ajuste.
                   </p>
                 </div>
                 <button
@@ -952,35 +1044,93 @@ export function QuotesPage() {
                 )}
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <div className="mb-1.5 flex items-center justify-between gap-2">
-                      <label htmlFor="cliente" className="label-caps">
-                        Cliente
-                      </label>
+                  <div className="sm:col-span-2">
+                    <p className="label-caps mb-1.5">Cliente</p>
+                    <div className="inline-flex rounded-lg border border-border bg-background p-0.5">
                       <button
                         type="button"
-                        onClick={() => setClientModalOpen(true)}
-                        className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary transition-colors duration-200 hover:bg-primary hover:text-white"
+                        onClick={() => {
+                          setClientMode("registered");
+                          setGuestName("");
+                          setGuestContact("");
+                        }}
+                        className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                          clientMode === "registered"
+                            ? "bg-primary text-white"
+                            : "text-muted hover:text-foreground"
+                        }`}
                       >
-                        <Plus size={12} weight={QUOTE_ICON_WEIGHT} aria-hidden />
-                        Novo cliente
+                        Cliente cadastrado
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setClientMode("guest");
+                          setClientId("");
+                        }}
+                        className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                          clientMode === "guest"
+                            ? "bg-primary text-white"
+                            : "text-muted hover:text-foreground"
+                        }`}
+                      >
+                        Cliente avulso
                       </button>
                     </div>
-                    <Dropdown
-                      id="cliente"
-                      value={clientId}
-                      options={clients.map((client) => ({
-                        value: client.id,
-                        label: client.name,
-                      }))}
-                      onChange={setClientId}
-                      searchable
-                      searchPlaceholder="Buscar cliente..."
-                      placeholder="Selecione um cliente"
-                      actionLabel="Novo cliente"
-                      onAction={() => setClientModalOpen(true)}
-                    />
+                    <p className="mt-1.5 text-[11px] text-muted">
+                      {clientMode === "guest"
+                        ? "Nome e contato só neste orçamento — não cria cadastro no sistema."
+                        : "Use um cliente já cadastrado ou crie um cadastro completo."}
+                    </p>
                   </div>
+                  {clientMode === "registered" ? (
+                    <div>
+                      <div className="mb-1.5 flex items-center justify-between gap-2">
+                        <label htmlFor="cliente" className="label-caps">
+                          Cliente cadastrado
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setClientModalOpen(true)}
+                          className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary transition-colors duration-200 hover:bg-primary hover:text-white"
+                        >
+                          <Plus size={12} weight={QUOTE_ICON_WEIGHT} aria-hidden />
+                          Novo cliente
+                        </button>
+                      </div>
+                      <Dropdown
+                        id="cliente"
+                        value={clientId}
+                        options={clients.map((client) => ({
+                          value: client.id,
+                          label: client.name,
+                        }))}
+                        onChange={setClientId}
+                        searchable
+                        searchPlaceholder="Buscar cliente..."
+                        placeholder="Selecione um cliente"
+                        actionLabel="Novo cliente"
+                        onAction={() => setClientModalOpen(true)}
+                      />
+                    </div>
+                  ) : (
+                    <>
+                      <Input
+                        label="Nome"
+                        value={guestName}
+                        onChange={(event) => setGuestName(event.target.value)}
+                        placeholder="Nome do cliente"
+                        autoComplete="name"
+                      />
+                      <Input
+                        label="Contato"
+                        value={guestContact}
+                        onChange={(event) => setGuestContact(event.target.value)}
+                        placeholder="Telefone ou e-mail"
+                        autoComplete="off"
+                      />
+                    </>
+                  )}
                   <Input
                     label="Validade"
                     type="date"
@@ -999,7 +1149,7 @@ export function QuotesPage() {
                         setNotes(event.target.value);
                         resizeNotesField(event.target);
                       }}
-                      placeholder="Condições, prazo de execução, observações internas..."
+                      placeholder="Condições, prazo de execução, observações para o cliente..."
                       className="block w-full resize-none overflow-hidden rounded-md border border-border bg-input px-3 py-2 text-sm leading-5 text-foreground placeholder:text-muted/60 transition-colors duration-300 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                     />
                   </div>
@@ -1017,18 +1167,69 @@ export function QuotesPage() {
                           prev.filter((row) => row.serviceId !== serviceId)
                         )
                       }
+                      onChangePrice={(serviceId, price) =>
+                        setItems((prev) =>
+                          prev.map((row) =>
+                            row.serviceId === serviceId
+                              ? { ...row, unitPrice: price }
+                              : row
+                          )
+                        )
+                      }
                     />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <Input
+                      label="Ajuste final (opcional)"
+                      value={adjustmentInput}
+                      onChange={(event) =>
+                        setAdjustmentInput(maskSignedCurrencyInput(event.target.value))
+                      }
+                      placeholder="0,00"
+                      inputMode="decimal"
+                      prefix="R$"
+                    />
+                    <p className="mt-1 text-[11px] text-muted">
+                      Valor em reais. Use negativo para desconto (ex.: -150,00) ou positivo para acréscimo.
+                    </p>
                   </div>
                 </div>
               </div>
 
               <div className="relative shrink-0 bg-card">
                 <ModalFooterFade visible={formScroll.showMoreBelow} />
-                <div className="flex items-center justify-between px-5 py-3 sm:px-6">
-                  <p className="label-caps text-muted">Total</p>
-                  <p className="text-lg font-semibold tracking-tight tabular-nums text-foreground sm:text-xl">
-                    {formatCurrency(totalAmount)}
-                  </p>
+                <div className="space-y-1 px-5 py-3 sm:px-6">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="label-caps text-muted">Subtotal</p>
+                    <p className="text-sm font-semibold tabular-nums text-foreground">
+                      {formatCurrency(subtotal)}
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="label-caps text-muted">Ajuste</p>
+                    <p
+                      className={`text-sm font-semibold tabular-nums ${
+                        adjustmentAmount < 0
+                          ? "text-danger"
+                          : adjustmentAmount > 0
+                            ? "text-primary"
+                            : "text-muted"
+                      }`}
+                    >
+                      {adjustmentAmount > 0 ? "+" : ""}
+                      {formatCurrency(adjustmentAmount)}
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 border-t border-border pt-1.5">
+                    <p className="label-caps text-muted">Total final</p>
+                    <p
+                      className={`text-lg font-semibold tracking-tight tabular-nums sm:text-xl ${
+                        finalTotal < 0 ? "text-danger" : "text-foreground"
+                      }`}
+                    >
+                      {formatCurrency(finalTotal)}
+                    </p>
+                  </div>
                 </div>
                 <div className="flex flex-col-reverse gap-2 px-5 pb-4 sm:flex-row sm:justify-end sm:px-6">
                   <Button
