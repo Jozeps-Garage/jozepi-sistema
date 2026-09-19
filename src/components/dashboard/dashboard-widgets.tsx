@@ -14,6 +14,7 @@ import { RevenueMiniChart } from "@/components/dashboard/revenue-mini-chart";
 import { formatCurrency } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
 import type { DashboardData } from "@/lib/dashboard/types";
+import { inDueAlertWindow, isOverdue } from "@/lib/finance/due";
 import {
   buildWhatsAppUrl,
   formatShortDate,
@@ -37,7 +38,7 @@ export function RevenueWidget({ data }: { data: DashboardData }) {
         <p className="text-2xl font-bold leading-none text-foreground">
           {formatCurrency(data.stats.monthly_revenue)}
         </p>
-        <p className="mt-0.5 text-[11px] text-muted">Receitas de OS finalizadas</p>
+        <p className="mt-0.5 text-[11px] text-muted">Receitas pagas no mês</p>
       </div>
     </div>
   );
@@ -207,33 +208,88 @@ export function AgendaWidget({ data }: { data: DashboardData }) {
 }
 
 export function CashflowWidget({ data }: { data: DashboardData }) {
+  const today = data.todayDateKey;
+  const unpaidOrders = [...data.unpaidOrders].sort((a, b) => {
+    const aOverdue = isOverdue(
+      { payment_status: a.payment_status, due_date: a.due_date },
+      today
+    );
+    const bOverdue = isOverdue(
+      { payment_status: b.payment_status, due_date: b.due_date },
+      today
+    );
+    if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
+    return (a.due_date ?? "").localeCompare(b.due_date ?? "");
+  });
+  const pendingExpenses = [...data.pendingExpenses].sort((a, b) => {
+    const aDue = a.due_date || a.transaction_date;
+    const bDue = b.due_date || b.transaction_date;
+    const aOverdue = isOverdue({ payment_status: a.payment_status, due_date: aDue }, today);
+    const bOverdue = isOverdue({ payment_status: b.payment_status, due_date: bDue }, today);
+    if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
+    return aDue.localeCompare(bDue);
+  });
+  const dueAlerts = [
+    ...unpaidOrders.map((order) => ({
+      payment_status: order.payment_status,
+      due_date: order.due_date ?? (order.completed_at ?? order.opened_at)?.slice(0, 10) ?? null,
+    })),
+    ...pendingExpenses.map((expense) => ({
+      payment_status: expense.payment_status,
+      due_date: expense.due_date || expense.transaction_date,
+    })),
+  ].filter((item) => inDueAlertWindow(item, today));
+  const overdueCount = dueAlerts.filter((item) => isOverdue(item, today)).length;
+  const upcomingCount = dueAlerts.length - overdueCount;
   return (
     <div className="card-surface flex h-full min-h-0 flex-col">
       <div className="mb-2 flex items-center gap-2">
         <Wallet size={16} weight="light" className="text-muted" aria-hidden />
         <h2 className="text-sm font-semibold text-foreground">Financeiro</h2>
       </div>
+      {dueAlerts.length > 0 && (
+        <Link
+          href="/financeiro"
+          className={`mb-2 inline-flex items-center gap-1.5 self-start rounded-full px-2 py-0.5 text-[10px] font-bold transition-opacity hover:opacity-80 ${
+            overdueCount > 0
+              ? "bg-danger/10 text-danger"
+              : "bg-warning/10 text-warning"
+          }`}
+        >
+          <WarningCircle size={11} weight="fill" aria-hidden />
+          {overdueCount > 0
+            ? `${overdueCount} vencida${overdueCount === 1 ? "" : "s"}`
+            : "Contas a vencer"}
+          {upcomingCount > 0
+            ? ` · ${upcomingCount} nos próximos 7 dias`
+            : ""}
+        </Link>
+      )}
 
       <div className="grid min-h-0 flex-1 grid-cols-1 divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0">
         <div className="flex min-h-0 flex-col sm:pr-4">
           <div className="mb-1.5 flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-foreground">A receber</h3>
-            {data.unpaidOrders.length > 0 && (
+            {unpaidOrders.length > 0 && (
               <span className="rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-semibold text-success">
-                {data.unpaidOrders.length}
+                {unpaidOrders.length}
               </span>
             )}
           </div>
-          {data.unpaidOrders.length === 0 ? (
+          {unpaidOrders.length === 0 ? (
             <p className="py-2 text-xs text-muted">Nada a receber</p>
           ) : (
             <ul className="max-h-40 divide-y divide-border overflow-y-auto">
-              {data.unpaidOrders.map((order) => {
+              {unpaidOrders.map((order) => {
                 const clientName = getClientName(order.clients);
                 const service = getServiceNames(order.service_order_items);
                 const dateStr = (order.completed_at ?? order.opened_at)?.slice(
                   0,
                   10
+                );
+                const overdue = isOverdue(
+                  { payment_status: order.payment_status, due_date: order.due_date ?? dateStr },
+                  today
                 );
                 return (
                   <li
@@ -243,8 +299,13 @@ export function CashflowWidget({ data }: { data: DashboardData }) {
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-foreground">
                         {clientName}
+                        {overdue ? (
+                          <span className="ml-1.5 rounded-full bg-danger/10 px-1.5 py-0.5 text-[9px] font-bold text-danger">
+                            Vencido
+                          </span>
+                        ) : null}
                       </p>
-                      <p className="truncate text-[11px] text-muted">
+                      <p className={`truncate text-[11px] ${overdue ? "font-semibold text-danger" : "text-muted"}`}>
                         {service}
                         {dateStr ? ` · ${formatShortDate(dateStr)}` : ""}
                       </p>
@@ -262,17 +323,23 @@ export function CashflowWidget({ data }: { data: DashboardData }) {
         <div className="flex min-h-0 flex-col pt-3 sm:pl-4 sm:pt-0">
           <div className="mb-1.5 flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-foreground">A pagar</h3>
-            {data.pendingExpenses.length > 0 && (
+            {pendingExpenses.length > 0 && (
               <span className="rounded-full bg-danger/10 px-2 py-0.5 text-[10px] font-semibold text-danger">
-                {data.pendingExpenses.length}
+                {pendingExpenses.length}
               </span>
             )}
           </div>
-          {data.pendingExpenses.length === 0 ? (
+          {pendingExpenses.length === 0 ? (
             <p className="py-2 text-xs text-muted">Nada a pagar</p>
           ) : (
             <ul className="max-h-40 divide-y divide-border overflow-y-auto">
-              {data.pendingExpenses.map((expense) => (
+              {pendingExpenses.map((expense) => {
+                const due = expense.due_date || expense.transaction_date;
+                const overdue = isOverdue(
+                  { payment_status: expense.payment_status, due_date: due },
+                  today
+                );
+                return (
                 <li
                   key={expense.id}
                   className="flex items-center justify-between gap-2 py-1"
@@ -280,19 +347,23 @@ export function CashflowWidget({ data }: { data: DashboardData }) {
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-foreground">
                       {expense.description}
+                      {overdue ? (
+                        <span className="ml-1.5 rounded-full bg-danger/10 px-1.5 py-0.5 text-[9px] font-bold text-danger">
+                          Vencido
+                        </span>
+                      ) : null}
                     </p>
-                    <p className="truncate text-[11px] text-muted">
+                    <p className={`truncate text-[11px] ${overdue ? "font-semibold text-danger" : "text-muted"}`}>
                       {expense.category ?? "Despesa"}
-                      {expense.transaction_date
-                        ? ` · ${formatShortDate(expense.transaction_date)}`
-                        : ""}
+                      {due ? ` · ${formatShortDate(due)}` : ""}
                     </p>
                   </div>
                   <span className="shrink-0 text-sm font-bold text-danger">
                     {formatCurrency(Number(expense.amount ?? 0))}
                   </span>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
         </div>

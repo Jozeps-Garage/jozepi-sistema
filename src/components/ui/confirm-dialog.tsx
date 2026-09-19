@@ -11,9 +11,11 @@ interface ConfirmDialogProps {
   description: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  extraLabel?: string;
   loading?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
+  onExtra?: () => void;
 }
 
 export function ConfirmDialog({
@@ -22,9 +24,11 @@ export function ConfirmDialog({
   description,
   confirmLabel = "Confirmar",
   cancelLabel = "Cancelar",
+  extraLabel,
   loading = false,
   onConfirm,
   onCancel,
+  onExtra,
 }: ConfirmDialogProps) {
   useBodyScrollLock(open);
 
@@ -69,6 +73,17 @@ export function ConfirmDialog({
           >
             {cancelLabel}
           </Button>
+          {extraLabel && onExtra && (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={onExtra}
+              disabled={loading}
+              className="w-full border-danger/30 text-danger hover:bg-danger/10 sm:w-auto"
+            >
+              {extraLabel}
+            </Button>
+          )}
           <Button
             type="button"
             onClick={onConfirm}

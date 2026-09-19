@@ -21,6 +21,7 @@ import {
   getServiceOrderStatus,
   dateKey,
 } from "@/lib/agenda/utils";
+import { resolveDefaultCashflowIds } from "@/lib/finance/transactions";
 import type { ClientFormData } from "@/types/client";
 import type { Client } from "@/types/client";
 
@@ -169,6 +170,12 @@ export async function syncFinanceRevenue(
   const description = `${appointment.client} - ${
     appointment.service || "Serviço realizado"
   }`;
+  const defaults = await resolveDefaultCashflowIds(
+    supabase,
+    workshopId,
+    "receita",
+    "Serviço"
+  );
   const payload = {
     workshop_id: workshopId,
     type: "receita" as const,
@@ -177,32 +184,64 @@ export async function syncFinanceRevenue(
     category: "Serviço",
     service_order_id: appointment.id,
     transaction_date: appointment.date,
+    ...(defaults.accountId ? { account_id: defaults.accountId } : {}),
+    ...(defaults.categoryId ? { category_id: defaults.categoryId } : {}),
   };
 
-  const { data: existingTransactions, error: findError } = await supabase
+  let existingId: string | null = null;
+  let existingAccountId: string | null = null;
+
+  const withCashflow = await supabase
     .from("financial_transactions")
-    .select("id")
+    .select("id, account_id")
     .eq("service_order_id", appointment.id)
     .eq("type", "receita")
     .limit(1);
 
-  if (findError) return findError.message;
+  if (!withCashflow.error) {
+    existingId = withCashflow.data?.[0]?.id ?? null;
+    existingAccountId = withCashflow.data?.[0]?.account_id ?? null;
+  } else {
+    const legacyFind = await supabase
+      .from("financial_transactions")
+      .select("id")
+      .eq("service_order_id", appointment.id)
+      .eq("type", "receita")
+      .limit(1);
+    if (legacyFind.error) return legacyFind.error.message;
+    existingId = legacyFind.data?.[0]?.id ?? null;
+  }
 
-  const existingTransaction = existingTransactions?.[0];
-  if (existingTransaction) {
+  if (existingId) {
     const { error: updateError } = await supabase
       .from("financial_transactions")
-      .update(payload)
-      .eq("id", existingTransaction.id);
+      .update({
+        ...payload,
+        account_id: existingAccountId ?? defaults.accountId ?? undefined,
+      })
+      .eq("id", existingId);
 
     return updateError?.message ?? null;
   }
 
+  const insertPayload = {
+    ...payload,
+    payment_status: "pendente" as const,
+    effective_date: null,
+    due_date: appointment.date,
+  };
+
   const { error: insertError } = await supabase
+    .from("financial_transactions")
+    .insert(insertPayload);
+
+  if (!insertError) return null;
+
+  const { error: legacyError } = await supabase
     .from("financial_transactions")
     .insert(payload);
 
-  return insertError?.message ?? null;
+  return legacyError?.message ?? null;
 }
 
 export async function deleteFinanceRevenue(

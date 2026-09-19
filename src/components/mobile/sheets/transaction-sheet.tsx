@@ -1,28 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Dropdown } from "@/components/ui/dropdown";
 import { Input } from "@/components/ui/input";
 import { BottomSheet } from "@/components/mobile/bottom-sheet";
 import { MoneyField } from "@/components/mobile/sheets/fields";
-import { createTransaction, type TransactionType } from "@/lib/finance/transactions";
+import { defaultAccountId, loadFinancialAccounts } from "@/lib/finance/accounts";
+import {
+  categoriesOfType,
+  loadFinancialCategories,
+} from "@/lib/finance/categories";
+import {
+  createTransaction,
+  type TransactionType,
+} from "@/lib/finance/transactions";
+import type { FinancialAccount, FinancialCategory } from "@/lib/finance/types";
 import { parseCurrencyInput } from "@/lib/utils/money";
-
-const EXPENSE_CATEGORIES = [
-  { value: "Produtos", label: "Produtos" },
-  { value: "Equipamentos", label: "Equipamentos" },
-  { value: "Aluguel", label: "Aluguel" },
-  { value: "Marketing", label: "Marketing" },
-  { value: "Outros", label: "Outros" },
-];
-
-const REVENUE_CATEGORIES = [
-  { value: "Serviço", label: "Serviço" },
-  { value: "Gorjeta", label: "Gorjeta" },
-  { value: "Outros", label: "Outros" },
-];
 
 function todayKey() {
   const now = new Date();
@@ -49,26 +44,68 @@ export function TransactionSheet({
   onDone,
 }: TransactionSheetProps) {
   const isExpense = type === "despesa";
-  const categories = isExpense ? EXPENSE_CATEGORIES : REVENUE_CATEGORIES;
 
+  const [accounts, setAccounts] = useState<FinancialAccount[]>([]);
+  const [categories, setCategories] = useState<FinancialCategory[]>([]);
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
-  const [category, setCategory] = useState(categories[0].value);
+  const [categoryId, setCategoryId] = useState("");
+  const [accountId, setAccountId] = useState("");
   const [date, setDate] = useState(todayKey());
   const [saving, setSaving] = useState(false);
+  const [loadingOptions, setLoadingOptions] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function reset() {
+  const categoryOptions = categoriesOfType(categories, type).map((category) => ({
+    value: category.id,
+    label: category.name,
+  }));
+  const accountOptions = accounts
+    .filter((account) => account.active)
+    .map((account) => ({ value: account.id, label: account.name }));
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+
     setDescription("");
     setAmount("");
-    setCategory(categories[0].value);
     setDate(todayKey());
     setError(null);
-  }
+    setLoadingOptions(true);
+
+    void (async () => {
+      try {
+        const [loadedAccounts, loadedCategories] = await Promise.all([
+          loadFinancialAccounts(supabase, workshopId),
+          loadFinancialCategories(supabase, workshopId),
+        ]);
+        if (cancelled) return;
+        setAccounts(loadedAccounts);
+        setCategories(loadedCategories);
+        setAccountId(defaultAccountId(loadedAccounts));
+        setCategoryId(categoriesOfType(loadedCategories, type)[0]?.id ?? "");
+      } catch (err) {
+        if (cancelled) return;
+        setAccounts([]);
+        setCategories([]);
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Não foi possível carregar contas e categorias."
+        );
+      } finally {
+        if (!cancelled) setLoadingOptions(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, supabase, workshopId, type]);
 
   function handleClose() {
     if (saving) return;
-    reset();
     onClose();
   }
 
@@ -80,6 +117,14 @@ export function TransactionSheet({
       setError("Informe uma descrição.");
       return;
     }
+    if (!accountId) {
+      setError("Selecione a conta do lançamento.");
+      return;
+    }
+    if (!categoryId) {
+      setError("Selecione a categoria.");
+      return;
+    }
 
     let value: number;
     try {
@@ -89,6 +134,9 @@ export function TransactionSheet({
       return;
     }
 
+    const categoryName =
+      categoryOptions.find((option) => option.value === categoryId)?.label ?? "Outros";
+
     setSaving(true);
     setError(null);
     try {
@@ -96,14 +144,17 @@ export function TransactionSheet({
         type,
         description,
         amount: value,
-        category,
+        category: categoryName,
+        categoryId,
+        accountId,
         date,
+        effectiveDate: date,
+        paymentStatus: "pago",
       });
       onDone(
         "success",
         isExpense ? "Despesa lançada!" : "Receita lançada!"
       );
-      reset();
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao salvar.");
@@ -140,10 +191,18 @@ export function TransactionSheet({
           />
         </div>
         <Dropdown
+          label="Conta"
+          value={accountId}
+          onChange={setAccountId}
+          options={accountOptions}
+          placeholder={loadingOptions ? "Carregando..." : "Selecione a conta"}
+        />
+        <Dropdown
           label="Categoria"
-          value={category}
-          onChange={setCategory}
-          options={categories}
+          value={categoryId}
+          onChange={setCategoryId}
+          options={categoryOptions}
+          placeholder={loadingOptions ? "Carregando..." : "Selecione a categoria"}
         />
         {error && <p className="text-sm text-danger">{error}</p>}
         <Button type="submit" loading={saving} className="w-full">

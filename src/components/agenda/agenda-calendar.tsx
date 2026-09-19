@@ -714,6 +714,7 @@ export function AgendaCalendar() {
     clientId: "",
     vehicleId: "",
     serviceIds: [],
+    servicePrices: {},
     totalAmount: "",
     notes: "",
     preCadastro: false,
@@ -1157,11 +1158,11 @@ export function AgendaCalendar() {
       serviceId: service.id,
       name: service.name,
       kind: kindFromCategory(service.category),
-      price: getServicePrice(service),
+      price: form.servicePrices[service.id] ?? getServicePrice(service),
     })
   );
-  const servicesTotal = selectedServices.reduce(
-    (total, service) => total + getServicePrice(service),
+  const servicesTotal = selectedCatalogItems.reduce(
+    (total, item) => total + item.price,
     0
   );
   const customTotalAmount = (() => {
@@ -1234,6 +1235,7 @@ export function AgendaCalendar() {
       clientId: "",
       vehicleId: "",
       serviceIds: [],
+      servicePrices: {},
       totalAmount: "",
       notes: "",
       preCadastro: false,
@@ -1285,6 +1287,7 @@ export function AgendaCalendar() {
         clientId: linkedClient.id,
         vehicleId: linkedClient.vehicles?.[0]?.id ?? "",
         serviceIds: [],
+        servicePrices: {},
         totalAmount: "",
         notes: "",
         preCadastro: false,
@@ -1354,6 +1357,7 @@ export function AgendaCalendar() {
       clientId: appointment.clientId,
       vehicleId: appointment.vehicleId,
       serviceIds: appointment.serviceIds,
+      servicePrices: appointment.servicePrices ?? {},
       totalAmount:
         useCustomTotal && appointment.totalAmount > 0
           ? String(appointment.totalAmount)
@@ -1416,9 +1420,24 @@ export function AgendaCalendar() {
   }
 
   function removeServiceFromForm(serviceId: string) {
+    setForm((prev) => {
+      const nextPrices = { ...prev.servicePrices };
+      delete nextPrices[serviceId];
+      return {
+        ...prev,
+        serviceIds: prev.serviceIds.filter((id) => id !== serviceId),
+        servicePrices: nextPrices,
+      };
+    });
+  }
+
+  function changeServicePrice(serviceId: string, price: number) {
     setForm((prev) => ({
       ...prev,
-      serviceIds: prev.serviceIds.filter((id) => id !== serviceId),
+      servicePrices: {
+        ...prev.servicePrices,
+        [serviceId]: price,
+      },
     }));
   }
 
@@ -1428,10 +1447,14 @@ export function AgendaCalendar() {
   ) {
     setForm((prev) => {
       const nextIds = [...prev.serviceIds];
+      const nextPrices = { ...prev.servicePrices };
       for (const item of items) {
         if (!nextIds.includes(item.serviceId)) nextIds.push(item.serviceId);
+        if (nextPrices[item.serviceId] == null) {
+          nextPrices[item.serviceId] = item.price;
+        }
       }
-      return { ...prev, serviceIds: nextIds };
+      return { ...prev, serviceIds: nextIds, servicePrices: nextPrices };
     });
 
     setServices((prev) => {
@@ -1727,7 +1750,11 @@ export function AgendaCalendar() {
       completed_at:
         currentStatus === "Concluído" ? new Date().toISOString() : null,
     };
-    const serviceItems = buildServiceOrderItems(selectedServices, appointmentTotal);
+    const serviceItems = buildServiceOrderItems(
+      selectedServices,
+      appointmentTotal,
+      form.servicePrices
+    );
 
     setSavingAppointment(true);
     setError(null);
@@ -1808,6 +1835,7 @@ export function AgendaCalendar() {
         clientId: appointmentClient.id,
         vehicleId: appointmentVehicle.id,
         serviceIds: selectedServices.map((service) => service.id),
+        servicePrices: form.servicePrices,
         client: appointmentClient.name,
         service: serviceLabel,
         totalAmount: appointmentTotal,
@@ -2709,6 +2737,7 @@ export function AgendaCalendar() {
                     items={selectedCatalogItems}
                     onSelect={() => setCatalogOpen(true)}
                     onRemove={removeServiceFromForm}
+                    onChangePrice={changeServicePrice}
                     emptyText={
                       loadingServices
                         ? "Carregando serviços..."
@@ -3458,6 +3487,7 @@ export function AgendaCalendar() {
                     items={selectedCatalogItems}
                     onSelect={() => setCatalogOpen(true)}
                     onRemove={removeServiceFromForm}
+                    onChangePrice={changeServicePrice}
                     emptyText={
                       loadingServices
                         ? "Carregando serviços..."

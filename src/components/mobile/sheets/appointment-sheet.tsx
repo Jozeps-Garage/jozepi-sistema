@@ -252,7 +252,14 @@ export function AppointmentSheet({
       if (!appointmentId) throw new Error("Erro ao salvar agendamento.");
 
       if (selectedServices.length > 0) {
-        const items = buildServiceOrderItems(selectedServices, total);
+        const priceByServiceId = Object.fromEntries(
+          selectedItems.map((item) => [item.serviceId, item.price])
+        );
+        const items = buildServiceOrderItems(
+          selectedServices,
+          total,
+          priceByServiceId
+        );
         const { error: itemsError } = await saveAppointmentItems(
           supabase,
           appointmentId,
@@ -309,6 +316,13 @@ export function AppointmentSheet({
             items={selectedItems}
             onSelect={() => setCatalogOpen(true)}
             onRemove={removeService}
+            onChangePrice={(serviceId, price) =>
+              setSelectedItems((prev) =>
+                prev.map((item) =>
+                  item.serviceId === serviceId ? { ...item, price } : item
+                )
+              )
+            }
           />
 
           <Input

@@ -9,6 +9,7 @@ export interface Appointment {
   clientId: string;
   vehicleId: string;
   serviceIds: string[];
+  servicePrices?: Record<string, number>;
   client: string;
   service: string;
   totalAmount: number;
@@ -26,6 +27,7 @@ export interface AppointmentForm {
   clientId: string;
   vehicleId: string;
   serviceIds: string[];
+  servicePrices: Record<string, number>;
   totalAmount: string;
   notes: string;
   /** Marca o horário sem ter o cliente cadastrado: cria um pré-cadastro no momento de salvar. */

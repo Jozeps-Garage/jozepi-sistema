@@ -6,6 +6,7 @@ import {
   CalendarBlank,
   CalendarCheck,
   CaretDown,
+  CaretRight,
   ChartBar,
   ChartDonut,
   ChartLineUp,
@@ -23,6 +24,7 @@ import {
   TrendUp,
   Trophy,
   Wallet,
+  WarningCircle,
   XCircle,
 } from "@phosphor-icons/react";
 import {
@@ -31,6 +33,11 @@ import {
   Plus as LucidePlus,
   Trash2,
 } from "lucide-react";
+import { ConfirmPaidDialog, TransferDialog } from "@/components/finance/cashflow-dialogs";
+import { AccountsPanel, type AccountStatementLine } from "@/components/finance/accounts-panel";
+import { CategoriesPanel } from "@/components/finance/categories-panel";
+import { UpcomingDuesSection } from "@/components/finance/upcoming-dues";
+import { CashflowProjectionPanel } from "@/components/finance/cashflow-projection";
 import { RevenueExpenseChart } from "@/components/finance/revenue-expense-chart";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -39,8 +46,36 @@ import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { formatCurrency } from "@/lib/utils/format";
+import {
+  defaultAccountId,
+  loadFinancialAccounts,
+  saveFinancialAccount,
+  setDefaultFinancialAccount,
+} from "@/lib/finance/accounts";
+import { accountBalance, cashDate as cashflowDate, isPaidCashStatus, sumPaidRevenueInRange } from "@/lib/finance/cash";
+import {
+  addMonthsToDateKey,
+  inDueAlertWindow,
+  installmentBaseDescription,
+  isOverdue,
+  splitInstallmentAmounts,
+  todayDateKey,
+} from "@/lib/finance/due";
+import {
+  categoriesOfType,
+  loadFinancialCategories,
+  matchCategoryId,
+  saveFinancialCategory,
+} from "@/lib/finance/categories";
+import { resolveDefaultCashflowIds } from "@/lib/finance/transactions";
+import {
+  FIXED_COST_CATEGORY_NAME,
+  type FinancialAccount,
+  type FinancialCategory,
+  type FinancialTransfer,
+} from "@/lib/finance/types";
 
-type FinanceTab = "overview" | "revenues" | "expenses" | "fixedCosts";
+type FinanceTab = "overview" | "revenues" | "expenses" | "fixedCosts" | "cashflow" | "accounts" | "categories";
 type PeriodFilter = "all" | "today" | "week" | "month" | "custom";
 type ChartInterval = "7d" | "1m" | "3m" | "6m" | "1a";
 
@@ -77,6 +112,8 @@ interface FinancialTransaction {
   description: string;
   amount: number | string;
   category: string | null;
+  category_id: string | null;
+  account_id: string | null;
   service_order_id: string | null;
   supplier_id: string | null;
   product_id: string | null;
@@ -84,6 +121,11 @@ interface FinancialTransaction {
   payment_status: PaymentStatus;
   notes: string | null;
   transaction_date: string;
+  effective_date: string | null;
+  due_date: string | null;
+  installment_group_id: string | null;
+  installment_number: number | null;
+  installment_total: number | null;
   created_at: string;
 }
 
@@ -310,7 +352,11 @@ interface FinanceEntry {
   description: string;
   amount: number;
   category: string;
+  categoryId?: string;
+  accountId?: string;
   date: string;
+  effectiveDate?: string | null;
+  dueDate?: string | null;
   createdAt: string;
   clientName?: string;
   serviceName?: string;
@@ -320,20 +366,30 @@ interface FinanceEntry {
   serviceOrderId?: string;
   paymentStatus?: PaymentStatus;
   notes?: string;
+  installmentGroupId?: string | null;
+  installmentNumber?: number | null;
+  installmentTotal?: number | null;
 }
 
 type FinanceDeleteConfirm =
   | { type: "fixedCost"; cost: FixedCost }
   | { type: "transaction"; entry: FinanceEntry }
   | { type: "revertAppointment"; entry: FinanceEntry }
+  | { type: "installmentGroup"; entry: FinanceEntry; remaining: FinanceEntry[] }
   | null;
 
 interface TransactionForm {
   description: string;
   amount: string;
   date: string;
-  category: string;
+  effectiveDate: string;
+  dueDate: string;
+  categoryId: string;
+  accountId: string;
+  paymentStatus: PaymentStatus;
   supplierId: string;
+  installmentsEnabled: boolean;
+  installmentCount: string;
 }
 
 interface DateRange {
@@ -346,6 +402,9 @@ const tabs: { id: FinanceTab; label: string }[] = [
   { id: "revenues", label: "Receitas" },
   { id: "expenses", label: "Despesas" },
   { id: "fixedCosts", label: "Custos Fixos" },
+  { id: "cashflow", label: "Fluxo de Caixa" },
+  { id: "accounts", label: "Contas" },
+  { id: "categories", label: "Categorias" },
 ];
 
 const periodOptions = [
@@ -356,29 +415,8 @@ const periodOptions = [
   { value: "custom", label: "Personalizado" },
 ];
 
-const revenueCategoryOptions = [
-  { value: "Serviço", label: "Serviço" },
-  { value: "Gorjeta", label: "Gorjeta" },
-  { value: "Outros", label: "Outros" },
-];
-
-const expenseCategoryOptions = [
-  { value: "Produtos", label: "Produtos" },
-  { value: "Equipamentos", label: "Equipamentos" },
-  { value: "Aluguel", label: "Aluguel" },
-  { value: "Marketing", label: "Marketing" },
-  { value: "Outros", label: "Outros" },
-];
 const categoryFilterAll = "all";
 const FINANCE_ICON_WEIGHT = "light" as const;
-const revenueCategoryFilterOptions = [
-  { value: categoryFilterAll, label: "Todas as categorias" },
-  ...revenueCategoryOptions,
-];
-const expenseCategoryFilterOptions = [
-  { value: categoryFilterAll, label: "Todas as categorias" },
-  ...expenseCategoryOptions,
-];
 const DONUT_COLORS = ["#f97316", "#3b82f6", "#22c55e", "#6b7280", "#ef4444"];
 
 const shortMonthLabels = [
@@ -400,16 +438,28 @@ const initialRevenueForm: TransactionForm = {
   description: "",
   amount: "",
   date: dateKey(new Date()),
-  category: "Serviço",
+  effectiveDate: dateKey(new Date()),
+  dueDate: dateKey(new Date()),
+  categoryId: "",
+  accountId: "",
+  paymentStatus: "pago",
   supplierId: categoryFilterAll,
+  installmentsEnabled: false,
+  installmentCount: "3",
 };
 
 const initialExpenseForm: TransactionForm = {
   description: "",
   amount: "",
   date: dateKey(new Date()),
-  category: "Produtos",
+  effectiveDate: dateKey(new Date()),
+  dueDate: dateKey(new Date()),
+  categoryId: "",
+  accountId: "",
+  paymentStatus: "pago",
   supplierId: categoryFilterAll,
+  installmentsEnabled: false,
+  installmentCount: "3",
 };
 
 const initialFixedCostForm: FixedCostForm = {
@@ -710,6 +760,10 @@ function formatSupplierSaveError(message: string) {
   return message;
 }
 
+const TRANSACTION_SELECT_PHASE2 =
+  "id, type, description, amount, category, category_id, account_id, service_order_id, supplier_id, product_id, source, payment_status, notes, transaction_date, effective_date, due_date, installment_group_id, installment_number, installment_total, created_at";
+const TRANSACTION_SELECT_CASHFLOW =
+  "id, type, description, amount, category, category_id, account_id, service_order_id, supplier_id, product_id, source, payment_status, notes, transaction_date, effective_date, created_at";
 const TRANSACTION_SELECT_WITH_NOTES =
   "id, type, description, amount, category, service_order_id, supplier_id, product_id, source, payment_status, notes, transaction_date, created_at";
 const TRANSACTION_SELECT_WITH_PAYMENT =
@@ -731,6 +785,8 @@ function normalizeTransactionRow(
     description: String(row.description),
     amount: row.amount as number | string,
     category: (row.category as string | null) ?? null,
+    category_id: (row.category_id as string | null) ?? null,
+    account_id: (row.account_id as string | null) ?? null,
     service_order_id: (row.service_order_id as string | null) ?? null,
     supplier_id: (row.supplier_id as string | null) ?? null,
     product_id: (row.product_id as string | null) ?? null,
@@ -746,6 +802,13 @@ function normalizeTransactionRow(
           : null
         : fallback?.notes ?? null,
     transaction_date: String(row.transaction_date),
+    effective_date: (row.effective_date as string | null) ?? null,
+    due_date: (row.due_date as string | null) ?? null,
+    installment_group_id: (row.installment_group_id as string | null) ?? null,
+    installment_number:
+      typeof row.installment_number === "number" ? row.installment_number : null,
+    installment_total:
+      typeof row.installment_total === "number" ? row.installment_total : null,
     created_at: String(row.created_at ?? row.transaction_date),
   };
 }
@@ -776,6 +839,8 @@ async function loadFinancialTransactions(
   workshopId: string
 ) {
   const attempts = [
+    TRANSACTION_SELECT_PHASE2,
+    TRANSACTION_SELECT_CASHFLOW,
     TRANSACTION_SELECT_WITH_NOTES,
     TRANSACTION_SELECT_WITH_PAYMENT,
     TRANSACTION_SELECT_FULL,
@@ -817,6 +882,17 @@ async function syncFixedCostExpenses(
       .map((tx) => [tx.source as string, tx])
   );
   const synced: FinancialTransaction[] = [];
+  const defaults = await resolveDefaultCashflowIds(
+    supabase,
+    workshopId,
+    "despesa",
+    FIXED_COST_CATEGORY_NAME
+  );
+  const cashflowInsert = {
+    ...(defaults.accountId ? { account_id: defaults.accountId } : {}),
+    ...(defaults.categoryId ? { category_id: defaults.categoryId } : {}),
+    payment_status: "pago" as const,
+  };
 
   for (const cost of costs) {
     if (!cost.active || cost.kind !== "real" || !cost.payment_day) continue;
@@ -846,7 +922,9 @@ async function syncFixedCostExpenses(
         const needsUpdate =
           Number(existing.amount) !== amount ||
           existing.description !== cost.name ||
-          existing.transaction_date !== paymentDate;
+          existing.transaction_date !== paymentDate ||
+          (!existing.account_id && Boolean(defaults.accountId)) ||
+          (!existing.category_id && Boolean(defaults.categoryId));
 
         if (!needsUpdate) continue;
 
@@ -855,13 +933,15 @@ async function syncFixedCostExpenses(
           .update({
             description: cost.name,
             amount,
-            category: "Custo Fixo",
+            category: FIXED_COST_CATEGORY_NAME,
             transaction_date: paymentDate,
             source,
+            ...(existing.account_id ? {} : cashflowInsert.account_id ? { account_id: cashflowInsert.account_id } : {}),
+            ...(existing.category_id ? {} : cashflowInsert.category_id ? { category_id: cashflowInsert.category_id } : {}),
           })
           .eq("id", existing.id)
           .eq("workshop_id", workshopId)
-          .select(TRANSACTION_SELECT_FULL)
+          .select(TRANSACTION_SELECT_CASHFLOW)
           .maybeSingle();
 
         if (!error && data) {
@@ -875,18 +955,22 @@ async function syncFixedCostExpenses(
         continue;
       }
 
+      const insertPayload = {
+        workshop_id: workshopId,
+        type: "despesa" as const,
+        description: cost.name,
+        amount,
+        category: FIXED_COST_CATEGORY_NAME,
+        transaction_date: paymentDate,
+        source,
+        ...cashflowInsert,
+        effective_date: paymentDate,
+      };
+
       const { data, error } = await supabase
         .from("financial_transactions")
-        .insert({
-          workshop_id: workshopId,
-          type: "despesa",
-          description: cost.name,
-          amount,
-          category: "Custo Fixo",
-          transaction_date: paymentDate,
-          source,
-        })
-        .select(TRANSACTION_SELECT_WITH_PAYMENT)
+        .insert(insertPayload)
+        .select(TRANSACTION_SELECT_CASHFLOW)
         .single();
 
       if (error) {
@@ -897,7 +981,7 @@ async function syncFixedCostExpenses(
             type: "despesa",
             description: cost.name,
             amount,
-            category: "Custo Fixo",
+            category: FIXED_COST_CATEGORY_NAME,
             transaction_date: paymentDate,
             source,
           })
@@ -933,6 +1017,8 @@ async function fetchFinancialTransactionById(
   transactionId: string
 ) {
   const attempts = [
+    TRANSACTION_SELECT_PHASE2,
+    TRANSACTION_SELECT_CASHFLOW,
     TRANSACTION_SELECT_WITH_NOTES,
     TRANSACTION_SELECT_WITH_PAYMENT,
     TRANSACTION_SELECT_FULL,
@@ -1469,15 +1555,24 @@ function TransactionNotesIcon({
 
 function PaymentStatusSelect({
   value,
+  overdue,
   onChange,
 }: {
   value?: PaymentStatus;
+  overdue?: boolean;
   onChange: (status: PaymentStatus) => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const current = getPaymentStatusOption(value);
-  const CurrentIcon = current.icon;
+  const display = overdue
+    ? {
+        label: "Vencido",
+        className: "bg-danger/10 text-danger hover:bg-danger hover:text-white",
+        icon: WarningCircle,
+      }
+    : current;
+  const DisplayIcon = display.icon;
 
   useEffect(() => {
     if (!open) return;
@@ -1509,10 +1604,10 @@ function PaymentStatusSelect({
         aria-expanded={open}
         aria-label="Alterar status de pagamento"
         title="Alterar status de pagamento"
-        className={`inline-flex h-8 w-full min-w-0 items-center justify-center gap-1 rounded-full px-2.5 text-[11px] font-bold transition-colors ${current.className}`}
+        className={`inline-flex h-8 w-full min-w-0 items-center justify-center gap-1 rounded-full px-2.5 text-[11px] font-bold transition-colors ${display.className}`}
       >
-        <CurrentIcon size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
-        {current.label}
+        <DisplayIcon size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+        {display.label}
         <CaretDown size={10} weight={FINANCE_ICON_WEIGHT} aria-hidden />
       </button>
 
@@ -1559,6 +1654,9 @@ function TransactionList({
   accent = "default",
   filter,
   groupByMonth = false,
+  groupInstallments = false,
+  editingId,
+  editForm,
   onEditTransaction,
   onDeleteTransaction,
   onChangePaymentStatus,
@@ -1570,24 +1668,54 @@ function TransactionList({
   accent?: "default" | "expense";
   filter?: React.ReactNode;
   groupByMonth?: boolean;
+  groupInstallments?: boolean;
+  editingId?: string | null;
+  editForm?: React.ReactNode;
   onEditTransaction?: (entry: FinanceEntry) => void;
   onDeleteTransaction?: (entry: FinanceEntry) => void;
   onChangePaymentStatus?: (entry: FinanceEntry, status: PaymentStatus) => void;
   onUpdateNotes?: (entry: FinanceEntry, notes: string | null) => Promise<void>;
 }) {
   const [page, setPage] = useState(0);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const editRowRef = useRef<HTMLElement>(null);
+  const todayKeyValue = todayDateKey();
+  const listItems = useMemo(() => {
+    if (!groupInstallments) {
+      return entries.map((entry) => ({ kind: "single" as const, entry }));
+    }
+    const items: Array<
+      | { kind: "single"; entry: FinanceEntry }
+      | { kind: "group"; groupId: string; entries: FinanceEntry[] }
+    > = [];
+    const seen = new Set<string>();
+    for (const entry of entries) {
+      const groupId = entry.installmentGroupId;
+      if (!groupId || (entry.installmentTotal ?? 0) < 2) {
+        items.push({ kind: "single", entry });
+        continue;
+      }
+      if (seen.has(groupId)) continue;
+      seen.add(groupId);
+      const group = entries
+        .filter((item) => item.installmentGroupId === groupId)
+        .sort((a, b) => (a.installmentNumber ?? 0) - (b.installmentNumber ?? 0));
+      items.push({ kind: "group", groupId, entries: group });
+    }
+    return items;
+  }, [entries, groupInstallments]);
   const entriesSignature = useMemo(
-    () => entries.map((entry) => entry.id).join("|"),
-    [entries]
+    () => listItems.map((item) => (item.kind === "single" ? item.entry.id : item.groupId)).join("|"),
+    [listItems]
   );
 
   useEffect(() => {
     setPage(0);
   }, [entriesSignature]);
 
-  const totalPages = Math.ceil(entries.length / TRANSACTION_PAGE_SIZE);
+  const totalPages = Math.ceil(listItems.length / TRANSACTION_PAGE_SIZE);
   const safePage = Math.min(page, Math.max(0, totalPages - 1));
-  const pagedEntries = entries.slice(
+  const pagedItems = listItems.slice(
     safePage * TRANSACTION_PAGE_SIZE,
     (safePage + 1) * TRANSACTION_PAGE_SIZE
   );
@@ -1596,11 +1724,15 @@ function TransactionList({
     if (page !== safePage) setPage(safePage);
   }, [page, safePage]);
 
+  useEffect(() => {
+    if (!editingId) return;
+    editRowRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [editingId]);
+
   const showPayment = Boolean(onChangePaymentStatus);
   const showNotes = Boolean(onUpdateNotes);
   const labelColumnTitle = accent === "expense" ? "Fornecedor" : "Categoria";
-  const canEditPaymentStatus = (entry: FinanceEntry) =>
-    accent === "expense" || Boolean(entry.serviceOrderId);
+  const canEditPaymentStatus = (_entry: FinanceEntry) => true;
 
   // Separate fixed columns so OBS / status / edit stay aligned across rows.
   const gridTemplateColumns = [
@@ -1658,37 +1790,40 @@ function TransactionList({
           <span className="text-right">Ações</span>
         </div>
         {(() => {
-          // Build flat list with optional month-separator rows
           type Row =
             | { kind: "header"; key: string; label: string }
-            | { kind: "entry"; entry: FinanceEntry };
+            | { kind: "group"; groupId: string; groupEntries: FinanceEntry[] }
+            | { kind: "entry"; entry: FinanceEntry; nested?: boolean };
           const rows: Row[] = [];
           let lastMonthKey = "";
-          for (const entry of pagedEntries) {
-            if (groupByMonth) {
-              const key = monthKeyFromDateStr(entry.date);
-              if (key !== lastMonthKey) {
-                rows.push({ kind: "header", key, label: getMonthYearLabel(entry.date) });
-                lastMonthKey = key;
-              }
-            }
-            rows.push({ kind: "entry", entry });
+
+          function pushMonthHeader(date: string) {
+            if (!groupByMonth) return;
+            const key = monthKeyFromDateStr(date);
+            if (key === lastMonthKey) return;
+            rows.push({ kind: "header", key, label: getMonthYearLabel(date) });
+            lastMonthKey = key;
           }
-          return rows.map((row) => {
-            if (row.kind === "header") {
-              return (
-                <div
-                  key={`header-${row.key}`}
-                  className="border-b border-border bg-background/60 px-3 py-2"
-                >
-                  <span className="text-[11px] font-bold uppercase tracking-wide text-muted capitalize">
-                    {row.label}
-                  </span>
-                </div>
-              );
+
+          for (const item of pagedItems) {
+            if (item.kind === "group") {
+              pushMonthHeader(item.entries[0]?.date ?? "");
+              rows.push({ kind: "group", groupId: item.groupId, groupEntries: item.entries });
+              if (expandedGroups[item.groupId] !== false) {
+                item.entries.forEach((entry) => rows.push({ kind: "entry", entry, nested: true }));
+              }
+              continue;
             }
-            const { entry } = row;
+            pushMonthHeader(item.entry.date);
+            rows.push({ kind: "entry", entry: item.entry });
+          }
+
+          const renderEntry = (entry: FinanceEntry, nested?: boolean) => {
           const isRevenue = entry.type === "receita";
+          const overdue = isOverdue(
+            { payment_status: entry.paymentStatus, due_date: entry.dueDate },
+            todayKeyValue
+          );
           const displayTitle =
             entry.kind === "automatic" && entry.clientName
               ? entry.clientName
@@ -1697,15 +1832,31 @@ function TransactionList({
             entry.kind === "automatic" && entry.serviceName
               ? entry.serviceName
               : undefined;
+          const displayDate = entry.dueDate || entry.date;
+          if (editingId === entry.id && editForm) {
+            return (
+              <article
+                key={entry.id}
+                ref={editRowRef}
+                className={`border-b border-border bg-background px-3 py-4 ${
+                  nested ? "pl-7" : ""
+                }`}
+              >
+                {editForm}
+              </article>
+            );
+          }
           return (
             <article
               key={entry.id}
-              className="grid items-center gap-x-4 border-b border-border/70 px-3 py-3 transition-colors hover:bg-background/70"
+              className={`grid items-center gap-x-4 border-b border-border/70 px-3 py-3 transition-colors hover:bg-background/70 ${
+                nested ? "bg-background/40" : ""
+              } ${overdue ? "bg-danger/5" : ""}`}
               style={{ gridTemplateColumns }}
             >
               <div className="min-w-0">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <p className="truncate text-sm font-semibold text-foreground">
+                  <p className={`truncate text-sm font-semibold text-foreground ${nested ? "pl-4" : ""}`}>
                     {displayTitle}
                   </p>
                   <span
@@ -1720,6 +1871,8 @@ function TransactionList({
                         <CalendarBlank size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
                         Agenda
                       </>
+                    ) : nested ? (
+                      "Parcela"
                     ) : (
                       <>
                         <PencilSimple size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
@@ -1736,7 +1889,7 @@ function TransactionList({
                 {accent === "expense" ? entry.supplierName ?? "-" : entry.category}
               </div>
               <div className="text-sm font-medium text-foreground">
-                {formatShortDate(entry.date)}
+                {formatShortDate(displayDate)}
               </div>
               <div
                 className={`text-sm font-bold ${
@@ -1758,6 +1911,7 @@ function TransactionList({
                   {canEditPaymentStatus(entry) ? (
                     <PaymentStatusSelect
                       value={entry.paymentStatus}
+                      overdue={overdue}
                       onChange={(status) => onChangePaymentStatus?.(entry, status)}
                     />
                   ) : (
@@ -1798,14 +1952,82 @@ function TransactionList({
               </div>
             </article>
           );
-          }); // end rows.map
-        })()} {/* end IIFE */}
+          };
+
+          return rows.map((row) => {
+            if (row.kind === "header") {
+              return (
+                <div
+                  key={`header-${row.key}`}
+                  className="border-b border-border bg-background/60 px-3 py-2"
+                >
+                  <span className="text-[11px] font-bold uppercase tracking-wide text-muted capitalize">
+                    {row.label}
+                  </span>
+                </div>
+              );
+            }
+            if (row.kind === "group") {
+              const paidCount = row.groupEntries.filter((entry) => entry.paymentStatus === "pago").length;
+              const total = row.groupEntries[0]?.installmentTotal ?? row.groupEntries.length;
+              const amount = row.groupEntries.reduce((sum, entry) => sum + entry.amount, 0);
+              const expanded = expandedGroups[row.groupId] !== false;
+              const title = installmentBaseDescription(row.groupEntries[0]?.description ?? "Compra");
+              const hasOverdue = row.groupEntries.some((entry) =>
+                isOverdue(
+                  { payment_status: entry.paymentStatus, due_date: entry.dueDate },
+                  todayKeyValue
+                )
+              );
+              return (
+                <button
+                  key={`group-${row.groupId}`}
+                  type="button"
+                  onClick={() =>
+                    setExpandedGroups((prev) => ({
+                      ...prev,
+                      [row.groupId]: prev[row.groupId] === false,
+                    }))
+                  }
+                  className={`grid w-full items-center gap-x-4 border-b border-border px-3 py-3 text-left transition-colors hover:bg-background/70 ${
+                    hasOverdue ? "bg-danger/5" : "bg-background/50"
+                  }`}
+                  style={{ gridTemplateColumns }}
+                >
+                  <div className="min-w-0">
+                    <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-foreground">
+                      {expanded ? (
+                        <CaretDown size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                      ) : (
+                        <CaretRight size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                      )}
+                      {title} ({total}x)
+                    </p>
+                    <p className="mt-0.5 pl-5 text-xs text-muted">
+                      {paidCount}/{row.groupEntries.length} pagas
+                      {hasOverdue ? " · parcela vencida" : ""}
+                    </p>
+                  </div>
+                  <div className="text-sm font-medium text-foreground">
+                    {row.groupEntries[0]?.supplierName ?? "-"}
+                  </div>
+                  <div className="text-sm font-medium text-muted">Parcelado</div>
+                  <div className="text-sm font-bold text-danger">{formatCurrency(amount)}</div>
+                  {showNotes && <span />}
+                  {showPayment && <span />}
+                  <span />
+                </button>
+              );
+            }
+            return renderEntry(row.entry, row.nested);
+          });
+        })()}
         </div>
       </div>
       {totalPages > 1 && (
         <div className="mt-4 flex items-center justify-between border-t border-border px-3 pt-4">
           <p className="text-xs text-muted">
-            {safePage * TRANSACTION_PAGE_SIZE + 1}–{Math.min((safePage + 1) * TRANSACTION_PAGE_SIZE, entries.length)} de {entries.length} lançamentos
+            {safePage * TRANSACTION_PAGE_SIZE + 1}–{Math.min((safePage + 1) * TRANSACTION_PAGE_SIZE, listItems.length)} de {listItems.length} lançamentos
           </p>
           <div className="flex items-center gap-1">
             <button
@@ -1850,10 +2072,13 @@ function TransactionFormCard({
   description,
   form,
   categories,
+  accountOptions,
   supplierOptions,
   loading,
   error,
   buttonLabel,
+  allowInstallments = false,
+  embedded = false,
   onChange,
   onSubmit,
   onCancel,
@@ -1862,10 +2087,13 @@ function TransactionFormCard({
   description: string;
   form: TransactionForm;
   categories: { value: string; label: string }[];
+  accountOptions: { value: string; label: string }[];
   supplierOptions?: { value: string; label: string }[];
   loading: boolean;
   error: string | null;
   buttonLabel: string;
+  allowInstallments?: boolean;
+  embedded?: boolean;
   onChange: (patch: Partial<TransactionForm>) => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
   onCancel: () => void;
@@ -1874,7 +2102,11 @@ function TransactionFormCard({
     <form
       onSubmit={onSubmit}
       autoComplete="off"
-      className="finance-manual-form-enter rounded-lg border border-border bg-card shadow-card p-4 shadow-card sm:p-5"
+      className={
+        embedded
+          ? "finance-manual-form-enter rounded-lg border border-premium/30 bg-card p-4 shadow-card sm:p-5"
+          : "finance-manual-form-enter rounded-lg border border-border bg-card p-4 shadow-card sm:p-5"
+      }
     >
       <div className="mb-4">
         <h2 className="text-lg font-semibold text-foreground">{title}</h2>
@@ -1901,18 +2133,117 @@ function TransactionFormCard({
           />
         )}
         <Input
-          label="Data"
+          label="Data do lançamento"
           type="date"
           value={form.date}
-          onChange={(event) => onChange({ date: event.target.value })}
+          onChange={(event) =>
+            onChange({
+              date: event.target.value,
+              effectiveDate:
+                form.paymentStatus === "pago" && !form.effectiveDate
+                  ? event.target.value
+                  : form.effectiveDate,
+              dueDate: form.dueDate || event.target.value,
+            })
+          }
+        />
+        <Dropdown
+          label="Conta"
+          value={form.accountId}
+          options={accountOptions}
+          onChange={(accountId) => onChange({ accountId })}
+          placeholder="Selecione a conta"
         />
         <Dropdown
           label="Categoria"
-          value={form.category}
+          value={form.categoryId}
           options={categories}
-          onChange={(category) => onChange({ category })}
+          onChange={(categoryId) => onChange({ categoryId })}
+          placeholder="Selecione a categoria"
         />
+        <Dropdown
+          label="Status"
+          value={form.installmentsEnabled ? "pendente" : form.paymentStatus}
+          options={[
+            { value: "pago", label: "Pago" },
+            { value: "pendente", label: "Pendente" },
+            { value: "parcial", label: "Parcial" },
+          ]}
+          onChange={(paymentStatus) =>
+            onChange({
+              paymentStatus: paymentStatus as PaymentStatus,
+              effectiveDate:
+                paymentStatus === "pago"
+                  ? form.effectiveDate || form.date
+                  : "",
+              dueDate: form.dueDate || form.date,
+              installmentsEnabled:
+                paymentStatus === "pago" ? false : form.installmentsEnabled,
+            })
+          }
+        />
+        {form.paymentStatus === "pago" && !form.installmentsEnabled && (
+          <Input
+            label="Data de efetivação"
+            type="date"
+            value={form.effectiveDate}
+            onChange={(event) => onChange({ effectiveDate: event.target.value })}
+          />
+        )}
+        {(form.paymentStatus === "pendente" ||
+          form.paymentStatus === "parcial" ||
+          form.installmentsEnabled) && (
+          <Input
+            label="Vencimento"
+            type="date"
+            value={form.dueDate || form.date}
+            onChange={(event) => onChange({ dueDate: event.target.value })}
+          />
+        )}
       </div>
+      {allowInstallments && (
+        <div className="mt-4 rounded-lg border border-border bg-background p-4">
+          <button
+            type="button"
+            onClick={() =>
+              onChange({
+                installmentsEnabled: !form.installmentsEnabled,
+                paymentStatus: !form.installmentsEnabled ? "pendente" : form.paymentStatus,
+                dueDate: form.dueDate || form.date,
+              })
+            }
+            className="flex w-full items-center justify-between text-left"
+          >
+            <span>
+              <span className="text-sm font-semibold text-foreground">Parcelar esta despesa</span>
+              <span className="mt-0.5 block text-xs text-muted">
+                Gera várias despesas pendentes com o mesmo grupo, vencendo mês a mês.
+              </span>
+            </span>
+            <span
+              className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                form.installmentsEnabled
+                  ? "bg-primary text-white"
+                  : "bg-card text-muted"
+              }`}
+            >
+              {form.installmentsEnabled ? "Sim" : "Não"}
+            </span>
+          </button>
+          {form.installmentsEnabled && (
+            <div className="mt-3 max-w-xs">
+              <Input
+                label="Número de parcelas"
+                type="number"
+                min={2}
+                max={24}
+                value={form.installmentCount}
+                onChange={(event) => onChange({ installmentCount: event.target.value })}
+              />
+            </div>
+          )}
+        </div>
+      )}
       {error && (
         <p className="mt-3 rounded-lg border border-danger/20 bg-danger/5 px-4 py-3 text-sm text-danger">
           {error}
@@ -1944,6 +2275,9 @@ export function FinancePage() {
   const [activeTab, setActiveTab] = useState<FinanceTab>("overview");
   const [workshopId, setWorkshopId] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<FinancialTransaction[]>([]);
+  const [accounts, setAccounts] = useState<FinancialAccount[]>([]);
+  const [categories, setCategories] = useState<FinancialCategory[]>([]);
+  const [transfers, setTransfers] = useState<FinancialTransfer[]>([]);
   const [orders, setOrders] = useState<CompletedOrder[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [fixedCosts, setFixedCosts] = useState<FixedCost[]>(() => {
@@ -1994,6 +2328,11 @@ export function FinancePage() {
   const [launchingCostId, setLaunchingCostId] = useState<string | null>(null);
   const [launchErrors, setLaunchErrors] = useState<Record<string, string>>({});
   const [overviewChartInterval, setOverviewChartInterval] = useState<ChartInterval>("6m");
+  const [showTransfer, setShowTransfer] = useState(false);
+  const [savingTransfer, setSavingTransfer] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
+  const [paidConfirm, setPaidConfirm] = useState<FinanceEntry | null>(null);
+  const [savingPaid, setSavingPaid] = useState(false);
 
   const loadFinanceData = useCallback(async () => {
     if (initialFinanceLoadRef.current) {
@@ -2061,6 +2400,42 @@ export function FinancePage() {
     }
 
     setTransactions(transactionsData);
+
+    try {
+      const [loadedAccounts, loadedCategories] = await Promise.all([
+        loadFinancialAccounts(supabase, profileWorkshopId),
+        loadFinancialCategories(supabase, profileWorkshopId),
+      ]);
+      setAccounts(loadedAccounts);
+      setCategories(loadedCategories);
+    } catch (cashflowError) {
+      setAccounts([]);
+      setCategories([]);
+      setError(
+        cashflowError instanceof Error
+          ? `${cashflowError.message} Aplique as migrations 030–033 no Supabase (SQL Editor) para contas, categorias e fluxo de caixa.`
+          : "Aplique as migrations 030–033 no Supabase (SQL Editor)."
+      );
+    }
+
+    const { data: transferData, error: transferError } = await supabase
+      .from("financial_transfers")
+      .select(
+        "id, workshop_id, from_account_id, to_account_id, amount, transfer_date, description, created_at"
+      )
+      .eq("workshop_id", profileWorkshopId)
+      .order("transfer_date", { ascending: false });
+
+    if (!transferError) {
+      setTransfers(
+        ((transferData ?? []) as FinancialTransfer[]).map((row) => ({
+          ...row,
+          amount: Number(row.amount) || 0,
+        }))
+      );
+    } else {
+      setTransfers([]);
+    }
 
     if (ordersError) {
       setError(ordersError.message);
@@ -2256,7 +2631,11 @@ export function FinancePage() {
         description: transaction.description,
         amount: toCurrencyNumber(transaction.amount),
         category: transaction.category ?? "Outros",
+        categoryId: transaction.category_id ?? undefined,
+        accountId: transaction.account_id ?? undefined,
         date: transaction.transaction_date,
+        effectiveDate: transaction.effective_date,
+        dueDate: transaction.due_date,
         createdAt: transaction.created_at ?? transaction.transaction_date,
         clientName: order ? firstRelation(order.clients)?.name : undefined,
         serviceName: serviceNames,
@@ -2268,6 +2647,9 @@ export function FinancePage() {
         serviceOrderId: transaction.service_order_id ?? undefined,
         paymentStatus,
         notes: transaction.notes ?? "",
+        installmentGroupId: transaction.installment_group_id,
+        installmentNumber: transaction.installment_number,
+        installmentTotal: transaction.installment_total,
       };
     });
   }, [ordersById, suppliersById, transactions]);
@@ -2308,23 +2690,114 @@ export function FinancePage() {
     end: endOfMonth(previousMonthDate),
   };
   const todayRange = getPeriodRange("today", "", "", today);
-  const monthRevenues = revenueEntries.filter((entry) =>
-    isDateInRange(entry.date, currentMonthRange)
+  const currentMonthStart = dateKey(currentMonthRange.start);
+  const currentMonthEnd = dateKey(currentMonthRange.end);
+  const monthRevenueTotal = sumPaidRevenueInRange(
+    revenueEntries.map((entry) => ({
+      type: entry.type,
+      amount: entry.amount,
+      payment_status: entry.paymentStatus,
+      effective_date: entry.effectiveDate,
+      transaction_date: entry.date,
+    })),
+    currentMonthStart,
+    currentMonthEnd
   );
-  const monthExpenses = expenseEntries.filter((entry) =>
-    isDateInRange(entry.date, currentMonthRange)
-  );
-  const previousMonthRevenues = revenueEntries.filter((entry) =>
-    isDateInRange(entry.date, previousMonthRange)
-  );
-  const previousMonthExpenses = expenseEntries.filter((entry) =>
-    isDateInRange(entry.date, previousMonthRange)
-  );
-  const monthRevenueTotal = sumEntries(monthRevenues);
-  const monthExpenseTotal = sumEntries(monthExpenses);
+  const monthExpenseTotal = expenseEntries.reduce((sum, entry) => {
+    if (!isPaidCashStatus(entry.paymentStatus)) return sum;
+    const date = cashflowDate({
+      effective_date: entry.effectiveDate,
+      transaction_date: entry.date,
+    });
+    if (date < currentMonthStart || date > currentMonthEnd) return sum;
+    return sum + entry.amount;
+  }, 0);
   const monthProfit = monthRevenueTotal - monthExpenseTotal;
-  const previousMonthProfit =
-    sumEntries(previousMonthRevenues) - sumEntries(previousMonthExpenses);
+  const previousMonthStart = dateKey(previousMonthRange.start);
+  const previousMonthEnd = dateKey(previousMonthRange.end);
+  const previousMonthRevenueTotal = sumPaidRevenueInRange(
+    revenueEntries.map((entry) => ({
+      type: entry.type,
+      amount: entry.amount,
+      payment_status: entry.paymentStatus,
+      effective_date: entry.effectiveDate,
+      transaction_date: entry.date,
+    })),
+    previousMonthStart,
+    previousMonthEnd
+  );
+  const previousMonthExpenseTotal = expenseEntries.reduce((sum, entry) => {
+    if (!isPaidCashStatus(entry.paymentStatus)) return sum;
+    const date = cashflowDate({
+      effective_date: entry.effectiveDate,
+      transaction_date: entry.date,
+    });
+    if (date < previousMonthStart || date > previousMonthEnd) return sum;
+    return sum + entry.amount;
+  }, 0);
+  const previousMonthProfit = previousMonthRevenueTotal - previousMonthExpenseTotal;
+  const accountBalances = useMemo(() => {
+    const rows = transactionEntries.map((entry) => ({
+      type: entry.type,
+      amount: entry.amount,
+      payment_status: entry.paymentStatus,
+      effective_date: entry.effectiveDate,
+      transaction_date: entry.date,
+      account_id: entry.accountId ?? null,
+    }));
+    return Object.fromEntries(
+      accounts.map((account) => [account.id, accountBalance(account, rows, transfers)])
+    ) as Record<string, number>;
+  }, [accounts, transactionEntries, transfers]);
+  const currentCashBalance = useMemo(
+    () =>
+      accounts
+        .filter((account) => account.active)
+        .reduce((sum, account) => sum + (accountBalances[account.id] ?? 0), 0),
+    [accountBalances, accounts]
+  );
+
+  function statementLinesForAccount(accountId: string): AccountStatementLine[] {
+    const txLines: AccountStatementLine[] = transactionEntries
+      .filter((entry) => entry.accountId === accountId)
+      .map((entry) => ({
+        id: `tx-${entry.id}`,
+        date: cashflowDate({
+          effective_date: entry.effectiveDate,
+          transaction_date: entry.date,
+        }),
+        description: entry.description,
+        amount: entry.type === "receita" ? entry.amount : -entry.amount,
+        kind: entry.type,
+        overdue: isOverdue(
+          { payment_status: entry.paymentStatus, due_date: entry.dueDate },
+          dateKey(today)
+        ),
+      }));
+    const transferLines: AccountStatementLine[] = transfers
+      .filter(
+        (transfer) =>
+          transfer.from_account_id === accountId || transfer.to_account_id === accountId
+      )
+      .map((transfer) => {
+        const incoming = transfer.to_account_id === accountId;
+        const counterpartId = incoming
+          ? transfer.from_account_id
+          : transfer.to_account_id;
+        const counterpart =
+          accounts.find((account) => account.id === counterpartId)?.name ?? "conta";
+        return {
+          id: `tr-${transfer.id}`,
+          date: transfer.transfer_date,
+          description:
+            transfer.description?.trim() ||
+            (incoming ? `Transferência de ${counterpart}` : `Transferência para ${counterpart}`),
+          amount: incoming ? transfer.amount : -transfer.amount,
+          kind: incoming ? "transfer_in" : "transfer_out",
+        };
+      });
+    return [...txLines, ...transferLines].sort((a, b) => b.date.localeCompare(a.date));
+  }
   const monthGrowth =
     previousMonthProfit === 0
       ? monthProfit > 0
@@ -2359,6 +2832,29 @@ export function FinancePage() {
       label: supplier.name,
     })),
   ];
+  const activeAccountOptions = accounts
+    .filter((account) => account.active)
+    .map((account) => ({ value: account.id, label: account.name }));
+  const revenueCategorySelectOptions = categoriesOfType(categories, "receita").map(
+    (category) => ({ value: category.id, label: category.name })
+  );
+  const expenseCategorySelectOptions = categoriesOfType(categories, "despesa").map(
+    (category) => ({ value: category.id, label: category.name })
+  );
+  const revenueCategoryFilterOptions = [
+    { value: categoryFilterAll, label: "Todas as categorias" },
+    ...[...new Set(revenueEntries.map((entry) => entry.category))].map((name) => ({
+      value: name,
+      label: name,
+    })),
+  ];
+  const expenseCategoryFilterOptions = [
+    { value: categoryFilterAll, label: "Todas as categorias" },
+    ...[...new Set(expenseEntries.map((entry) => entry.category))].map((name) => ({
+      value: name,
+      label: name,
+    })),
+  ];
   const filteredRevenueEntries = revenueEntries.filter(
     (entry) =>
       (revenuePeriod === "all" || isDateInRange(entry.date, revenueRange)) &&
@@ -2373,6 +2869,41 @@ export function FinancePage() {
       (expenseSupplierFilter === categoryFilterAll ||
         entry.supplierId === expenseSupplierFilter)
   );
+
+  const upcomingDueItems = useMemo(() => {
+    const todayKeyValue = dateKey(today);
+    const accountNames = new Map(accounts.map((account) => [account.id, account.name]));
+    return transactionEntries
+      .filter((entry) =>
+        inDueAlertWindow(
+          { payment_status: entry.paymentStatus, due_date: entry.dueDate },
+          todayKeyValue
+        )
+      )
+      .sort((a, b) => {
+        const aOverdue = isOverdue(
+          { payment_status: a.paymentStatus, due_date: a.dueDate },
+          todayKeyValue
+        );
+        const bOverdue = isOverdue(
+          { payment_status: b.paymentStatus, due_date: b.dueDate },
+          todayKeyValue
+        );
+        if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
+        return (a.dueDate ?? "").localeCompare(b.dueDate ?? "");
+      })
+      .map((entry) => ({
+        id: entry.id,
+        description: entry.clientName
+          ? `${entry.clientName}${entry.serviceName ? ` · ${entry.serviceName}` : ""}`
+          : entry.description,
+        amount: entry.amount,
+        type: entry.type,
+        dueDate: entry.dueDate || entry.date,
+        accountName: entry.accountId ? accountNames.get(entry.accountId) : undefined,
+        paymentStatus: entry.paymentStatus,
+      }));
+  }, [accounts, today, transactionEntries]);
 
   const reportMonths = Array.from({ length: 6 }, (_, index) =>
     addMonths(startOfMonth(today), index - 5)
@@ -2471,8 +3002,10 @@ export function FinancePage() {
     items.forEach((item) => {
       const service = firstRelation(item.services);
       const serviceName = service?.name ?? "Serviço";
-      const catalogPrice = toCurrencyNumber(service?.price ?? item.unit_price);
-      const subtotal = catalogPrice * (Number(item.quantity) || 1);
+      const storedUnit = toCurrencyNumber(item.unit_price);
+      const catalogPrice = toCurrencyNumber(service?.price);
+      const unitPrice = storedUnit > 0 ? storedUnit : catalogPrice;
+      const subtotal = unitPrice * (Number(item.quantity) || 1);
       acc[serviceName] = (acc[serviceName] ?? 0) + subtotal;
     });
     return acc;
@@ -2542,13 +3075,34 @@ export function FinancePage() {
     monthlyServiceCount > 0 ? monthExpenseTotal / monthlyServiceCount : 0;
 
   function resetForm(type: TransactionType) {
+    const accountId = defaultAccountId(accounts);
     if (type === "receita") {
-      setRevenueForm({ ...initialRevenueForm, date: dateKey(today) });
+      setRevenueForm({
+        ...initialRevenueForm,
+        date: dateKey(today),
+        effectiveDate: dateKey(today),
+        dueDate: dateKey(today),
+        accountId,
+        categoryId:
+          matchCategoryId(categories, "receita", "Serviço") ||
+          revenueCategorySelectOptions[0]?.value ||
+          "",
+      });
       setEditingRevenueId(null);
       return;
     }
 
-    setExpenseForm({ ...initialExpenseForm, date: dateKey(today) });
+    setExpenseForm({
+      ...initialExpenseForm,
+      date: dateKey(today),
+      effectiveDate: dateKey(today),
+      dueDate: dateKey(today),
+      accountId,
+      categoryId:
+        matchCategoryId(categories, "despesa", "Produtos") ||
+        expenseCategorySelectOptions[0]?.value ||
+        "",
+    });
     setEditingExpenseId(null);
   }
 
@@ -2590,6 +3144,21 @@ export function FinancePage() {
       return;
     }
 
+    if (!form.accountId) {
+      setFormError("Selecione a conta do lançamento.");
+      return;
+    }
+    if (!form.categoryId) {
+      setFormError("Selecione a categoria.");
+      return;
+    }
+
+    const categoryName =
+      (type === "receita"
+        ? revenueCategorySelectOptions
+        : expenseCategorySelectOptions
+      ).find((option) => option.value === form.categoryId)?.label ?? "Outros";
+
     let amount: number;
     try {
       amount = parseMoney(form.amount);
@@ -2612,10 +3181,20 @@ export function FinancePage() {
 
     setSaving(true);
     setFormError(null);
+    const paymentStatus = form.installmentsEnabled ? "pendente" : form.paymentStatus;
+    const effectiveDate =
+      paymentStatus === "pago" ? form.effectiveDate || form.date : null;
+    const dueDate =
+      paymentStatus === "pago" ? form.dueDate || null : form.dueDate || form.date;
     const transactionPayload = {
       description: form.description.trim(),
       amount,
-      category: form.category,
+      category: categoryName,
+      category_id: form.categoryId,
+      account_id: form.accountId,
+      payment_status: paymentStatus,
+      effective_date: effectiveDate,
+      due_date: dueDate,
       transaction_date: form.date,
     };
 
@@ -2637,6 +3216,23 @@ export function FinancePage() {
           .eq("workshop_id", workshopId);
 
         updateError = legacyResult.error;
+      }
+
+      if (
+        updateError &&
+        (isMissingColumnError(updateError, "category_id") ||
+          isMissingColumnError(updateError, "account_id") ||
+          isMissingColumnError(updateError, "effective_date") ||
+          isMissingColumnError(updateError, "due_date"))
+      ) {
+        const { category_id: _categoryId, account_id: _accountId, effective_date: _effectiveDate, due_date: _dueDate, ...legacyPayload } =
+          transactionPayload;
+        const legacyCashflow = await supabase
+          .from("financial_transactions")
+          .update({ ...legacyPayload, supplier_id: supplierId })
+          .eq("id", transactionId)
+          .eq("workshop_id", workshopId);
+        updateError = legacyCashflow.error;
       }
 
       setSaving(false);
@@ -2668,6 +3264,55 @@ export function FinancePage() {
       return;
     }
 
+    if (type === "despesa" && form.installmentsEnabled) {
+      const count = Number(form.installmentCount);
+      if (!Number.isInteger(count) || count < 2 || count > 24) {
+        setSaving(false);
+        setFormError("Informe entre 2 e 24 parcelas.");
+        return;
+      }
+
+      const amounts = splitInstallmentAmounts(amount, count);
+      const groupId = crypto.randomUUID();
+      const firstDue = dueDate || form.date;
+      const rows = amounts.map((parcelAmount, index) => ({
+        workshop_id: workshopId,
+        type: "despesa" as const,
+        description: `${form.description.trim()} (${index + 1}/${count})`,
+        amount: parcelAmount,
+        category: categoryName,
+        category_id: form.categoryId,
+        account_id: form.accountId,
+        supplier_id: supplierId,
+        payment_status: "pendente" as const,
+        effective_date: null,
+        due_date: addMonthsToDateKey(firstDue, index),
+        transaction_date: form.date,
+        installment_group_id: groupId,
+        installment_number: index + 1,
+        installment_total: count,
+      }));
+
+      const { error: groupError } = await supabase
+        .from("financial_transactions")
+        .insert(rows);
+
+      setSaving(false);
+      if (groupError) {
+        setFormError(
+          isMissingColumnError(groupError, "installment_group_id") ||
+            isMissingColumnError(groupError, "due_date")
+            ? "Aplique as migrations 034 e 035 no Supabase (SQL Editor) para vencimento e parcelamento."
+            : formatSupplierSaveError(groupError.message)
+        );
+        return;
+      }
+
+      void loadFinanceData();
+      closeManualForm(type);
+      return;
+    }
+
     let { data: insertedRow, error: insertError } = await supabase
       .from("financial_transactions")
       .insert({
@@ -2692,6 +3337,29 @@ export function FinancePage() {
 
       insertedRow = legacyResult.data;
       insertError = legacyResult.error;
+    }
+
+    if (
+      insertError &&
+      (isMissingColumnError(insertError, "category_id") ||
+        isMissingColumnError(insertError, "account_id") ||
+        isMissingColumnError(insertError, "effective_date") ||
+        isMissingColumnError(insertError, "due_date"))
+    ) {
+      const { category_id: _categoryId, account_id: _accountId, effective_date: _effectiveDate, due_date: _dueDate, ...legacyPayload } =
+        transactionPayload;
+      const legacyCashflow = await supabase
+        .from("financial_transactions")
+        .insert({
+          workshop_id: workshopId,
+          type,
+          ...legacyPayload,
+          supplier_id: supplierId,
+        })
+        .select("id")
+        .single();
+      insertedRow = legacyCashflow.data;
+      insertError = legacyCashflow.error;
     }
 
     setSaving(false);
@@ -2726,24 +3394,46 @@ export function FinancePage() {
         maximumFractionDigits: 2,
       }),
       date: entry.date,
-      category: entry.category,
+      effectiveDate: entry.effectiveDate || entry.date,
+      dueDate: entry.dueDate || entry.date,
+      categoryId:
+        entry.categoryId ||
+        matchCategoryId(categories, "receita", entry.category),
+      accountId: entry.accountId || defaultAccountId(accounts),
+      paymentStatus: entry.paymentStatus ?? "pago",
       supplierId: categoryFilterAll,
+      installmentsEnabled: false,
+      installmentCount: "3",
     });
     setRevenueError(null);
+    setShowRevenueForm(false);
     setEditingRevenueId(entry.id);
-    setShowRevenueForm(true);
   }
 
-  async function handleChangePaymentStatus(
+  function handleChangePaymentStatus(
     entry: FinanceEntry,
     nextStatus: PaymentStatus
   ) {
     if (entry.paymentStatus === nextStatus) return;
+    if (nextStatus === "pago") {
+      setPaidConfirm(entry);
+      return;
+    }
+    void applyPaymentStatus(entry, nextStatus, null);
+  }
 
+  async function applyPaymentStatus(
+    entry: FinanceEntry,
+    nextStatus: PaymentStatus,
+    effectiveDate: string | null
+  ) {
     const previousStatus = entry.paymentStatus ?? "pendente";
+    const previousEffective = entry.effectiveDate ?? null;
+    const nextEffective =
+      nextStatus === "pago" ? effectiveDate || dateKey(today) : null;
     setError(null);
 
-    if (entry.type === "receita" && entry.serviceOrderId) {
+    if (entry.serviceOrderId) {
       setOrders((prev) =>
         prev.map((order) =>
           order.id === entry.serviceOrderId
@@ -2751,13 +3441,28 @@ export function FinancePage() {
             : order
         )
       );
+    }
 
-      const { error: updateError } = await supabase
+    writeStoredTxPaymentStatus(entry.id, nextStatus);
+    setTransactions((prev) =>
+      prev.map((transaction) =>
+        transaction.id === entry.id
+          ? {
+              ...transaction,
+              payment_status: nextStatus,
+              effective_date: nextEffective,
+            }
+          : transaction
+      )
+    );
+
+    if (entry.serviceOrderId) {
+      const { error: orderError } = await supabase
         .from("service_orders")
         .update({ payment_status: nextStatus })
         .eq("id", entry.serviceOrderId);
 
-      if (updateError) {
+      if (orderError) {
         setOrders((prev) =>
           prev.map((order) =>
             order.id === entry.serviceOrderId
@@ -2765,27 +3470,42 @@ export function FinancePage() {
               : order
           )
         );
-        setError(updateError.message);
+        writeStoredTxPaymentStatus(entry.id, previousStatus);
+        setTransactions((prev) =>
+          prev.map((transaction) =>
+            transaction.id === entry.id
+              ? {
+                  ...transaction,
+                  payment_status: previousStatus,
+                  effective_date: previousEffective,
+                }
+              : transaction
+          )
+        );
+        setError(orderError.message);
+        return;
       }
-      return;
     }
 
-    if (entry.type !== "despesa") return;
+    const payload = {
+      payment_status: nextStatus,
+      effective_date: nextEffective,
+    };
 
-    writeStoredTxPaymentStatus(entry.id, nextStatus);
-    setTransactions((prev) =>
-      prev.map((transaction) =>
-        transaction.id === entry.id
-          ? { ...transaction, payment_status: nextStatus }
-          : transaction
-      )
-    );
-
-    const { error: updateError } = await supabase
+    let { error: updateError } = await supabase
       .from("financial_transactions")
-      .update({ payment_status: nextStatus })
+      .update(payload)
       .eq("id", entry.id)
       .eq("workshop_id", workshopId);
+
+    if (isMissingColumnError(updateError, "effective_date")) {
+      const fallback = await supabase
+        .from("financial_transactions")
+        .update({ payment_status: nextStatus })
+        .eq("id", entry.id)
+        .eq("workshop_id", workshopId);
+      updateError = fallback.error;
+    }
 
     if (!updateError) {
       clearStoredTxPaymentStatus(entry.id);
@@ -2793,15 +3513,27 @@ export function FinancePage() {
     }
 
     if (isMissingColumnError(updateError, "payment_status")) {
-      // Keep local/optimistic status until migration 018 is applied.
       return;
     }
 
+    if (entry.serviceOrderId) {
+      setOrders((prev) =>
+        prev.map((order) =>
+          order.id === entry.serviceOrderId
+            ? { ...order, payment_status: previousStatus }
+            : order
+        )
+      );
+    }
     writeStoredTxPaymentStatus(entry.id, previousStatus);
     setTransactions((prev) =>
       prev.map((transaction) =>
         transaction.id === entry.id
-          ? { ...transaction, payment_status: previousStatus }
+          ? {
+              ...transaction,
+              payment_status: previousStatus,
+              effective_date: previousEffective,
+            }
           : transaction
       )
     );
@@ -2855,12 +3587,20 @@ export function FinancePage() {
         maximumFractionDigits: 2,
       }),
       date: entry.date,
-      category: entry.category,
+      effectiveDate: entry.effectiveDate || entry.date,
+      dueDate: entry.dueDate || entry.date,
+      categoryId:
+        entry.categoryId ||
+        matchCategoryId(categories, "despesa", entry.category),
+      accountId: entry.accountId || defaultAccountId(accounts),
+      paymentStatus: entry.paymentStatus ?? "pago",
       supplierId: entry.supplierId ?? categoryFilterAll,
+      installmentsEnabled: false,
+      installmentCount: "3",
     });
     setExpenseError(null);
+    setShowExpenseForm(false);
     setEditingExpenseId(entry.id);
-    setShowExpenseForm(true);
   }
 
   function resetFixedCostForm() {
@@ -3107,6 +3847,13 @@ export function FinancePage() {
       return next;
     });
 
+    const defaults = await resolveDefaultCashflowIds(
+      supabase,
+      workshopId,
+      "despesa",
+      FIXED_COST_CATEGORY_NAME
+    );
+
     const { data, error } = await supabase
       .from("financial_transactions")
       .insert({
@@ -3114,11 +3861,15 @@ export function FinancePage() {
         type: "despesa",
         description: cost.name,
         amount,
-        category: "Custo Fixo",
+        category: FIXED_COST_CATEGORY_NAME,
         transaction_date: pending.paymentDate,
         source: pending.source,
+        ...(defaults.accountId ? { account_id: defaults.accountId } : {}),
+        ...(defaults.categoryId ? { category_id: defaults.categoryId } : {}),
+        payment_status: "pago",
+        effective_date: pending.paymentDate,
       })
-      .select(TRANSACTION_SELECT_WITH_PAYMENT)
+      .select(TRANSACTION_SELECT_CASHFLOW)
       .single();
 
     let saved: unknown = data;
@@ -3241,7 +3992,38 @@ export function FinancePage() {
   }
 
   function requestDeleteTransaction(entry: FinanceEntry) {
+    if (entry.installmentGroupId) {
+      const remaining = expenseEntries.filter(
+        (item) =>
+          item.installmentGroupId === entry.installmentGroupId &&
+          item.paymentStatus !== "pago"
+      );
+      if (remaining.length > 1) {
+        setDeleteConfirm({ type: "installmentGroup", entry, remaining });
+        return;
+      }
+    }
     setDeleteConfirm({ type: "transaction", entry });
+  }
+
+  async function executeDeleteInstallmentGroup(remaining: FinanceEntry[]) {
+    setDeletingFinanceItem(true);
+    setError(null);
+    const ids = remaining.map((item) => item.id);
+    try {
+      const { error: deleteError } = await supabase
+        .from("financial_transactions")
+        .delete()
+        .in("id", ids);
+      if (deleteError) {
+        setError(deleteError.message);
+        return;
+      }
+      setTransactions((prev) => prev.filter((item) => !ids.includes(item.id)));
+      setDeleteConfirm(null);
+    } finally {
+      setDeletingFinanceItem(false);
+    }
   }
 
   async function executeDeleteTransaction(
@@ -3295,6 +4077,130 @@ export function FinancePage() {
 
   function handleDeleteTransaction(entry: FinanceEntry) {
     requestDeleteTransaction(entry);
+  }
+
+  async function handleCreateAccount(input: {
+    name: string;
+    type: FinancialAccount["type"];
+    initialBalance: string;
+  }) {
+    if (!workshopId) throw new Error("Oficina não encontrada.");
+    const normalized = input.initialBalance.replace(/\./g, "").replace(",", ".");
+    const initialBalance = Number(normalized || 0);
+    if (!Number.isFinite(initialBalance)) {
+      throw new Error("Informe um saldo inicial válido.");
+    }
+    const saved = await saveFinancialAccount(supabase, workshopId, {
+      name: input.name,
+      type: input.type,
+      initial_balance: initialBalance,
+      active: true,
+    });
+    setAccounts((prev) =>
+      [...prev.filter((account) => account.id !== saved.id), saved].sort((a, b) =>
+        a.name.localeCompare(b.name, "pt-BR")
+      )
+    );
+  }
+
+  async function handleSetDefaultAccount(accountId: string) {
+    if (!workshopId) return;
+    await setDefaultFinancialAccount(supabase, workshopId, accountId);
+    setAccounts((prev) =>
+      prev.map((account) => ({
+        ...account,
+        is_default: account.id === accountId,
+      }))
+    );
+  }
+
+  async function handleToggleAccount(account: FinancialAccount) {
+    if (!workshopId) return;
+    const saved = await saveFinancialAccount(supabase, workshopId, {
+      id: account.id,
+      name: account.name,
+      type: account.type,
+      initial_balance: account.initial_balance,
+      active: !account.active,
+    });
+    setAccounts((prev) =>
+      prev.map((item) => (item.id === saved.id ? saved : item))
+    );
+  }
+
+  async function handleSaveCategory(input: {
+    id?: string;
+    name: string;
+    type: TransactionType;
+    active: boolean;
+  }) {
+    if (!workshopId) throw new Error("Oficina não encontrada.");
+    const saved = await saveFinancialCategory(supabase, workshopId, input);
+    setCategories((prev) => {
+      const next = [...prev.filter((category) => category.id !== saved.id), saved];
+      return next.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+    });
+  }
+
+  async function handleSubmitTransfer(input: {
+    fromAccountId: string;
+    toAccountId: string;
+    amount: string;
+    date: string;
+    description: string;
+  }) {
+    if (!workshopId) {
+      setTransferError("Oficina não encontrada.");
+      return;
+    }
+    if (!input.fromAccountId || !input.toAccountId) {
+      setTransferError("Selecione as contas de origem e destino.");
+      return;
+    }
+    if (input.fromAccountId === input.toAccountId) {
+      setTransferError("Origem e destino precisam ser contas diferentes.");
+      return;
+    }
+
+    let amount: number;
+    try {
+      amount = parseMoney(input.amount);
+    } catch (err) {
+      setTransferError(err instanceof Error ? err.message : "Informe um valor válido.");
+      return;
+    }
+
+    setSavingTransfer(true);
+    setTransferError(null);
+    const { data, error: insertError } = await supabase
+      .from("financial_transfers")
+      .insert({
+        workshop_id: workshopId,
+        from_account_id: input.fromAccountId,
+        to_account_id: input.toAccountId,
+        amount,
+        transfer_date: input.date,
+        description: input.description.trim() || null,
+      })
+      .select(
+        "id, workshop_id, from_account_id, to_account_id, amount, transfer_date, description, created_at"
+      )
+      .single();
+
+    setSavingTransfer(false);
+
+    if (insertError || !data) {
+      setTransferError(
+        insertError?.message ?? "Não foi possível registrar a transferência."
+      );
+      return;
+    }
+
+    setTransfers((prev) => [
+      { ...data, amount: Number(data.amount) || 0 } as FinancialTransfer,
+      ...prev,
+    ]);
+    setShowTransfer(false);
   }
 
   return (
@@ -3351,7 +4257,7 @@ export function FinancePage() {
       </div>
 
       <div className="rounded-lg border border-border bg-card shadow-card p-1.5 shadow-card">
-        <div className="grid grid-cols-2 gap-1.5 md:grid-cols-4">
+        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
           {tabs.map((tab) => (
             <button
               key={tab.id}
@@ -3422,6 +4328,15 @@ export function FinancePage() {
                     </div>
                   </div>
                 </section>
+
+                <UpcomingDuesSection
+                  items={upcomingDueItems}
+                  today={dateKey(today)}
+                  onMarkPaid={(item) => {
+                    const entry = transactionEntries.find((row) => row.id === item.id);
+                    if (entry) handleChangePaymentStatus(entry, "pago");
+                  }}
+                />
 
                 <section className="rounded-lg border border-border bg-card shadow-card p-5 shadow-card">
                   <div className="mb-4 flex items-center justify-between gap-3">
@@ -3636,19 +4551,16 @@ export function FinancePage() {
                   Nova receita
                 </Button>
               </div>
-              {showRevenueForm && (
+              {showRevenueForm && !editingRevenueId && (
                 <TransactionFormCard
-                  title={editingRevenueId ? "Editar receita" : "Lançar receita manual"}
-                  description={
-                    editingRevenueId
-                      ? "Atualize os dados do lançamento selecionado."
-                      : "Use para gorjetas, receitas avulsas ou ajustes."
-                  }
+                  title="Lançar receita manual"
+                  description="Use para gorjetas, receitas avulsas ou ajustes."
                   form={revenueForm}
-                  categories={revenueCategoryOptions}
+                  categories={revenueCategorySelectOptions}
+                  accountOptions={activeAccountOptions}
                   loading={savingRevenue}
                   error={revenueError}
-                  buttonLabel={editingRevenueId ? "Atualizar receita" : "Salvar receita"}
+                  buttonLabel="Salvar receita"
                   onChange={(patch) => setRevenueForm((prev) => ({ ...prev, ...patch }))}
                   onSubmit={(event) => handleSaveManualTransaction(event, "receita")}
                   onCancel={() => closeManualForm("receita")}
@@ -3658,6 +4570,25 @@ export function FinancePage() {
                 entries={filteredRevenueEntries}
                 emptyMessage="Nenhuma receita encontrada."
                 groupByMonth={revenuePeriod !== "all"}
+                editingId={editingRevenueId}
+                editForm={
+                  editingRevenueId ? (
+                    <TransactionFormCard
+                      embedded
+                      title="Editar receita"
+                      description="Atualize os dados deste lançamento."
+                      form={revenueForm}
+                      categories={revenueCategorySelectOptions}
+                      accountOptions={activeAccountOptions}
+                      loading={savingRevenue}
+                      error={revenueError}
+                      buttonLabel="Atualizar receita"
+                      onChange={(patch) => setRevenueForm((prev) => ({ ...prev, ...patch }))}
+                      onSubmit={(event) => handleSaveManualTransaction(event, "receita")}
+                      onCancel={() => closeManualForm("receita")}
+                    />
+                  ) : null
+                }
                 onEditTransaction={handleEditRevenue}
                 onChangePaymentStatus={handleChangePaymentStatus}
                 onUpdateNotes={handleUpdateTransactionNotes}
@@ -3714,20 +4645,18 @@ export function FinancePage() {
                   Nova despesa
                 </Button>
               </div>
-              {showExpenseForm && (
+              {showExpenseForm && !editingExpenseId && (
                 <TransactionFormCard
-                  title={editingExpenseId ? "Editar despesa" : "Lançar despesa"}
-                  description={
-                    editingExpenseId
-                      ? "Atualize os dados do lançamento selecionado."
-                      : "Registre compras, custos fixos e investimentos."
-                  }
+                  title="Lançar despesa"
+                  description="Registre compras, custos fixos e investimentos."
                   form={expenseForm}
-                  categories={expenseCategoryOptions}
+                  categories={expenseCategorySelectOptions}
+                  accountOptions={activeAccountOptions}
                   supplierOptions={expenseSupplierOptions}
                   loading={savingExpense}
                   error={expenseError}
-                  buttonLabel={editingExpenseId ? "Atualizar despesa" : "Salvar despesa"}
+                  buttonLabel="Salvar despesa"
+                  allowInstallments
                   onChange={(patch) => setExpenseForm((prev) => ({ ...prev, ...patch }))}
                   onSubmit={(event) => handleSaveManualTransaction(event, "despesa")}
                   onCancel={() => closeManualForm("despesa")}
@@ -3735,9 +4664,30 @@ export function FinancePage() {
               )}
               <TransactionList
                 entries={filteredExpenseEntries}
+                editingId={editingExpenseId}
+                editForm={
+                  editingExpenseId ? (
+                    <TransactionFormCard
+                      embedded
+                      title="Editar despesa"
+                      description="Atualize os dados deste lançamento."
+                      form={expenseForm}
+                      categories={expenseCategorySelectOptions}
+                      accountOptions={activeAccountOptions}
+                      supplierOptions={expenseSupplierOptions}
+                      loading={savingExpense}
+                      error={expenseError}
+                      buttonLabel="Atualizar despesa"
+                      onChange={(patch) => setExpenseForm((prev) => ({ ...prev, ...patch }))}
+                      onSubmit={(event) => handleSaveManualTransaction(event, "despesa")}
+                      onCancel={() => closeManualForm("despesa")}
+                    />
+                  ) : null
+                }
                 emptyMessage="Nenhuma despesa registrada"
                 emptyDescription="Use o botão + Nova despesa para adicionar um lançamento manual."
                 accent="expense"
+                groupInstallments
                 filter={
                   <InlineFilterButton
                     value={expensePeriod}
@@ -3771,6 +4721,20 @@ export function FinancePage() {
                 onUpdateNotes={handleUpdateTransactionNotes}
               />
             </div>
+          )}
+
+          {activeTab === "cashflow" && (
+            <CashflowProjectionPanel
+              currentBalance={currentCashBalance}
+              entries={transactionEntries}
+              accounts={accounts}
+              transfers={transfers}
+              today={dateKey(today)}
+              onMarkPaid={(item) => {
+                const entry = transactionEntries.find((row) => row.id === item.id);
+                if (entry) handleChangePaymentStatus(entry, "pago");
+              }}
+            />
           )}
 
           {activeTab === "fixedCosts" && (
@@ -4099,6 +5063,25 @@ export function FinancePage() {
               </div>
             </div>
           )}
+
+          {activeTab === "accounts" && (
+            <AccountsPanel
+              accounts={accounts}
+              balances={accountBalances}
+              statementLines={statementLinesForAccount}
+              onCreateAccount={handleCreateAccount}
+              onSetDefault={handleSetDefaultAccount}
+              onToggleActive={handleToggleAccount}
+              onOpenTransfer={() => {
+                setTransferError(null);
+                setShowTransfer(true);
+              }}
+            />
+          )}
+
+          {activeTab === "categories" && (
+            <CategoriesPanel categories={categories} onSave={handleSaveCategory} />
+          )}
         </>
       )}
       <style>{`
@@ -4148,6 +5131,36 @@ export function FinancePage() {
       />
 
       <ConfirmDialog
+        open={deleteConfirm?.type === "installmentGroup"}
+        title="Excluir parcela"
+        description={
+          deleteConfirm?.type === "installmentGroup"
+            ? `Esta despesa faz parte de um parcelamento. Excluir só esta parcela ou as ${deleteConfirm.remaining.length} parcelas em aberto?`
+            : ""
+        }
+        confirmLabel="Só esta parcela"
+        extraLabel={
+          deleteConfirm?.type === "installmentGroup"
+            ? `Excluir ${deleteConfirm.remaining.length} em aberto`
+            : undefined
+        }
+        loading={deletingFinanceItem}
+        onCancel={() => {
+          if (!deletingFinanceItem) setDeleteConfirm(null);
+        }}
+        onConfirm={() => {
+          if (deleteConfirm?.type === "installmentGroup") {
+            void executeDeleteTransaction(deleteConfirm.entry, false);
+          }
+        }}
+        onExtra={() => {
+          if (deleteConfirm?.type === "installmentGroup") {
+            void executeDeleteInstallmentGroup(deleteConfirm.remaining);
+          }
+        }}
+      />
+
+      <ConfirmDialog
         open={deleteConfirm?.type === "transaction"}
         title="Excluir lançamento"
         description={
@@ -4191,6 +5204,39 @@ export function FinancePage() {
           if (deleteConfirm?.type === "revertAppointment") {
             void executeDeleteTransaction(deleteConfirm.entry, true);
           }
+        }}
+      />
+
+      <ConfirmPaidDialog
+        open={Boolean(paidConfirm)}
+        defaultDate={dateKey(today)}
+        loading={savingPaid}
+        onCancel={() => {
+          if (!savingPaid) setPaidConfirm(null);
+        }}
+        onConfirm={(effectiveDate) => {
+          if (!paidConfirm) return;
+          setSavingPaid(true);
+          void applyPaymentStatus(paidConfirm, "pago", effectiveDate).finally(() => {
+            setSavingPaid(false);
+            setPaidConfirm(null);
+          });
+        }}
+      />
+
+      <TransferDialog
+        open={showTransfer}
+        accounts={accounts.filter((account) => account.active)}
+        loading={savingTransfer}
+        error={transferError}
+        onCancel={() => {
+          if (!savingTransfer) {
+            setShowTransfer(false);
+            setTransferError(null);
+          }
+        }}
+        onSubmit={(input) => {
+          void handleSubmitTransfer(input);
         }}
       />
     </div>

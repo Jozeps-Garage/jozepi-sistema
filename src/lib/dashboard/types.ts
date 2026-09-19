@@ -27,6 +27,7 @@ export type UnpaidOrderRow = {
   completed_at: string | null;
   opened_at: string | null;
   payment_status: "pendente" | "parcial";
+  due_date?: string | null;
   clients: AppointmentClient | AppointmentClient[] | null;
   service_order_items: {
     services: { name: string } | { name: string }[] | null;
@@ -38,6 +39,7 @@ export type PendingExpenseRow = {
   description: string;
   amount: number | string;
   transaction_date: string;
+  due_date?: string | null;
   category: string | null;
   payment_status: "pendente" | "parcial" | "pago" | "cancelado" | null;
 };

@@ -172,12 +172,28 @@ export function parseAppointmentAmount(value: string) {
 
 export function calculateServicesTotal(
   serviceIds: string[],
-  catalogServices: AgendaService[]
+  catalogServices: AgendaService[],
+  priceOverrides?: Record<string, number>
 ) {
   return serviceIds.reduce((total, serviceId) => {
+    const override = priceOverrides?.[serviceId];
+    if (override != null) return total + override;
     const service = catalogServices.find((item) => item.id === serviceId);
     return total + (service ? getServicePrice(service) : 0);
   }, 0);
+}
+
+export function servicePricesFromOrderItems(
+  items: Array<{ service_id: string; unit_price: number | string | null }>
+) {
+  const prices: Record<string, number> = {};
+  for (const item of items) {
+    const unit = Number(item.unit_price);
+    if (Number.isFinite(unit) && unit > 0) {
+      prices[item.service_id] = unit;
+    }
+  }
+  return prices;
 }
 
 export function isCustomAppointmentTotal(
@@ -186,27 +202,41 @@ export function isCustomAppointmentTotal(
 ) {
   if (appointment.totalAmount <= 0) return false;
 
-  const catalogTotal = calculateServicesTotal(
+  const servicesTotal = calculateServicesTotal(
     appointment.serviceIds,
-    catalogServices
+    catalogServices,
+    appointment.servicePrices
   );
 
-  return Math.abs(appointment.totalAmount - catalogTotal) > 0.009;
+  return Math.abs(appointment.totalAmount - servicesTotal) > 0.009;
 }
 
 export function buildServiceOrderItems(
   selectedServices: AgendaService[],
-  appointmentTotal: number
+  appointmentTotal: number,
+  priceOverrides?: Record<string, number>
 ) {
-  const catalogTotal = selectedServices.reduce(
-    (total, service) => total + getServicePrice(service),
-    0
+  const hasOverrides = Boolean(
+    priceOverrides && Object.keys(priceOverrides).length > 0
   );
+  const linePrices = selectedServices.map((service) => ({
+    service,
+    price: priceOverrides?.[service.id] ?? getServicePrice(service),
+  }));
+  const linesTotal = linePrices.reduce((total, item) => total + item.price, 0);
+
+  if (hasOverrides) {
+    return linePrices.map((item) => ({
+      service_id: item.service.id,
+      quantity: 1,
+      unit_price: item.price,
+    }));
+  }
 
   if (
     selectedServices.length === 0 ||
-    catalogTotal <= 0 ||
-    Math.abs(appointmentTotal - catalogTotal) <= 0.009
+    linesTotal <= 0 ||
+    Math.abs(appointmentTotal - linesTotal) <= 0.009
   ) {
     return selectedServices.map((service) => ({
       service_id: service.id,
@@ -228,7 +258,7 @@ export function buildServiceOrderItems(
 
     const share =
       Math.round(
-        (getServicePrice(service) / catalogTotal) * appointmentTotal * 100
+        (getServicePrice(service) / linesTotal) * appointmentTotal * 100
       ) / 100;
     assignedTotal += share;
 
@@ -370,6 +400,7 @@ export function mapOrderToAppointment(order: AppointmentOrderRow): Appointment {
     clientId: order.client_id,
     vehicleId: order.vehicle_id,
     serviceIds: serviceItems.map((item) => item.service_id),
+    servicePrices: servicePricesFromOrderItems(serviceItems),
     client: client?.name ?? "Cliente não encontrado",
     service: services.map((service) => service.name).join(", "),
     totalAmount: Number(order.total_amount) || 0,

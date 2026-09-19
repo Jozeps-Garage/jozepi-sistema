@@ -10,6 +10,8 @@ import type {
 } from "@/lib/dashboard/types";
 import { getProductStockPercent } from "@/lib/dashboard/types";
 import { createClient } from "@/lib/supabase/server";
+import { cashDate, getMonthlyRevenue, isPaidCashStatus } from "@/lib/finance/cash";
+import { toMoneyNumber } from "@/lib/finance/types";
 import {
   DEFAULT_TIME_ZONE,
   addDaysToDateKey,
@@ -119,17 +121,11 @@ export default async function DashboardPage() {
       .gte("scheduled_date", monthStart)
       .lte("scheduled_date", monthEnd);
 
-    const { data: revenueRows } = await supabase
-      .from("service_orders")
-      .select("total_amount")
-      .eq("workshop_id", workshopId)
-      .eq("status", "finalizada")
-      .gte("scheduled_date", monthStart)
-      .lte("scheduled_date", monthEnd);
-
-    const monthlyRevenue = (revenueRows ?? []).reduce(
-      (sum, row) => sum + Number(row.total_amount ?? 0),
-      0
+    const monthlyRevenue = await getMonthlyRevenue(
+      supabase,
+      workshopId,
+      monthStart,
+      monthEnd
     );
 
     if (statsData) {
@@ -198,52 +194,108 @@ export default async function DashboardPage() {
 
     unpaidOrders = (unpaidData as UnpaidOrderRow[] | null) ?? [];
 
-    const { data: pendingExpenseData, error: pendingExpenseError } =
-      await supabase
+    if (unpaidOrders.length > 0) {
+      const { data: dueRows } = await supabase
         .from("financial_transactions")
-        .select(
-          "id, description, amount, transaction_date, category, payment_status"
-        )
+        .select("service_order_id, due_date")
         .eq("workshop_id", workshopId)
-        .eq("type", "despesa")
-        .in("payment_status", ["pendente", "parcial"])
-        .order("transaction_date", { ascending: false })
-        .limit(20);
+        .eq("type", "receita")
+        .in(
+          "service_order_id",
+          unpaidOrders.map((order) => order.id)
+        );
+      const dueByOrder = new Map(
+        ((dueRows ?? []) as { service_order_id: string | null; due_date: string | null }[])
+          .filter((row) => row.service_order_id)
+          .map((row) => [row.service_order_id as string, row.due_date])
+      );
+      unpaidOrders = unpaidOrders.map((order) => ({
+        ...order,
+        due_date: dueByOrder.get(order.id) ?? (order.completed_at ?? order.opened_at)?.slice(0, 10) ?? null,
+      }));
+    }
 
-    if (!pendingExpenseError) {
-      pendingExpenses = (pendingExpenseData as PendingExpenseRow[] | null) ?? [];
+    const pendingWithDue = await supabase
+      .from("financial_transactions")
+      .select(
+        "id, description, amount, transaction_date, due_date, category, payment_status"
+      )
+      .eq("workshop_id", workshopId)
+      .eq("type", "despesa")
+      .in("payment_status", ["pendente", "parcial"])
+      .order("due_date", { ascending: true })
+      .limit(20);
+
+    if (!pendingWithDue.error) {
+      pendingExpenses = (pendingWithDue.data as PendingExpenseRow[] | null) ?? [];
+    } else {
+      const { data: pendingExpenseData, error: pendingExpenseError } =
+        await supabase
+          .from("financial_transactions")
+          .select(
+            "id, description, amount, transaction_date, category, payment_status"
+          )
+          .eq("workshop_id", workshopId)
+          .eq("type", "despesa")
+          .in("payment_status", ["pendente", "parcial"])
+          .order("transaction_date", { ascending: false })
+          .limit(20);
+
+      if (!pendingExpenseError) {
+        pendingExpenses = (pendingExpenseData as PendingExpenseRow[] | null) ?? [];
+      }
     }
 
     const sixMonthsAgo = addMonthsToYearMonth(zonedNow.year, zonedNow.month, -5);
     const sixMonthsAgoStr = `${sixMonthsAgo.year}-${String(sixMonthsAgo.month).padStart(2, "0")}-01`;
-    const { data: txData } = await supabase
-      .from("financial_transactions")
-      .select("type, amount, transaction_date")
-      .eq("workshop_id", workshopId)
-      .gte("transaction_date", sixMonthsAgoStr);
-
-    const txRows = (txData ?? []) as {
+    type ChartTxRow = {
       type: string;
       amount: string | number;
       transaction_date: string;
-    }[];
+      payment_status?: string | null;
+      effective_date?: string | null;
+    };
+
+    const cashChart = await supabase
+      .from("financial_transactions")
+      .select("type, amount, transaction_date, payment_status, effective_date")
+      .eq("workshop_id", workshopId);
+
+    let txRows: ChartTxRow[] = [];
+    if (!cashChart.error) {
+      txRows = (cashChart.data ?? []) as ChartTxRow[];
+    } else {
+      const legacyChart = await supabase
+        .from("financial_transactions")
+        .select("type, amount, transaction_date")
+        .eq("workshop_id", workshopId)
+        .gte("transaction_date", sixMonthsAgoStr);
+      txRows = (legacyChart.data ?? []) as ChartTxRow[];
+    }
 
     monthlyChartData = Array.from({ length: 6 }, (_, idx) => {
       const monthParts = addMonthsToYearMonth(zonedNow.year, zonedNow.month, -5 + idx);
       const date = new Date(monthParts.year, monthParts.month - 1, 1);
       const monthPrefix = `${monthParts.year}-${String(monthParts.month).padStart(2, "0")}`;
+      const monthStartKey = `${monthPrefix}-01`;
+      const monthEndKey = `${monthPrefix}-${String(new Date(monthParts.year, monthParts.month, 0).getDate()).padStart(2, "0")}`;
       const label = date
         .toLocaleDateString("pt-BR", { month: "short" })
         .replace(".", "");
-      const monthTx = txRows.filter((tx) =>
-        tx.transaction_date?.startsWith(monthPrefix)
-      );
+      const monthTx = txRows.filter((tx) => {
+        if (!isPaidCashStatus(tx.payment_status)) return false;
+        const dateValue = cashDate({
+          effective_date: tx.effective_date,
+          transaction_date: tx.transaction_date,
+        });
+        return dateValue >= monthStartKey && dateValue <= monthEndKey;
+      });
       const revenue = monthTx
         .filter((tx) => tx.type === "receita")
-        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+        .reduce((sum, tx) => sum + toMoneyNumber(tx.amount), 0);
       const expense = monthTx
         .filter((tx) => tx.type === "despesa")
-        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+        .reduce((sum, tx) => sum + toMoneyNumber(tx.amount), 0);
       return { label, revenue, expense };
     });
 
