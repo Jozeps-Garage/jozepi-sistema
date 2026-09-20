@@ -10,13 +10,28 @@ export interface ServicePackage {
   accentBorder: string;
   badgeBg: string;
   badgeText: string;
+  active: boolean;
 }
 
 interface PackageOverride {
   price?: number;
   newItems?: string[];
+  active?: boolean;
+  removed?: boolean;
 }
 type PackageOverrides = Record<string, PackageOverride>;
+
+function applyOverride(
+  pkg: Omit<ServicePackage, "active">,
+  override: PackageOverride | undefined
+): ServicePackage {
+  return {
+    ...pkg,
+    ...(override?.price !== undefined ? { price: override.price } : {}),
+    ...(override?.newItems !== undefined ? { newItems: override.newItems } : {}),
+    active: override?.active ?? true,
+  };
+}
 
 const STAGE_PACKAGES_STORAGE_KEY = "auto-estetica-stage-packages-v2";
 
@@ -54,7 +69,9 @@ const STAGE_2_SERVICES = [...STAGE_1_SERVICES, ...STAGE_2_NEW_SERVICES];
 const STAGE_3_SERVICES = [...STAGE_2_SERVICES, ...STAGE_3_NEW_SERVICES];
 const STAGE_4_SERVICES = [...STAGE_3_SERVICES, ...STAGE_4_NEW_SERVICES];
 
-export const STAGE_PACKAGES: ServicePackage[] = [
+export type PackageDefaults = Omit<ServicePackage, "active">;
+
+export const STAGE_PACKAGES: PackageDefaults[] = [
   {
     id: "stage-1",
     badge: "STAGE 1",
@@ -117,15 +134,28 @@ function readOverrides(): PackageOverrides {
 
 export function loadStagePackages(): ServicePackage[] {
   const overrides = readOverrides();
-  return STAGE_PACKAGES.map((pkg) => {
-    const o = overrides[pkg.id];
-    if (!o) return pkg;
-    return {
-      ...pkg,
-      ...(o.price !== undefined ? { price: o.price } : {}),
-      ...(o.newItems !== undefined ? { newItems: o.newItems } : {}),
-    };
-  });
+  return STAGE_PACKAGES.filter((pkg) => !overrides[pkg.id]?.removed).map((pkg) =>
+    applyOverride(pkg, overrides[pkg.id])
+  );
+}
+
+export function hasRemovedStagePackages(): boolean {
+  const overrides = readOverrides();
+  return STAGE_PACKAGES.some((pkg) => overrides[pkg.id]?.removed);
+}
+
+export function restoreStagePackages(): void {
+  if (typeof window === "undefined") return;
+  try {
+    const stored = readOverrides();
+    for (const key of Object.keys(stored)) {
+      delete stored[key].removed;
+      delete stored[key].active;
+    }
+    localStorage.setItem(STAGE_PACKAGES_STORAGE_KEY, JSON.stringify(stored));
+  } catch {
+    // ignore
+  }
 }
 
 export function saveStagePackageOverride(id: string, override: PackageOverride): void {
@@ -169,7 +199,7 @@ const DQUARTZ_GO_FEATURES = [
   "Brilho profundo e hidrofobia excepcional",
 ];
 
-export const COATING_PACKAGES: ServicePackage[] = [
+export const COATING_PACKAGES: PackageDefaults[] = [
   {
     id: "coating-cquartz-lite",
     badge: "CQUARTZ Lite",
@@ -222,15 +252,28 @@ function readCoatingOverrides(): PackageOverrides {
 
 export function loadCoatingPackages(): ServicePackage[] {
   const overrides = readCoatingOverrides();
-  return COATING_PACKAGES.map((pkg) => {
-    const o = overrides[pkg.id];
-    if (!o) return pkg;
-    return {
-      ...pkg,
-      ...(o.price !== undefined ? { price: o.price } : {}),
-      ...(o.newItems !== undefined ? { newItems: o.newItems } : {}),
-    };
-  });
+  return COATING_PACKAGES.filter((pkg) => !overrides[pkg.id]?.removed).map((pkg) =>
+    applyOverride(pkg, overrides[pkg.id])
+  );
+}
+
+export function hasRemovedCoatingPackages(): boolean {
+  const overrides = readCoatingOverrides();
+  return COATING_PACKAGES.some((pkg) => overrides[pkg.id]?.removed);
+}
+
+export function restoreCoatingPackages(): void {
+  if (typeof window === "undefined") return;
+  try {
+    const stored = readCoatingOverrides();
+    for (const key of Object.keys(stored)) {
+      delete stored[key].removed;
+      delete stored[key].active;
+    }
+    localStorage.setItem(COATING_PACKAGES_STORAGE_KEY, JSON.stringify(stored));
+  } catch {
+    // ignore
+  }
 }
 
 export function saveCoatingPackageOverride(
@@ -326,15 +369,17 @@ export async function ensurePackageServicesInCatalog(
     if (existing) {
       const priceChanged = Number(existing.price) !== pkg.price;
       const durationChanged = existing.duration_minutes !== pkg.durationMinutes;
-      const inactive = !existing.active;
+      // Segue o estado do pacote em vez de forçar ativo: senão a sincronização
+      // reativaria na hora um pacote que o usuário acabou de desativar.
+      const activeChanged = existing.active !== pkg.active;
 
-      if (priceChanged || durationChanged || inactive) {
+      if (priceChanged || durationChanged || activeChanged) {
         await supabase
           .from("services")
           .update({
             price: pkg.price,
             duration_minutes: pkg.durationMinutes,
-            active: true,
+            active: pkg.active,
             updated_at: new Date().toISOString(),
           })
           .eq("id", existing.id);
@@ -345,7 +390,7 @@ export async function ensurePackageServicesInCatalog(
             ...nextServices[index],
             price: pkg.price,
             duration_minutes: pkg.durationMinutes,
-            active: true,
+            active: pkg.active,
           };
         }
       }

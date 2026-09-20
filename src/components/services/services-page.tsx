@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  ArrowCounterClockwise,
   CalendarBlank,
   Clock,
   PencilSimple,
@@ -16,14 +17,20 @@ import {
   COATING_PACKAGES,
   ensurePackageServicesInCatalog,
   getPackageDurationMinutes,
+  hasRemovedCoatingPackages,
+  hasRemovedStagePackages,
   loadCoatingPackages,
   loadStagePackages,
   packageCatalogName,
+  restoreCoatingPackages,
+  restoreStagePackages,
   saveCoatingPackageOverride,
   saveStagePackageOverride,
   STAGE_PACKAGES,
   type ServicePackage,
 } from "@/lib/services/packages";
+
+type PackageStateOverride = { active?: boolean; removed?: boolean };
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dropdown } from "@/components/ui/dropdown";
@@ -492,15 +499,21 @@ export function ServicesPage() {
 
   // Stage packages state (loaded from localStorage overrides merged over defaults)
   // Use static defaults for SSR + first client paint; apply localStorage overrides after mount.
-  const [stagePackages, setStagePackages] =
-    useState<ServicePackage[]>(STAGE_PACKAGES);
-  const [coatingPackages, setCoatingPackages] =
-    useState<ServicePackage[]>(COATING_PACKAGES);
+  const [stagePackages, setStagePackages] = useState<ServicePackage[]>(() =>
+    STAGE_PACKAGES.map((pkg) => ({ ...pkg, active: true }))
+  );
+  const [coatingPackages, setCoatingPackages] = useState<ServicePackage[]>(() =>
+    COATING_PACKAGES.map((pkg) => ({ ...pkg, active: true }))
+  );
   const [editingPackageId, setEditingPackageId] = useState<string | null>(null);
   const [pkgEditPrice, setPkgEditPrice] = useState("");
   const [pkgEditItems, setPkgEditItems] = useState<string[]>([]);
   const [pkgEditNewItem, setPkgEditNewItem] = useState("");
   const [typeFilter, setTypeFilter] = useState<CatalogTypeFilter>("all");
+  const [packageToDelete, setPackageToDelete] = useState<ServicePackage | null>(
+    null
+  );
+  const [hasRemovedPackages, setHasRemovedPackages] = useState(false);
 
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [products, setProducts] = useState<ProductItem[]>([]);
@@ -580,6 +593,13 @@ export function ServicesPage() {
   useEffect(() => {
     setStagePackages(loadStagePackages());
     setCoatingPackages(loadCoatingPackages());
+  }, []);
+
+  // Só dá para saber no cliente: o estado vive no localStorage.
+  useEffect(() => {
+    setHasRemovedPackages(
+      hasRemovedCoatingPackages() || hasRemovedStagePackages()
+    );
   }, []);
 
   useEffect(() => {
@@ -1119,7 +1139,7 @@ export function ServicesPage() {
       summary: coatingProtectionSummary(pkg),
       price: pkg.price,
       durationMinutes: getPackageDurationMinutes(pkg.id),
-      active: true,
+      active: pkg.active,
       package: pkg,
     })),
     ...customServiceRows.filter((row) => row.kind === "coating"),
@@ -1130,7 +1150,7 @@ export function ServicesPage() {
       summary: stageInclusionSummary(pkg),
       price: pkg.price,
       durationMinutes: getPackageDurationMinutes(pkg.id),
-      active: true,
+      active: pkg.active,
       package: pkg,
     })),
     ...customServiceRows.filter((row) => row.kind === "stage"),
@@ -1177,6 +1197,73 @@ export function ServicesPage() {
     }
     setEditingPackageId(null);
     setPkgEditNewItem("");
+  }
+
+  function savePackageState(pkg: ServicePackage, override: PackageStateOverride) {
+    const apply = (list: ServicePackage[]) =>
+      override.removed
+        ? list.filter((item) => item.id !== pkg.id)
+        : list.map((item) =>
+            item.id === pkg.id ? { ...item, ...override } : item
+          );
+
+    if (pkg.id.startsWith("coating-")) {
+      saveCoatingPackageOverride(pkg.id, override);
+      setCoatingPackages(apply);
+    } else {
+      saveStagePackageOverride(pkg.id, override);
+      setStagePackages(apply);
+    }
+  }
+
+  // O pacote tem um serviço espelho no banco, que é o que a Agenda agenda.
+  // Sem atualizar os dois, um pacote desativado continuaria agendável.
+  async function syncPackageMirrorService(pkg: ServicePackage, active: boolean) {
+    const kind = pkg.id.startsWith("coating-") ? "coating" : "stage";
+    const catalogName = packageCatalogName(pkg, kind).trim().toLowerCase();
+    const mirror = services.find(
+      (service) => service.name.trim().toLowerCase() === catalogName
+    );
+    if (!mirror) return;
+
+    const { error: updateError } = await supabase
+      .from("services")
+      .update({ active })
+      .eq("id", mirror.id);
+
+    if (updateError) {
+      setError(updateError.message);
+      return;
+    }
+
+    setServices((prev) =>
+      prev.map((service) =>
+        service.id === mirror.id ? { ...service, active } : service
+      )
+    );
+  }
+
+  async function handleTogglePackageActive(pkg: ServicePackage) {
+    const nextActive = !pkg.active;
+    setError(null);
+    savePackageState(pkg, { active: nextActive });
+    await syncPackageMirrorService(pkg, nextActive);
+  }
+
+  async function executeDeletePackage(pkg: ServicePackage) {
+    setError(null);
+    savePackageState(pkg, { removed: true });
+    setHasRemovedPackages(true);
+    await syncPackageMirrorService(pkg, false);
+    setPackageToDelete(null);
+  }
+
+  function handleRestorePackages() {
+    restoreCoatingPackages();
+    restoreStagePackages();
+    setCoatingPackages(loadCoatingPackages());
+    setStagePackages(loadStagePackages());
+    setHasRemovedPackages(false);
   }
 
   async function handleBookPackage(pkg: ServicePackage) {
@@ -1262,6 +1349,21 @@ export function ServicesPage() {
                 </button>
               );
             })}
+            {hasRemovedPackages && (
+              <button
+                type="button"
+                onClick={handleRestorePackages}
+                className="rounded-full border border-dashed border-border px-3 py-1.5 text-xs font-semibold text-muted transition-colors hover:border-primary/30 hover:text-foreground"
+              >
+                <ArrowCounterClockwise
+                  size={12}
+                  weight={SERVICE_ICON_WEIGHT}
+                  aria-hidden
+                  className="mr-1 inline"
+                />
+                Restaurar pacotes
+              </button>
+            )}
           </div>
         </div>
         <Button
@@ -1983,12 +2085,36 @@ export function ServicesPage() {
                           aria-hidden
                         />
                       </button>
-                      {/* Pacotes de fábrica não desativam nem excluem — o espaço
-                          fica reservado para os cards alinharem na mesma altura. */}
-                      {!service && (
+                      {pkg && (
                         <>
-                          <span className="h-6 w-6" aria-hidden />
-                          <span className="h-6 w-6" aria-hidden />
+                          <button
+                            type="button"
+                            onClick={() => void handleTogglePackageActive(pkg)}
+                            className="flex h-6 w-6 items-center justify-center rounded text-muted/60 transition-colors hover:bg-background hover:text-foreground"
+                            title={pkg.active ? "Desativar" : "Ativar"}
+                            aria-label={
+                              pkg.active ? "Desativar pacote" : "Ativar pacote"
+                            }
+                          >
+                            <Power
+                              size={13}
+                              weight={SERVICE_ICON_WEIGHT}
+                              aria-hidden
+                            />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPackageToDelete(pkg)}
+                            className="flex h-6 w-6 items-center justify-center rounded text-muted/60 transition-colors hover:bg-background hover:text-danger"
+                            title="Excluir"
+                            aria-label={`Excluir ${row.name}`}
+                          >
+                            <Trash
+                              size={13}
+                              weight={SERVICE_ICON_WEIGHT}
+                              aria-hidden
+                            />
+                          </button>
                         </>
                       )}
                       {service && (
@@ -2070,6 +2196,21 @@ export function ServicesPage() {
           }
         }
       `}</style>
+
+      <ConfirmDialog
+        open={Boolean(packageToDelete)}
+        title="Excluir pacote"
+        description={
+          packageToDelete
+            ? `Deseja excluir o pacote "${packageToDelete.badge}"? Ele sai do catálogo e deixa de ser agendável. Dá para trazer de volta pelo botão "Restaurar pacotes" no topo da lista.`
+            : ""
+        }
+        confirmLabel="Excluir pacote"
+        onCancel={() => setPackageToDelete(null)}
+        onConfirm={() => {
+          if (packageToDelete) void executeDeletePackage(packageToDelete);
+        }}
+      />
 
       <ConfirmDialog
         open={Boolean(serviceToDelete)}
