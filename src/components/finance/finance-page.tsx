@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowsClockwise,
   ArrowUp,
   CalendarBlank,
   CalendarCheck,
@@ -347,7 +348,7 @@ interface CompletedOrder {
 
 interface FinanceEntry {
   id: string;
-  kind: "automatic" | "manual";
+  kind: "automatic" | "fixed" | "manual";
   type: TransactionType;
   description: string;
   amount: number;
@@ -510,6 +511,10 @@ function normalizeFixedCost(row: Record<string, unknown>): FixedCost {
 
 function fixedCostExpenseSource(costId: string, yearMonth: string) {
   return `fixed_cost:${costId}:${yearMonth}`;
+}
+
+function isFixedCostSource(source: string | null | undefined) {
+  return Boolean(source?.startsWith("fixed_cost:"));
 }
 
 function getFixedCostTransactionsBySource(transactions: FinancialTransaction[]) {
@@ -1863,7 +1868,9 @@ function TransactionList({
                     className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
                       entry.kind === "automatic"
                         ? "bg-success/10 text-success"
-                        : "bg-primary/10 text-primary"
+                        : entry.kind === "fixed" && !nested
+                          ? "bg-premium/10 text-premium"
+                          : "bg-primary/10 text-primary"
                     }`}
                   >
                     {entry.kind === "automatic" ? (
@@ -1873,6 +1880,11 @@ function TransactionList({
                       </>
                     ) : nested ? (
                       "Parcela"
+                    ) : entry.kind === "fixed" ? (
+                      <>
+                        <ArrowsClockwise size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                        Custo fixo
+                      </>
                     ) : (
                       <>
                         <PencilSimple size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
@@ -2626,7 +2638,11 @@ export function FinancePage() {
 
       return {
         id: transaction.id,
-        kind: transaction.service_order_id ? "automatic" : "manual",
+        kind: transaction.service_order_id
+          ? "automatic"
+          : isFixedCostSource(transaction.source)
+            ? "fixed"
+            : "manual",
         type: transaction.type,
         description: transaction.description,
         amount: toCurrencyNumber(transaction.amount),
