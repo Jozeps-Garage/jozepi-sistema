@@ -2283,7 +2283,19 @@ function TransactionFormCard({
 
 export function FinancePage() {
   const supabase = useMemo(() => createClient(), []);
-  const today = useMemo(() => new Date(), []);
+  const [today, setToday] = useState(() => startOfDay(new Date()));
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      // Keep the same instance while the day holds, or every memo keyed on
+      // `today` recomputes each tick.
+      setToday((current) => {
+        const current0h = startOfDay(new Date());
+        return current0h.getTime() === current.getTime() ? current : current0h;
+      });
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const [activeTab, setActiveTab] = useState<FinanceTab>("overview");
   const [workshopId, setWorkshopId] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<FinancialTransaction[]>([]);

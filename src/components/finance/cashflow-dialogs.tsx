@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dropdown } from "@/components/ui/dropdown";
 import { Input } from "@/components/ui/input";
@@ -87,6 +87,7 @@ export function TransferDialog({
     description: string;
   }) => void;
 }) {
+  const wasOpen = useRef(false);
   const [fromAccountId, setFromAccountId] = useState(accounts[0]?.id ?? "");
   const [toAccountId, setToAccountId] = useState(accounts[1]?.id ?? accounts[0]?.id ?? "");
   const [amount, setAmount] = useState("");
@@ -94,15 +95,19 @@ export function TransferDialog({
   const [description, setDescription] = useState("");
 
   useEffect(() => {
-    if (!open) return;
-    setFromAccountId(accounts[0]?.id ?? "");
-    setToAccountId(accounts[1]?.id ?? accounts[0]?.id ?? "");
-    setAmount("");
-    const now = new Date();
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const day = String(now.getDate()).padStart(2, "0");
-    setDate(`${now.getFullYear()}-${month}-${day}`);
-    setDescription("");
+    // Só reinicia na abertura: o pai recria `accounts` a cada render, e sem
+    // essa guarda um refresh do realtime apagaria o que já foi digitado.
+    if (open && !wasOpen.current) {
+      setFromAccountId(accounts[0]?.id ?? "");
+      setToAccountId(accounts[1]?.id ?? accounts[0]?.id ?? "");
+      setAmount("");
+      const now = new Date();
+      const month = String(now.getMonth() + 1).padStart(2, "0");
+      const day = String(now.getDate()).padStart(2, "0");
+      setDate(`${now.getFullYear()}-${month}-${day}`);
+      setDescription("");
+    }
+    wasOpen.current = open;
   }, [open, accounts]);
 
   if (!open) return null;

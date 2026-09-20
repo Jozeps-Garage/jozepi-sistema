@@ -22,7 +22,7 @@ export interface QuickTransactionInput {
   paymentStatus?: PaymentStatus;
 }
 
-function isMissingColumnError(message: string, column: string) {
+export function isMissingColumnError(message: string, column: string) {
   const normalized = message.toLowerCase();
   if (!normalized.includes(column.toLowerCase())) return false;
   if (

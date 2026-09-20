@@ -21,7 +21,10 @@ import {
   getServiceOrderStatus,
   dateKey,
 } from "@/lib/agenda/utils";
-import { resolveDefaultCashflowIds } from "@/lib/finance/transactions";
+import {
+  isMissingColumnError,
+  resolveDefaultCashflowIds,
+} from "@/lib/finance/transactions";
 import type { ClientFormData } from "@/types/client";
 import type { Client } from "@/types/client";
 
@@ -224,24 +227,27 @@ export async function syncFinanceRevenue(
     return updateError?.message ?? null;
   }
 
-  const insertPayload = {
-    ...payload,
-    payment_status: "pendente" as const,
-    effective_date: null,
-    due_date: appointment.date,
-  };
+  // Degrada coluna a coluna, mas nunca sem payment_status: a default do banco
+  // é 'pago', e gravar receita não recebida como paga corrompe o caixa.
+  const pending = { ...payload, payment_status: "pendente" as const };
+  const attempts = [
+    { ...pending, effective_date: null, due_date: appointment.date },
+    { ...pending, effective_date: null },
+    pending,
+  ];
 
-  const { error: insertError } = await supabase
-    .from("financial_transactions")
-    .insert(insertPayload);
+  let lastError: { message: string } | null = null;
+  for (const attempt of attempts) {
+    const { error } = await supabase.from("financial_transactions").insert(attempt);
+    if (!error) return null;
+    lastError = error;
+    const missingColumn =
+      isMissingColumnError(error.message, "due_date") ||
+      isMissingColumnError(error.message, "effective_date");
+    if (!missingColumn) break;
+  }
 
-  if (!insertError) return null;
-
-  const { error: legacyError } = await supabase
-    .from("financial_transactions")
-    .insert(payload);
-
-  return legacyError?.message ?? null;
+  return lastError?.message ?? null;
 }
 
 export async function deleteFinanceRevenue(
