@@ -1927,21 +1927,20 @@ export function ServicesPage() {
                         {row.active ? "Ativo" : "Inativo"}
                       </span>
                     </div>
-                    {durationLabel && (
-                      <div className="mt-1.5 flex items-center gap-1 text-xs text-muted">
-                        <Clock
-                          size={12}
-                          weight={SERVICE_ICON_WEIGHT}
-                          aria-hidden
-                        />
-                        {durationLabel}
-                      </div>
-                    )}
-                    {row.summary && (
-                      <p className="mt-1.5 line-clamp-2 text-sm leading-5 text-muted">
-                        {row.summary}
-                      </p>
-                    )}
+                    <div className="mt-1.5 flex items-center gap-1 text-xs text-muted">
+                      <Clock size={12} weight={SERVICE_ICON_WEIGHT} aria-hidden />
+                      {durationLabel || "Duração não informada"}
+                    </div>
+                    {/* Sempre ocupa duas linhas: sem isso os cards sem descrição
+                        encolhem e a coluna de ações desalinha entre si. */}
+                    <p
+                      className={cn(
+                        "mt-1.5 line-clamp-2 min-h-10 text-sm leading-5",
+                        row.summary ? "text-muted" : "text-muted/60"
+                      )}
+                    >
+                      {row.summary || "Sem descrição"}
+                    </p>
                   </div>
 
                   <div className="flex shrink-0 flex-col items-end gap-2">
@@ -1984,6 +1983,14 @@ export function ServicesPage() {
                           aria-hidden
                         />
                       </button>
+                      {/* Pacotes de fábrica não desativam nem excluem — o espaço
+                          fica reservado para os cards alinharem na mesma altura. */}
+                      {!service && (
+                        <>
+                          <span className="h-6 w-6" aria-hidden />
+                          <span className="h-6 w-6" aria-hidden />
+                        </>
+                      )}
                       {service && (
                         <>
                           <button
