@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import {
   CalendarPlus,
   Car,
@@ -23,7 +22,6 @@ import { PlateIcon } from "@/components/ui/plate-icon";
 import { Input } from "@/components/ui/input";
 import { ModelAutocomplete } from "@/components/clients/model-autocomplete";
 import { ClientFormModal } from "@/components/clients/client-form-modal";
-import { VehiclePhotoUpload } from "@/components/clients/vehicle-photo-upload";
 import { formatDate, formatPhone, getWhatsAppUrl, normalizePhone } from "@/lib/utils/format";
 import { syncVehicles } from "@/lib/clients/sync-vehicles";
 import { deleteVehiclePhotoByUrl } from "@/lib/supabase/vehicle-photos";
@@ -125,48 +123,6 @@ function VehicleFormModal({
     setForm((prev) => ({ ...prev, ...patch }));
   }
 
-  function handlePhoto(slot: 1 | 2, file: File) {
-    const previewKey = slot === 1 ? "previewUrl1" : "previewUrl2";
-    const currentPreview = form[previewKey];
-    if (currentPreview?.startsWith("blob:")) URL.revokeObjectURL(currentPreview);
-
-    if (slot === 1) {
-      updateVehicle({
-        photoFile1: file,
-        previewUrl1: URL.createObjectURL(file),
-        removePhoto1: false,
-      });
-      return;
-    }
-
-    updateVehicle({
-      photoFile2: file,
-      previewUrl2: URL.createObjectURL(file),
-      removePhoto2: false,
-    });
-  }
-
-  function removePhoto(slot: 1 | 2) {
-    const previewKey = slot === 1 ? "previewUrl1" : "previewUrl2";
-    const currentPreview = form[previewKey];
-    if (currentPreview?.startsWith("blob:")) URL.revokeObjectURL(currentPreview);
-
-    if (slot === 1) {
-      updateVehicle({
-        photoFile1: null,
-        previewUrl1: null,
-        removePhoto1: true,
-      });
-      return;
-    }
-
-    updateVehicle({
-      photoFile2: null,
-      previewUrl2: null,
-      removePhoto2: true,
-    });
-  }
-
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -243,19 +199,6 @@ function VehicleFormModal({
               updateVehicle({ plate: event.target.value.toUpperCase() })
             }
             placeholder="ABC-1D23"
-          />
-        </div>
-
-        <div className="mt-4">
-          <VehiclePhotoUpload
-            preview1={form.previewUrl1}
-            preview2={form.previewUrl2}
-            onPhoto1={(file) => handlePhoto(1, file)}
-            onPhoto2={(file) => handlePhoto(2, file)}
-            onRemove1={() => removePhoto(1)}
-            onRemove2={() => removePhoto(2)}
-            onError={setError}
-            compact
           />
         </div>
 
@@ -371,11 +314,6 @@ function ClientVehiclesPanel({
             </div>
           ) : (
             vehicles.map((vehicle) => {
-              const photos = [
-                vehicle.photo_url_1,
-                vehicle.photo_url_2,
-              ].filter(Boolean) as string[];
-
               return (
                 <article
                   key={vehicle.id}
@@ -414,44 +352,6 @@ function ClientVehiclesPanel({
                       <Trash size={16} weight={CLIENT_ICON_WEIGHT} aria-hidden />
                       {deletingVehicleId === vehicle.id ? "Excluindo..." : "Excluir"}
                     </button>
-                  </div>
-
-                  <div className="mt-4 grid grid-cols-2 gap-3">
-                    {[0, 1].map((index) => {
-                      const photo = photos[index];
-
-                      return photo ? (
-                        <div
-                          key={photo}
-                          className="relative h-36 overflow-hidden rounded-lg border border-border bg-card shadow-card"
-                        >
-                          <Image
-                            src={photo}
-                            alt={`Foto ${index + 1} de ${vehicle.brand} ${vehicle.model}`}
-                            fill
-                            sizes="(max-width: 768px) 50vw, 240px"
-                            className="object-cover"
-                          />
-                        </div>
-                      ) : (
-                        <div
-                          key={`empty-photo-${index}`}
-                          className="flex h-36 items-center justify-center rounded-lg border border-dashed border-border bg-card text-muted"
-                        >
-                          <div className="text-center">
-                            <Car
-                              size={24}
-                              weight={CLIENT_ICON_WEIGHT}
-                              className="mx-auto"
-                              aria-hidden
-                            />
-                            <p className="mt-2 text-xs font-medium">
-                              Sem foto
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    })}
                   </div>
                 </article>
               );

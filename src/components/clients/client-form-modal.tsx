@@ -13,7 +13,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ModelAutocomplete } from "@/components/clients/model-autocomplete";
-import { VehiclePhotoUpload } from "@/components/clients/vehicle-photo-upload";
 import {
   type Client,
   type ClientFormData,
@@ -93,48 +92,6 @@ function VehicleEditorModal({
     setForm((prev) => ({ ...prev, ...patch }));
   }
 
-  function handlePhoto(slot: 1 | 2, file: File) {
-    const previewKey = slot === 1 ? "previewUrl1" : "previewUrl2";
-    const currentPreview = form[previewKey];
-    if (currentPreview?.startsWith("blob:")) URL.revokeObjectURL(currentPreview);
-
-    if (slot === 1) {
-      updateVehicle({
-        photoFile1: file,
-        previewUrl1: URL.createObjectURL(file),
-        removePhoto1: false,
-      });
-      return;
-    }
-
-    updateVehicle({
-      photoFile2: file,
-      previewUrl2: URL.createObjectURL(file),
-      removePhoto2: false,
-    });
-  }
-
-  function removePhoto(slot: 1 | 2) {
-    const previewKey = slot === 1 ? "previewUrl1" : "previewUrl2";
-    const currentPreview = form[previewKey];
-    if (currentPreview?.startsWith("blob:")) URL.revokeObjectURL(currentPreview);
-
-    if (slot === 1) {
-      updateVehicle({
-        photoFile1: null,
-        previewUrl1: null,
-        removePhoto1: true,
-      });
-      return;
-    }
-
-    updateVehicle({
-      photoFile2: null,
-      previewUrl2: null,
-      removePhoto2: true,
-    });
-  }
-
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -210,19 +167,6 @@ function VehicleEditorModal({
               updateVehicle({ plate: event.target.value.toUpperCase() })
             }
             placeholder="ABC-1D23"
-          />
-        </div>
-
-        <div className="mt-4">
-          <VehiclePhotoUpload
-            preview1={form.previewUrl1}
-            preview2={form.previewUrl2}
-            onPhoto1={(file) => handlePhoto(1, file)}
-            onPhoto2={(file) => handlePhoto(2, file)}
-            onRemove1={() => removePhoto(1)}
-            onRemove2={() => removePhoto(2)}
-            onError={setError}
-            compact
           />
         </div>
 
@@ -435,7 +379,7 @@ export function ClientFormModal({
                     Adicionar veículo
                   </span>
                   <span className="mt-0.5 block text-xs text-muted">
-                    Nome do carro, placa (se já souber) e até 2 fotos
+                    Nome do carro e a placa, se já souber
                   </span>
                 </span>
                 <span className="flex h-10 w-10 items-center justify-center rounded-full bg-success text-white transition-transform duration-200 group-hover:scale-110">
