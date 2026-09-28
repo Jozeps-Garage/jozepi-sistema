@@ -3453,12 +3453,16 @@ export function FinancePage() {
   async function applyPaymentStatus(
     entry: FinanceEntry,
     nextStatus: PaymentStatus,
-    effectiveDate: string | null
+    effectiveDate: string | null,
+    accountId?: string
   ) {
     const previousStatus = entry.paymentStatus ?? "pendente";
     const previousEffective = entry.effectiveDate ?? null;
+    const previousAccount = entry.accountId ?? null;
     const nextEffective =
       nextStatus === "pago" ? effectiveDate || dateKey(today) : null;
+    const nextAccount =
+      nextStatus === "pago" ? accountId || previousAccount : previousAccount;
     setError(null);
 
     if (entry.serviceOrderId) {
@@ -3479,6 +3483,7 @@ export function FinancePage() {
               ...transaction,
               payment_status: nextStatus,
               effective_date: nextEffective,
+              account_id: nextAccount,
             }
           : transaction
       )
@@ -3506,6 +3511,7 @@ export function FinancePage() {
                   ...transaction,
                   payment_status: previousStatus,
                   effective_date: previousEffective,
+                  account_id: previousAccount,
                 }
               : transaction
           )
@@ -3518,6 +3524,7 @@ export function FinancePage() {
     const payload = {
       payment_status: nextStatus,
       effective_date: nextEffective,
+      ...(nextAccount ? { account_id: nextAccount } : {}),
     };
 
     let { error: updateError } = await supabase
@@ -3526,7 +3533,10 @@ export function FinancePage() {
       .eq("id", entry.id)
       .eq("workshop_id", workshopId);
 
-    if (isMissingColumnError(updateError, "effective_date")) {
+    if (
+      isMissingColumnError(updateError, "effective_date") ||
+      isMissingColumnError(updateError, "account_id")
+    ) {
       const fallback = await supabase
         .from("financial_transactions")
         .update({ payment_status: nextStatus })
@@ -3561,6 +3571,7 @@ export function FinancePage() {
               ...transaction,
               payment_status: previousStatus,
               effective_date: previousEffective,
+              account_id: previousAccount,
             }
           : transaction
       )
@@ -5238,14 +5249,24 @@ export function FinancePage() {
       <ConfirmPaidDialog
         open={Boolean(paidConfirm)}
         defaultDate={dateKey(today)}
+        accounts={activeAccountOptions.map((option) => ({
+          id: option.value,
+          name: option.label,
+        }))}
+        defaultAccountId={paidConfirm?.accountId || defaultAccountId(accounts)}
         loading={savingPaid}
         onCancel={() => {
           if (!savingPaid) setPaidConfirm(null);
         }}
-        onConfirm={(effectiveDate) => {
+        onConfirm={(effectiveDate, accountId) => {
           if (!paidConfirm) return;
           setSavingPaid(true);
-          void applyPaymentStatus(paidConfirm, "pago", effectiveDate).finally(() => {
+          void applyPaymentStatus(
+            paidConfirm,
+            "pago",
+            effectiveDate,
+            accountId
+          ).finally(() => {
             setSavingPaid(false);
             setPaidConfirm(null);
           });

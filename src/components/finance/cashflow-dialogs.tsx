@@ -8,23 +8,37 @@ import { Input } from "@/components/ui/input";
 export function ConfirmPaidDialog({
   open,
   defaultDate,
+  accounts,
+  defaultAccountId,
   loading,
   onCancel,
   onConfirm,
 }: {
   open: boolean;
   defaultDate: string;
+  accounts: { id: string; name: string }[];
+  defaultAccountId: string;
   loading?: boolean;
   onCancel: () => void;
-  onConfirm: (effectiveDate: string) => void;
+  onConfirm: (effectiveDate: string, accountId: string) => void;
 }) {
   const [date, setDate] = useState(defaultDate);
+  const [accountId, setAccountId] = useState(defaultAccountId);
+  const [missingAccount, setMissingAccount] = useState(false);
 
   useEffect(() => {
-    if (open) setDate(defaultDate);
-  }, [open, defaultDate]);
+    if (!open) return;
+    setDate(defaultDate);
+    setAccountId(defaultAccountId);
+    setMissingAccount(false);
+  }, [open, defaultDate, defaultAccountId]);
 
   if (!open) return null;
+
+  const accountOptions = accounts.map((account) => ({
+    value: account.id,
+    label: account.name,
+  }));
 
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-foreground/25 px-4 py-6 backdrop-blur-sm">
@@ -35,7 +49,11 @@ export function ConfirmPaidDialog({
         onSubmit={(event) => {
           event.preventDefault();
           if (!date) return;
-          onConfirm(date);
+          if (!accountId) {
+            setMissingAccount(true);
+            return;
+          }
+          onConfirm(date, accountId);
         }}
         className="w-full max-w-md rounded-lg border border-border bg-card p-5 shadow-card-hover"
       >
@@ -43,16 +61,31 @@ export function ConfirmPaidDialog({
           Confirmar pagamento
         </h2>
         <p className="mt-1 text-sm text-muted">
-          Informe a data em que o valor efetivamente entrou ou saiu da conta.
+          Informe quando o valor entrou ou saiu e em qual conta ele caiu.
         </p>
-        <div className="mt-4">
+        <div className="mt-4 grid grid-cols-1 gap-3">
           <Input
             label="Data de efetivação"
             type="date"
             value={date}
             onChange={(event) => setDate(event.target.value)}
           />
+          <Dropdown
+            label="Conta"
+            value={accountId}
+            options={accountOptions}
+            placeholder="Selecione a conta"
+            onChange={(value) => {
+              setAccountId(value);
+              setMissingAccount(false);
+            }}
+          />
         </div>
+        {missingAccount && (
+          <p className="mt-2 text-xs font-medium text-danger">
+            Selecione a conta que recebeu ou pagou o valor.
+          </p>
+        )}
         <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button type="button" variant="secondary" onClick={onCancel} disabled={loading}>
             Cancelar
