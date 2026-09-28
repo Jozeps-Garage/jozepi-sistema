@@ -916,6 +916,7 @@ export function ClientsPage() {
             const vehicles = client.vehicles ?? [];
             const vehicleCount = vehicles.length;
             const plated = vehicles.filter((vehicle) => vehicle.plate?.trim());
+            const missingPlates = vehicleCount - plated.length;
             const lastService = lastServiceByClient.get(client.id);
 
             return (
@@ -941,9 +942,21 @@ export function ClientsPage() {
                         +{plated.length - 2}
                       </span>
                     )}
+                    {missingPlates > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => openVehiclesPanel(client)}
+                        className="rounded-full bg-warning/12 px-2 py-0.5 text-[10px] font-bold text-warning transition-colors hover:bg-warning/20"
+                        title="Informar a placa"
+                      >
+                        {missingPlates === 1
+                          ? "Placa pendente"
+                          : `${missingPlates} placas pendentes`}
+                      </button>
+                    )}
                     {client.pre_cadastro && (
-                      <span className="rounded-full bg-warning/12 px-2 py-0.5 text-[10px] font-bold text-warning">
-                        Falta preencher
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                        Pré-cadastro
                       </span>
                     )}
                   </div>

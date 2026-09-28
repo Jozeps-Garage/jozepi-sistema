@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Bell, CheckCircle, Receipt, UserPlus, Wallet } from "@phosphor-icons/react";
+import { Bell, Car, CheckCircle, Receipt, UserPlus, Wallet } from "@phosphor-icons/react";
 import type { DashboardData } from "@/lib/dashboard/types";
 
 type TodoItem = {
@@ -24,7 +24,12 @@ function plural(count: number, one: string, many: string) {
 }
 
 export function TodoBell({ data }: { data: DashboardData }) {
-  const { unassignedTransactions, pendingQuotes, preRegisteredClients } = data.todos;
+  const {
+    unassignedTransactions,
+    pendingQuotes,
+    preRegisteredClients,
+    vehiclesWithoutPlate,
+  } = data.todos;
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -64,6 +69,15 @@ export function TodoBell({ data }: { data: DashboardData }) {
       href: "/orcamentos",
       icon: Receipt,
       chip: "bg-primary/8 text-primary",
+    },
+    {
+      key: "plates",
+      count: vehiclesWithoutPlate,
+      title: `${vehiclesWithoutPlate} ${plural(vehiclesWithoutPlate, "veículo sem placa", "veículos sem placa")}`,
+      hint: "Cadastrados antes de ver o carro",
+      href: "/clientes",
+      icon: Car,
+      chip: "bg-warning/12 text-warning",
     },
     {
       key: "preRegistered",

@@ -81,6 +81,7 @@ export default async function DashboardPage() {
     unassignedTransactions: 0,
     pendingQuotes: 0,
     preRegisteredClients: 0,
+    vehiclesWithoutPlate: 0,
   };
 
   let timeZone = DEFAULT_TIME_ZONE;
@@ -325,7 +326,8 @@ export default async function DashboardPage() {
       ? `account_id.is.null,account_id.eq.${fallbackAccount.id}`
       : "account_id.is.null";
 
-    const [unassigned, pendingQuotes, preRegistered] = await Promise.all([
+    const [unassigned, pendingQuotes, preRegistered, platelessVehicles] =
+      await Promise.all([
       supabase
         .from("financial_transactions")
         .select("id", { count: "exact", head: true })
@@ -342,12 +344,18 @@ export default async function DashboardPage() {
         .select("id", { count: "exact", head: true })
         .eq("workshop_id", workshopId)
         .eq("pre_cadastro", true),
+      supabase
+        .from("vehicles")
+        .select("id, clients!inner(workshop_id)", { count: "exact", head: true })
+        .eq("clients.workshop_id", workshopId)
+        .is("plate", null),
     ]);
 
     todos = {
       unassignedTransactions: unassigned.count ?? 0,
       pendingQuotes: pendingQuotes.count ?? 0,
       preRegisteredClients: preRegistered.count ?? 0,
+      vehiclesWithoutPlate: platelessVehicles.count ?? 0,
     };
   }
 

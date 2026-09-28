@@ -61,6 +61,7 @@ export type DashboardTodo = {
   unassignedTransactions: number;
   pendingQuotes: number;
   preRegisteredClients: number;
+  vehiclesWithoutPlate: number;
 };
 
 export type DashboardData = {

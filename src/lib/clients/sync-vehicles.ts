@@ -9,8 +9,12 @@ function isVehicleFilled(v: ClientFormData["vehicles"][0]) {
   return v.brand.trim() || v.model.trim() || v.plate.trim();
 }
 
+/**
+ * Placa fica de fora: dá para cadastrar o cliente antes de ver o carro. O
+ * veículo entra como pré-cadastro e a placa é cobrada depois.
+ */
 function isVehicleComplete(v: ClientFormData["vehicles"][0]) {
-  return v.brand.trim() && v.model.trim() && v.plate.trim();
+  return v.brand.trim() && v.model.trim();
 }
 
 function parseYear(year: string): number | null {
@@ -75,9 +79,7 @@ export async function syncVehicles(
   const incomplete = filled.filter((v) => !isVehicleComplete(v));
 
   if (incomplete.length > 0) {
-    throw new Error(
-      "Preencha marca, modelo e placa de todos os veículos adicionados."
-    );
+    throw new Error("Preencha marca e modelo de todos os veículos adicionados.");
   }
 
   const complete = filled.filter(isVehicleComplete);
@@ -94,11 +96,13 @@ export async function syncVehicles(
 
   for (const v of complete) {
     const year = parseYear(v.year);
+    const plate = v.plate.trim().toUpperCase();
     const basePayload = {
       brand: v.brand.trim(),
       model: v.model.trim(),
-      plate: v.plate.trim().toUpperCase(),
+      plate,
       year,
+      pre_cadastro: !plate,
     };
 
     let vehicleId = v.id;

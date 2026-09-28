@@ -140,8 +140,8 @@ function VehicleEditorModal({
     event.preventDefault();
     setError(null);
 
-    if (!form.brand.trim() || !form.model.trim() || !form.plate.trim()) {
-      setError("Preencha marca, modelo e placa do veículo.");
+    if (!form.brand.trim() || !form.model.trim()) {
+      setError("Preencha marca e modelo do veículo.");
       return;
     }
 
