@@ -1951,7 +1951,14 @@ function TransactionList({
           // O que o banco já sabia e a lista não mostrava: vencimento, data em
           // que o dinheiro se moveu, e a conta que recebeu ou pagou.
           const metaParts: string[] = [];
-          if (entry.dueDate) {
+          if (isRevenue) {
+            // Receita é serviço prestado: interessa quando entrou, não o
+            // vencimento. Só o atraso continua valendo como aviso.
+            metaParts.push(`Lançado ${formatShortDate(entry.date)}`);
+            if (overdue && entry.dueDate) {
+              metaParts.push(`Venceu ${formatShortDate(entry.dueDate)}`);
+            }
+          } else if (entry.dueDate) {
             metaParts.push(
               `${overdue ? "Venceu" : "Vence"} ${formatShortDate(entry.dueDate)}`
             );
