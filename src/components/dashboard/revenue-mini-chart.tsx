@@ -22,11 +22,11 @@ export function RevenueMiniChart({
   return (
     <div className={cn("card-surface h-full w-full", className)}>
       <div className="mb-2 flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <ChartBar size={18} weight="light" className="shrink-0 text-muted" />
-          <h2 className="truncate text-sm font-semibold text-foreground">
-            Últimos 6 meses
-          </h2>
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="icon-chip">
+            <ChartBar size={18} weight="light" aria-hidden />
+          </span>
+          <h2 className="section-title truncate">Últimos 6 meses</h2>
         </div>
         <Link
           href="/financeiro"

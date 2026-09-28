@@ -60,9 +60,9 @@ export function ClientsWidget({ data }: { data: DashboardData }) {
             Ver todos os clientes
           </p>
         </div>
-        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary">
+        <span className="icon-chip">
           <UsersThree size={20} weight="light" aria-hidden />
-        </div>
+        </span>
       </div>
     </Link>
   );
@@ -102,9 +102,11 @@ export function AgendaWidget({ data }: { data: DashboardData }) {
   return (
     <div className="card-surface flex h-full min-h-0 flex-col">
       <div className="mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <CalendarBlank size={16} weight="light" className="text-muted" aria-hidden />
-          <h2 className="text-sm font-semibold text-foreground">Agenda da semana</h2>
+        <div className="flex items-center gap-2.5">
+          <span className="icon-chip">
+            <CalendarBlank size={18} weight="light" aria-hidden />
+          </span>
+          <h2 className="section-title">Agenda da semana</h2>
         </div>
         <span className="text-xs text-muted">7 dias</span>
       </div>
@@ -243,9 +245,11 @@ export function CashflowWidget({ data }: { data: DashboardData }) {
   const upcomingCount = dueAlerts.length - overdueCount;
   return (
     <div className="card-surface flex h-full min-h-0 flex-col">
-      <div className="mb-2 flex items-center gap-2">
-        <Wallet size={16} weight="light" className="text-muted" aria-hidden />
-        <h2 className="text-sm font-semibold text-foreground">Financeiro</h2>
+      <div className="mb-3 flex items-center gap-2.5">
+        <span className="icon-chip">
+          <Wallet size={18} weight="light" aria-hidden />
+        </span>
+        <h2 className="section-title">Financeiro</h2>
       </div>
       {dueAlerts.length > 0 && (
         <Link
@@ -393,9 +397,11 @@ export function ChartWidget({ data }: { data: DashboardData }) {
 export function LowStockWidget({ data }: { data: DashboardData }) {
   return (
     <div className="card-surface flex h-full flex-col">
-      <div className="mb-2 flex items-center gap-2">
-        <WarningCircle size={15} weight="light" className="text-muted" aria-hidden />
-        <p className="label-caps">Estoque Baixo</p>
+      <div className="mb-3 flex items-center gap-2.5">
+        <span className="icon-chip icon-chip-premium">
+          <WarningCircle size={18} weight="light" aria-hidden />
+        </span>
+        <h2 className="section-title">Estoque baixo</h2>
       </div>
       {data.lowStockProducts.length === 0 ? (
         <p className="text-xs text-muted">Todos os produtos com estoque adequado</p>

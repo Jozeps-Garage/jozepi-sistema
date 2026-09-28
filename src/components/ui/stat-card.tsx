@@ -11,10 +11,10 @@ interface StatCardProps {
 }
 
 const variantStyles = {
-  default: "bg-primary/10 text-primary",
-  success: "bg-premium/10 text-premium",
-  warning: "bg-warning/10 text-warning",
-  info: "bg-premium/10 text-premium",
+  default: "bg-primary/8 text-primary",
+  success: "bg-premium/15 text-premium",
+  warning: "bg-warning/12 text-warning",
+  info: "bg-premium/15 text-premium",
 };
 
 function StatCardInner({
@@ -33,7 +33,7 @@ function StatCardInner({
       </div>
       <div
         className={cn(
-          "flex h-12 w-12 items-center justify-center rounded-md",
+          "flex h-11 w-11 shrink-0 items-center justify-center rounded-full",
           variantStyles[variant]
         )}
       >
