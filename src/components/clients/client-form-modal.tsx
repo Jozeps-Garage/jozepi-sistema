@@ -12,7 +12,6 @@ import {
 } from "@phosphor-icons/react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { BrandAutocomplete } from "@/components/clients/brand-autocomplete";
 import { ModelAutocomplete } from "@/components/clients/model-autocomplete";
 import { VehiclePhotoUpload } from "@/components/clients/vehicle-photo-upload";
 import {
@@ -194,37 +193,23 @@ function VehicleEditorModal({
           </div>
         )}
 
+        {/* Marca e ano continuam no estado, sem campo: editar um veículo antigo
+            não pode apagar o que já estava preenchido. */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <BrandAutocomplete
-            label="Marca"
-            value={form.brand}
-            onChange={(brand) => updateVehicle({ brand })}
-            placeholder="Digite para buscar"
-          />
           <ModelAutocomplete
-            label="Modelo"
+            label="Veículo"
             brand={form.brand}
             value={form.model}
             onChange={(model) => updateVehicle({ model })}
-            placeholder="Corolla"
+            placeholder="Ex.: Civic prata"
           />
           <Input
-            label="Placa"
+            label="Placa (opcional)"
             value={form.plate}
             onChange={(event) =>
               updateVehicle({ plate: event.target.value.toUpperCase() })
             }
             placeholder="ABC-1D23"
-          />
-          <Input
-            label="Ano"
-            value={form.year}
-            onChange={(event) =>
-              updateVehicle({ year: event.target.value.replace(/\D/g, "").slice(0, 4) })
-            }
-            placeholder="2024"
-            inputMode="numeric"
-            maxLength={4}
           />
         </div>
 
@@ -428,11 +413,10 @@ export function ClientFormModal({
           />
 
           <Input
-            label="Telefone"
+            label="Telefone (opcional)"
             value={form.phone}
             onChange={(e) => updateField("phone", e.target.value)}
             placeholder="(11) 99999-9999"
-            required
           />
 
           <div className="space-y-3">
@@ -451,7 +435,7 @@ export function ClientFormModal({
                     Adicionar veículo
                   </span>
                   <span className="mt-0.5 block text-xs text-muted">
-                    Inclua marca, modelo, ano, placa e até 2 fotos
+                    Nome do carro, placa (se já souber) e até 2 fotos
                   </span>
                 </span>
                 <span className="flex h-10 w-10 items-center justify-center rounded-full bg-success text-white transition-transform duration-200 group-hover:scale-110">

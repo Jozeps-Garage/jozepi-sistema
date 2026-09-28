@@ -71,7 +71,7 @@ export function ClientSheet({
     }
 
     const vehicles =
-      addVehicle && (brand.trim() || model.trim() || plate.trim())
+      addVehicle && (model.trim() || plate.trim())
         ? [
             {
               ...emptyVehicle,
@@ -139,22 +139,14 @@ export function ClientSheet({
               <Car size={18} weight="light" aria-hidden />
               Veículo
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <Input
-                label="Marca"
-                value={brand}
-                onChange={(event) => setBrand(event.target.value)}
-                placeholder="Ex.: Honda"
-              />
-              <Input
-                label="Modelo"
-                value={model}
-                onChange={(event) => setModel(event.target.value)}
-                placeholder="Ex.: Civic"
-              />
-            </div>
             <Input
-              label="Placa"
+              label="Veículo"
+              value={model}
+              onChange={(event) => setModel(event.target.value)}
+              placeholder="Ex.: Civic prata"
+            />
+            <Input
+              label="Placa (opcional)"
               value={plate}
               onChange={(event) => setPlate(event.target.value.toUpperCase())}
               placeholder="ABC1D23"

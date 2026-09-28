@@ -59,7 +59,7 @@ export function VehicleSheet({
       setError("Selecione o cliente.");
       return;
     }
-    if (!brand.trim() || !model.trim() || !plate.trim()) {
+    if (!model.trim()) {
       setError("Preencha marca, modelo e placa.");
       return;
     }
@@ -109,35 +109,18 @@ export function VehicleSheet({
 
         {clientId && (
           <>
-            <div className="grid grid-cols-2 gap-3">
-              <Input
-                label="Marca"
-                value={brand}
-                onChange={(event) => setBrand(event.target.value)}
-                placeholder="Ex.: Honda"
-              />
-              <Input
-                label="Modelo"
-                value={model}
-                onChange={(event) => setModel(event.target.value)}
-                placeholder="Ex.: Civic"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <Input
-                label="Placa"
-                value={plate}
-                onChange={(event) => setPlate(event.target.value.toUpperCase())}
-                placeholder="ABC1D23"
-              />
-              <Input
-                label="Ano"
-                value={year}
-                onChange={(event) => setYear(event.target.value.replace(/\D/g, ""))}
-                inputMode="numeric"
-                placeholder="Opcional"
-              />
-            </div>
+            <Input
+              label="Veículo"
+              value={model}
+              onChange={(event) => setModel(event.target.value)}
+              placeholder="Ex.: Civic prata"
+            />
+            <Input
+              label="Placa (opcional)"
+              value={plate}
+              onChange={(event) => setPlate(event.target.value.toUpperCase())}
+              placeholder="ABC1D23"
+            />
             {error && <p className="text-sm text-danger">{error}</p>}
             <Button type="submit" loading={saving} className="w-full">
               Cadastrar veículo

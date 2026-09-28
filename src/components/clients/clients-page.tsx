@@ -20,9 +20,7 @@ import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PlateIcon } from "@/components/ui/plate-icon";
-import { Dropdown } from "@/components/ui/dropdown";
 import { Input } from "@/components/ui/input";
-import { BrandAutocomplete } from "@/components/clients/brand-autocomplete";
 import { ModelAutocomplete } from "@/components/clients/model-autocomplete";
 import { ClientFormModal } from "@/components/clients/client-form-modal";
 import { VehiclePhotoUpload } from "@/components/clients/vehicle-photo-upload";
@@ -39,15 +37,9 @@ import {
 
 const CLIENT_ICON_WEIGHT = "light" as const;
 
-const clientInfoCardClass =
-  "inline-flex h-10 min-w-[10rem] items-center gap-2 rounded-lg border border-border bg-input px-3 text-sm font-medium shadow-card";
 
 const VEHICLE_MODAL_EXIT_MS = 180;
 
-const vehicleYearOptions = Array.from(
-  { length: new Date().getFullYear() - 1980 + 1 },
-  (_, index) => String(new Date().getFullYear() - index)
-).map((year) => ({ value: year, label: year }));
 
 function createVehicleFormItem(vehicle?: Vehicle | null): VehicleFormItem {
   if (vehicle) {
@@ -234,35 +226,23 @@ function VehicleFormModal({
           </div>
         )}
 
+        {/* Marca e ano seguem no estado, sem campo, para editar um veículo antigo
+            não apagar o que já estava lá. */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <BrandAutocomplete
-            label="Marca"
-            value={form.brand}
-            onChange={(brand) => updateVehicle({ brand })}
-            placeholder="Digite para buscar"
-          />
           <ModelAutocomplete
-            label="Modelo"
+            label="Veículo"
             brand={form.brand}
             value={form.model}
             onChange={(model) => updateVehicle({ model })}
-            placeholder="S10"
+            placeholder="Ex.: S10 branca"
           />
           <Input
-            label="Placa"
+            label="Placa (opcional)"
             value={form.plate}
             onChange={(event) =>
               updateVehicle({ plate: event.target.value.toUpperCase() })
             }
             placeholder="ABC-1D23"
-            required
-          />
-          <Dropdown
-            label="Ano"
-            value={form.year}
-            placeholder="Selecione o ano"
-            options={vehicleYearOptions}
-            onChange={(year) => updateVehicle({ year })}
           />
         </div>
 
