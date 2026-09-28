@@ -704,12 +704,16 @@ function sortEntriesByLaunch(a: FinanceEntry, b: FinanceEntry) {
   return b.date.localeCompare(a.date);
 }
 
-function parseMoney(value: string) {
+// min = 0 libera lançamento sem valor (serviço trocado, cortesia). Transferência
+// e custo fixo continuam exigindo valor — o banco recusa transferência zerada.
+function parseMoney(value: string, { min = 0.01 }: { min?: number } = {}) {
   const normalized = value.replace(/\./g, "").replace(",", ".");
   const amount = Number(normalized);
 
-  if (!Number.isFinite(amount) || amount <= 0) {
-    throw new Error("Informe um valor maior que zero.");
+  if (!Number.isFinite(amount) || amount < min) {
+    throw new Error(
+      min > 0 ? "Informe um valor maior que zero." : "Informe um valor válido."
+    );
   }
 
   return amount;
@@ -3215,7 +3219,7 @@ export function FinancePage() {
 
     let amount: number;
     try {
-      amount = parseMoney(form.amount);
+      amount = parseMoney(form.amount, { min: 0 });
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Informe um valor válido.");
       return;

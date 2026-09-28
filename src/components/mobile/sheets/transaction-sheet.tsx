@@ -128,7 +128,7 @@ export function TransactionSheet({
 
     let value: number;
     try {
-      value = parseCurrencyInput(amount, { min: 0.01 });
+      value = parseCurrencyInput(amount, { min: 0 });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Valor inválido.");
       return;
