@@ -485,6 +485,9 @@ function ClientVehiclesPanel({
 
 export function ClientsPage() {
   const [clients, setClients] = useState<Client[]>([]);
+  const [lastServiceByClient, setLastServiceByClient] = useState<
+    Map<string, string>
+  >(new Map());
   const [workshopId, setWorkshopId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -533,6 +536,28 @@ export function ClientsPage() {
     } else {
       setClients((data as Client[]) ?? []);
     }
+
+    // Uma consulta só para a oficina inteira: a data do último serviço de cada
+    // cliente é o que diz se ele sumiu, e não estava em lugar nenhum da tela.
+    const { data: orderRows } = await supabase
+      .from("service_orders")
+      .select("client_id, completed_at, scheduled_date")
+      .eq("workshop_id", profileWorkshopId)
+      .eq("status", "finalizada");
+
+    const lastByClient = new Map<string, string>();
+    for (const row of (orderRows ?? []) as {
+      client_id: string | null;
+      completed_at: string | null;
+      scheduled_date: string | null;
+    }[]) {
+      if (!row.client_id) continue;
+      const date = (row.completed_at ?? row.scheduled_date ?? "").slice(0, 10);
+      if (!date) continue;
+      const current = lastByClient.get(row.client_id);
+      if (!current || date > current) lastByClient.set(row.client_id, date);
+    }
+    setLastServiceByClient(lastByClient);
 
     setLoading(false);
   }, [supabase]);
@@ -886,21 +911,93 @@ export function ClientsPage() {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-card">
           {filteredClients.map((client) => {
-            const vehicleCount = client.vehicles?.length ?? 0;
+            const vehicles = client.vehicles ?? [];
+            const vehicleCount = vehicles.length;
+            const plated = vehicles.filter((vehicle) => vehicle.plate?.trim());
+            const lastService = lastServiceByClient.get(client.id);
 
             return (
               <article
                 key={client.id}
-                className="relative rounded-lg border border-border bg-input p-4 pb-10 shadow-card transition-shadow hover:shadow-card-hover"
+                className="group flex flex-col gap-2 border-b border-border/60 px-4 py-3 transition-colors last:border-b-0 hover:bg-background/60 sm:flex-row sm:items-center sm:gap-4"
               >
-                <div className="absolute right-3 top-3 flex items-center gap-1.5">
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <h2 className="truncate text-sm font-bold text-foreground">
+                      {client.name}
+                    </h2>
+                    {plated.slice(0, 2).map((vehicle) => (
+                      <span
+                        key={vehicle.id}
+                        className="rounded px-1.5 py-0.5 text-[11px] font-bold tracking-wide text-muted ring-1 ring-border"
+                      >
+                        {vehicle.plate.trim()}
+                      </span>
+                    ))}
+                    {plated.length > 2 && (
+                      <span className="text-[11px] font-semibold text-muted">
+                        +{plated.length - 2}
+                      </span>
+                    )}
+                    {client.pre_cadastro && (
+                      <span className="rounded-full bg-warning/12 px-2 py-0.5 text-[10px] font-bold text-warning">
+                        Falta preencher
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 truncate text-xs font-medium text-foreground/80">
+                    {client.phone ? formatPhone(client.phone) : "Sem telefone"}
+                    {" · "}
+                    {vehicleCount} veículo{vehicleCount !== 1 ? "s" : ""}
+                    {" · "}
+                    {lastService
+                      ? `Último serviço ${formatDate(lastService)}`
+                      : "Nunca atendido"}
+                  </p>
+                  {client.notes && (
+                    <p className="mt-1 truncate text-xs text-muted">{client.notes}</p>
+                  )}
+                </div>
+
+                {/* Ações discretas: o nome do cliente é o que se procura aqui. */}
+                <div className="flex shrink-0 items-center gap-1 sm:opacity-60 sm:transition-opacity sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+                  {client.phone && (
+                    <a
+                      href={getWhatsAppUrl(client.phone)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg text-[#008000] transition-colors hover:bg-[#008000]/10"
+                      title="Abrir conversa no WhatsApp"
+                      aria-label={`WhatsApp de ${client.name}`}
+                    >
+                      <WhatsappLogo size={16} weight={CLIENT_ICON_WEIGHT} aria-hidden />
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => openVehiclesPanel(client)}
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-background hover:text-foreground"
+                    title="Ver veículos cadastrados"
+                    aria-label={`Veículos de ${client.name}`}
+                  >
+                    <Car size={16} weight={CLIENT_ICON_WEIGHT} aria-hidden />
+                  </button>
+                  <Link
+                    href={`/agenda?clientId=${client.id}`}
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-background hover:text-foreground"
+                    title="Agendar com cliente"
+                    aria-label={`Agendar com ${client.name}`}
+                  >
+                    <CalendarPlus size={16} weight={CLIENT_ICON_WEIGHT} aria-hidden />
+                  </Link>
                   <button
                     type="button"
                     onClick={() => openEditModal(client)}
-                    className="rounded-lg bg-success/10 p-2 text-success transition-colors hover:bg-success hover:text-white"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-background hover:text-foreground"
                     title="Editar cliente"
+                    aria-label={`Editar ${client.name}`}
                   >
                     <PencilSimple size={16} weight={CLIENT_ICON_WEIGHT} aria-hidden />
                   </button>
@@ -908,77 +1005,13 @@ export function ClientsPage() {
                     type="button"
                     onClick={() => handleDelete(client)}
                     disabled={deletingId === client.id}
-                    className="rounded-lg bg-danger/10 p-2 text-danger transition-colors hover:bg-danger hover:text-white disabled:opacity-50"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-danger/10 hover:text-danger disabled:opacity-40"
                     title="Excluir cliente"
+                    aria-label={`Excluir ${client.name}`}
                   >
                     <Trash size={16} weight={CLIENT_ICON_WEIGHT} aria-hidden />
                   </button>
                 </div>
-
-                <div className="pr-20">
-                  <h2 className="truncate text-base font-semibold text-foreground">
-                    {client.name}
-                  </h2>
-                  {client.pre_cadastro && (
-                    <span className="mt-1 inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
-                      Pré-cadastro · falta preencher
-                    </span>
-                  )}
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted">
-                    {client.phone ? (
-                      <a
-                        href={getWhatsAppUrl(client.phone)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={`group ${clientInfoCardClass} text-[#008000] transition-all hover:-translate-y-0.5 hover:border-[#008000] hover:bg-[#008000] hover:text-white hover:shadow-card-hover`}
-                        title="Abrir conversa no WhatsApp"
-                      >
-                        <WhatsappLogo
-                          size={16}
-                          weight={CLIENT_ICON_WEIGHT}
-                          className="shrink-0 text-[#008000] transition-colors group-hover:text-white"
-                          aria-hidden
-                        />
-                        <span>{formatPhone(client.phone)}</span>
-                      </a>
-                    ) : (
-                      // Sem telefone não existe link de WhatsApp: o botão leva direto pro cadastro.
-                      <button
-                        type="button"
-                        onClick={() => openEditModal(client)}
-                        className={`${clientInfoCardClass} text-muted transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:bg-primary hover:text-white`}
-                        title="Finalizar o cadastro deste cliente"
-                      >
-                        Sem telefone · finalizar cadastro
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => openVehiclesPanel(client)}
-                      className={`${clientInfoCardClass} text-primary transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:bg-primary hover:text-white hover:shadow-card-hover`}
-                      title="Ver veículos cadastrados"
-                    >
-                      <Car size={16} weight={CLIENT_ICON_WEIGHT} aria-hidden />
-                      {vehicleCount} veículo{vehicleCount !== 1 ? "s" : ""}
-                    </button>
-                  </div>
-                </div>
-
-                <Link
-                  href={`/agenda?clientId=${client.id}`}
-                  className="mt-3 inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white shadow-card transition-all hover:-translate-y-0.5 hover:bg-primary-hover hover:shadow-card-hover"
-                >
-                  <CalendarPlus size={16} weight={CLIENT_ICON_WEIGHT} aria-hidden />
-                  Agendar com cliente
-                </Link>
-                {client.notes && (
-                  <p className="mt-3 line-clamp-2 rounded-lg bg-background/70 px-3 py-2 text-sm text-muted">
-                    {client.notes}
-                  </p>
-                )}
-                <span className="absolute bottom-3 right-4 text-xs font-medium text-muted">
-                  Cadastrado em {formatDate(client.created_at)}
-                </span>
               </article>
             );
           })}
