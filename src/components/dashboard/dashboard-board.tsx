@@ -10,7 +10,7 @@ import {
   RevenueWidget,
   ServicesWidget,
 } from "@/components/dashboard/dashboard-widgets";
-import { TodoCards } from "@/components/dashboard/todo-cards";
+import { TodoBell } from "@/components/dashboard/todo-bell";
 import type { DashboardData } from "@/lib/dashboard/types";
 
 const LEGACY_LAYOUT_STORAGE_KEY = "auto-estetica-dashboard-layout";
@@ -26,15 +26,14 @@ export function DashboardBoard({ data }: { data: DashboardData }) {
 
   return (
     <div className="dashboard-page">
-      <div className="mb-3">
-        <h1 className="font-brand text-xl font-light tracking-wide text-foreground sm:text-2xl">
-          {data.greeting}, {data.greetingName}.
-        </h1>
-        <p className="page-subtitle mt-1 text-sm">{data.dateLabel}</p>
-      </div>
-
-      <div className="mb-2.5">
-        <TodoCards data={data} />
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="font-brand text-xl font-light tracking-wide text-foreground sm:text-2xl">
+            {data.greeting}, {data.greetingName}.
+          </h1>
+          <p className="page-subtitle mt-1 text-sm">{data.dateLabel}</p>
+        </div>
+        <TodoBell data={data} />
       </div>
 
       <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-6">
