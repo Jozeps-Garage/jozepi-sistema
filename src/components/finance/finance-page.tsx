@@ -419,6 +419,48 @@ const periodOptions = [
 const categoryFilterAll = "all";
 const unassignedAccountFilter = "__sem_conta__";
 
+type TransactionSortKey = "description" | "label" | "date" | "amount" | "status";
+type TransactionSort = { key: TransactionSortKey; direction: "asc" | "desc" };
+
+const PAYMENT_STATUS_ORDER: Record<string, number> = {
+  pendente: 0,
+  parcial: 1,
+  pago: 2,
+  cancelado: 3,
+};
+
+/** A data que a linha mostra: vencimento quando existe, senão o lançamento. */
+function sortableDate(entry: FinanceEntry) {
+  return entry.dueDate || entry.date;
+}
+
+function compareEntries({ key, direction }: TransactionSort) {
+  const factor = direction === "asc" ? 1 : -1;
+  return (a: FinanceEntry, b: FinanceEntry) => {
+    let result = 0;
+    if (key === "amount") {
+      result = a.amount - b.amount;
+    } else if (key === "date") {
+      result = sortableDate(a).localeCompare(sortableDate(b));
+    } else if (key === "status") {
+      result =
+        (PAYMENT_STATUS_ORDER[a.paymentStatus ?? "pago"] ?? 9) -
+        (PAYMENT_STATUS_ORDER[b.paymentStatus ?? "pago"] ?? 9);
+    } else if (key === "label") {
+      result = (a.supplierName ?? a.category ?? "").localeCompare(
+        b.supplierName ?? b.category ?? "",
+        "pt-BR"
+      );
+    } else {
+      result = (a.clientName ?? a.description).localeCompare(
+        b.clientName ?? b.description,
+        "pt-BR"
+      );
+    }
+    return result * factor;
+  };
+}
+
 function matchesAccountFilter(entry: FinanceEntry, filter: string) {
   if (filter === categoryFilterAll) return true;
   if (filter === unassignedAccountFilter) return !entry.accountId;
@@ -1679,6 +1721,47 @@ function PaymentStatusSelect({
   );
 }
 
+function SortableHeader({
+  label,
+  icon: HeaderIcon,
+  sortKey,
+  sort,
+  onSort,
+}: {
+  label: string;
+  icon: React.ComponentType<{ size?: number; weight?: "light"; "aria-hidden"?: boolean }>;
+  sortKey: TransactionSortKey;
+  sort: TransactionSort | null;
+  onSort: (key: TransactionSortKey) => void;
+}) {
+  const active = sort?.key === sortKey;
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(sortKey)}
+      className={`flex min-w-0 items-center gap-1.5 text-left transition-colors hover:text-foreground ${
+        active ? "text-foreground" : ""
+      }`}
+      aria-label={`Ordenar por ${label}`}
+    >
+      <HeaderIcon size={13} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+      <span className="truncate">{label}</span>
+      <CaretDown
+        size={11}
+        weight="bold"
+        aria-hidden
+        className={`shrink-0 transition-transform ${
+          active
+            ? sort?.direction === "asc"
+              ? "rotate-180 opacity-100"
+              : "opacity-100"
+            : "opacity-25"
+        }`}
+      />
+    </button>
+  );
+}
+
 function TransactionList({
   entries,
   emptyMessage,
@@ -1739,7 +1822,27 @@ function TransactionList({
   }
   const editRowRef = useRef<HTMLElement>(null);
   const todayKeyValue = todayDateKey();
+
+  // null mantém a ordem que a página já entrega (lançamento mais recente).
+  const [sort, setSort] = useState<TransactionSort | null>(null);
+
+  function toggleSort(key: TransactionSortKey) {
+    setSort((current) =>
+      current?.key === key
+        ? current.direction === "asc"
+          ? { key, direction: "desc" }
+          : null
+        : { key, direction: "asc" }
+    );
+  }
+
+  const sortedEntries = useMemo(
+    () => (sort ? [...entries].sort(compareEntries(sort)) : entries),
+    [entries, sort]
+  );
+
   const listItems = useMemo(() => {
+    const entries = sortedEntries;
     if (!groupInstallments) {
       return entries.map((entry) => ({ kind: "single" as const, entry }));
     }
@@ -1762,7 +1865,7 @@ function TransactionList({
       items.push({ kind: "group", groupId, entries: group });
     }
     return items;
-  }, [entries, groupInstallments]);
+  }, [sortedEntries, groupInstallments]);
   const entriesSignature = useMemo(
     () => listItems.map((item) => (item.kind === "single" ? item.entry.id : item.groupId)).join("|"),
     [listItems]
@@ -1898,11 +2001,37 @@ function TransactionList({
           style={{ gridTemplateColumns }}
         >
           {canSelect && <span />}
-          <span>Descrição</span>
-          <span>{labelColumnTitle}</span>
-          <span>Valor</span>
+          <SortableHeader
+            label="Descrição"
+            icon={Note}
+            sortKey="description"
+            sort={sort}
+            onSort={toggleSort}
+          />
+          <SortableHeader
+            label={labelColumnTitle}
+            icon={accent === "expense" ? Wallet : ChartDonut}
+            sortKey="label"
+            sort={sort}
+            onSort={toggleSort}
+          />
+          <SortableHeader
+            label="Valor"
+            icon={accent === "expense" ? TrendDown : TrendUp}
+            sortKey="amount"
+            sort={sort}
+            onSort={toggleSort}
+          />
           {showNotes && <span className="text-center">OBS</span>}
-          {showPayment && <span>Status</span>}
+          {showPayment && (
+            <SortableHeader
+              label="Status"
+              icon={CheckCircle}
+              sortKey="status"
+              sort={sort}
+              onSort={toggleSort}
+            />
+          )}
           <span className="text-right">Ações</span>
         </div>
         {(() => {
