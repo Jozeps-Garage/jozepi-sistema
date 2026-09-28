@@ -1719,7 +1719,15 @@ function TransactionList({
   const [bulkAccountId, setBulkAccountId] = useState("");
   const [bulkSaving, setBulkSaving] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
-  const canSelect = Boolean(onBulkAssignAccount && accountOptions?.length);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const selectionAvailable = Boolean(onBulkAssignAccount && accountOptions?.length);
+  const canSelect = selectionAvailable && selectionMode;
+
+  function exitSelection() {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+    setBulkAccountId("");
+  }
 
   function toggleSelected(id: string) {
     setSelectedIds((prev) => {
@@ -1825,11 +1833,27 @@ function TransactionList({
 
   return (
     <div className="w-full">
-      {filter && <div className="mb-2 flex justify-end px-3">{filter}</div>}
-      {canSelect && selectedIds.size > 0 && (
+      {(filter || selectionAvailable) && (
+        <div className="mb-2 flex items-center justify-end gap-2 px-3">
+          {selectionAvailable && !selectionMode && (
+            <button
+              type="button"
+              onClick={() => setSelectionMode(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-muted transition-colors hover:text-foreground"
+            >
+              <ListChecks size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+              Selecionar
+            </button>
+          )}
+          {filter}
+        </div>
+      )}
+      {canSelect && (
         <div className="mb-2 flex flex-wrap items-end gap-3 rounded-lg border border-premium/30 bg-premium/5 px-3 py-2.5">
           <p className="pb-2.5 text-sm font-semibold text-foreground">
-            {selectedIds.size} selecionado{selectedIds.size === 1 ? "" : "s"}
+            {selectedIds.size === 0
+              ? "Marque os lançamentos"
+              : `${selectedIds.size} selecionado${selectedIds.size === 1 ? "" : "s"}`}
           </p>
           <Dropdown
             label="Mover para a conta"
@@ -1843,14 +1867,13 @@ function TransactionList({
             type="button"
             variant="success"
             loading={bulkSaving}
-            disabled={!bulkAccountId}
+            disabled={!bulkAccountId || selectedIds.size === 0}
             onClick={async () => {
-              if (!bulkAccountId) return;
+              if (!bulkAccountId || selectedIds.size === 0) return;
               setBulkSaving(true);
               try {
                 await onBulkAssignAccount!(Array.from(selectedIds), bulkAccountId);
-                setSelectedIds(new Set());
-                setBulkAccountId("");
+                exitSelection();
               } finally {
                 setBulkSaving(false);
               }
@@ -1861,10 +1884,10 @@ function TransactionList({
           </Button>
           <button
             type="button"
-            onClick={() => setSelectedIds(new Set())}
+            onClick={exitSelection}
             className="mb-3 text-xs font-semibold text-muted transition-colors hover:text-foreground"
           >
-            Limpar seleção
+            Cancelar
           </button>
         </div>
       )}
