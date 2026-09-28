@@ -2005,13 +2005,23 @@ function TransactionList({
           style={{ gridTemplateColumns }}
         >
           {canSelect && <span />}
-          <SortableHeader
-            label="Descrição"
-            icon={Note}
-            sortKey="description"
-            sort={sort}
-            onSort={toggleSort}
-          />
+          <span className="flex min-w-0 items-center gap-3">
+            <SortableHeader
+              label="Descrição"
+              icon={Note}
+              sortKey="description"
+              sort={sort}
+              onSort={toggleSort}
+            />
+            {/* A data vive na linha de metadados desta mesma célula. */}
+            <SortableHeader
+              label="Data"
+              icon={CalendarBlank}
+              sortKey="date"
+              sort={sort}
+              onSort={toggleSort}
+            />
+          </span>
           <SortableHeader
             label={labelColumnTitle}
             icon={accent === "expense" ? Wallet : ChartDonut}
