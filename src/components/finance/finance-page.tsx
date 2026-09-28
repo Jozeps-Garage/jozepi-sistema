@@ -1916,8 +1916,8 @@ function TransactionList({
                   <p className="mt-1 truncate text-xs text-muted">{displaySubtitle}</p>
                 )}
                 <p
-                  className={`mt-1 truncate text-xs ${
-                    overdue ? "font-semibold text-danger" : "text-muted"
+                  className={`mt-1 truncate text-xs font-medium ${
+                    overdue ? "font-semibold text-danger" : "text-foreground/80"
                   }`}
                 >
                   {metaParts.join(" · ")}
