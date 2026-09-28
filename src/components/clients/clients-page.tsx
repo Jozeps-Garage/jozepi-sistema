@@ -446,6 +446,11 @@ export function ClientsPage() {
     void Promise.resolve().then(loadClients);
   }, [loadClients]);
 
+  const totalVehicles = clients.reduce(
+    (total, client) => total + (client.vehicles?.length ?? 0),
+    0
+  );
+
   const filteredClients = clients.filter((client) => {
     const term = search.toLowerCase();
     const vehicleMatch = client.vehicles?.some(
@@ -759,11 +764,18 @@ export function ClientsPage() {
         </div>
 
         {!loading && (
-          <ClientStatChip
-            label="Total de clientes"
-            value={String(clients.length)}
-            icon={<UsersThree size={16} weight={CLIENT_ICON_WEIGHT} aria-hidden />}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <ClientStatChip
+              label="Total de clientes"
+              value={String(clients.length)}
+              icon={<UsersThree size={16} weight={CLIENT_ICON_WEIGHT} aria-hidden />}
+            />
+            <ClientStatChip
+              label="Veículos"
+              value={String(totalVehicles)}
+              icon={<Car size={16} weight={CLIENT_ICON_WEIGHT} aria-hidden />}
+            />
+          </div>
         )}
       </div>
 
