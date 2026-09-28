@@ -5254,6 +5254,7 @@ export function FinancePage() {
           name: option.label,
         }))}
         defaultAccountId={paidConfirm?.accountId || defaultAccountId(accounts)}
+        type={paidConfirm?.type}
         loading={savingPaid}
         onCancel={() => {
           if (!savingPaid) setPaidConfirm(null);

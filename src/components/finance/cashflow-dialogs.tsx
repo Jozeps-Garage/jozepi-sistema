@@ -10,6 +10,7 @@ export function ConfirmPaidDialog({
   defaultDate,
   accounts,
   defaultAccountId,
+  type = "receita",
   loading,
   onCancel,
   onConfirm,
@@ -18,10 +19,12 @@ export function ConfirmPaidDialog({
   defaultDate: string;
   accounts: { id: string; name: string }[];
   defaultAccountId: string;
+  type?: "receita" | "despesa";
   loading?: boolean;
   onCancel: () => void;
   onConfirm: (effectiveDate: string, accountId: string) => void;
 }) {
+  const isExpense = type === "despesa";
   const [date, setDate] = useState(defaultDate);
   const [accountId, setAccountId] = useState(defaultAccountId);
   const [missingAccount, setMissingAccount] = useState(false);
@@ -61,17 +64,19 @@ export function ConfirmPaidDialog({
           Confirmar pagamento
         </h2>
         <p className="mt-1 text-sm text-muted">
-          Informe quando o valor entrou ou saiu e em qual conta ele caiu.
+          {isExpense
+            ? "Informe quando o valor saiu e de qual conta ele saiu."
+            : "Informe quando o valor entrou e em qual conta ele caiu."}
         </p>
         <div className="mt-4 grid grid-cols-1 gap-3">
           <Input
-            label="Data de efetivação"
+            label={isExpense ? "Data do pagamento" : "Data do recebimento"}
             type="date"
             value={date}
             onChange={(event) => setDate(event.target.value)}
           />
           <Dropdown
-            label="Conta"
+            label={isExpense ? "Conta de saída" : "Conta de entrada"}
             value={accountId}
             options={accountOptions}
             placeholder="Selecione a conta"
@@ -83,7 +88,9 @@ export function ConfirmPaidDialog({
         </div>
         {missingAccount && (
           <p className="mt-2 text-xs font-medium text-danger">
-            Selecione a conta que recebeu ou pagou o valor.
+            {isExpense
+              ? "Selecione a conta de onde o valor saiu."
+              : "Selecione a conta que recebeu o valor."}
           </p>
         )}
         <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -91,7 +98,7 @@ export function ConfirmPaidDialog({
             Cancelar
           </Button>
           <Button type="submit" variant="success" loading={loading}>
-            Marcar como pago
+            {isExpense ? "Marcar como pago" : "Marcar como recebido"}
           </Button>
         </div>
       </form>
