@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { ChartLineUp, WarningCircle } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { dueRelativeLabel, isOpenPaymentStatus } from "@/lib/finance/due";
 import {
   balanceSeries,
@@ -330,9 +331,12 @@ export function CashflowProjectionPanel({
           Receitas e despesas em aberto com vencimento a partir de hoje, incluindo parcelas.
         </p>
         {upcoming.length === 0 ? (
-          <p className="mt-4 rounded-lg border border-dashed border-border bg-background px-4 py-8 text-center text-sm text-muted">
-            Nenhuma pendência com vencimento futuro.
-          </p>
+          <EmptyState
+            className="mt-4"
+            icon={<ChartLineUp size={20} weight="light" aria-hidden />}
+            title="Nenhuma pendência à frente"
+            description="Receitas e despesas em aberto com vencimento futuro aparecem aqui."
+          />
         ) : (
           <ul className="mt-4 divide-y divide-border overflow-hidden rounded-lg border border-border bg-background">
             {upcoming.map((item) => (

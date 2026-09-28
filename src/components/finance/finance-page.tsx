@@ -44,6 +44,7 @@ import { CashflowProjectionPanel } from "@/components/finance/cashflow-projectio
 import { RevenueExpenseChart } from "@/components/finance/revenue-expense-chart";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Dropdown } from "@/components/ui/dropdown";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
@@ -1917,23 +1918,11 @@ function TransactionList({
     return (
       <div className="w-full">
         {filter && <div className="mb-2 flex justify-end px-3">{filter}</div>}
-        <div className="flex flex-col items-center px-4 py-12 text-center">
-          <span
-            className={`flex h-12 w-12 items-center justify-center rounded-lg ${
-              accent === "expense"
-                ? "bg-danger/10 text-danger"
-                : "bg-primary/10 text-primary"
-            }`}
-          >
-            <ClipboardList className="h-6 w-6" />
-          </span>
-          <p className="mt-4 text-sm font-semibold text-foreground">
-            {emptyMessage}
-          </p>
-          {emptyDescription && (
-            <p className="mt-1 max-w-sm text-sm text-muted">{emptyDescription}</p>
-          )}
-        </div>
+        <EmptyState
+          icon={<ClipboardList className="h-5 w-5" />}
+          title={emptyMessage}
+          description={emptyDescription}
+        />
       </div>
     );
   }

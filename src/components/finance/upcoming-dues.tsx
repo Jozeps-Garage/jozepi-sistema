@@ -2,6 +2,7 @@
 
 import { CalendarBlank, WarningCircle } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { dueRelativeLabel, isOverdue, todayDateKey } from "@/lib/finance/due";
 import type { PaymentStatus, TransactionType } from "@/lib/finance/types";
 import { formatCurrency } from "@/lib/utils/format";
@@ -27,9 +28,11 @@ export function UpcomingDuesList({
 }) {
   if (items.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-border bg-background px-4 py-8 text-center text-sm text-muted">
-        Nenhuma conta vencida ou a vencer nos próximos 7 dias.
-      </p>
+      <EmptyState
+        icon={<CalendarBlank size={20} weight="light" aria-hidden />}
+        title="Nada vencendo por agora"
+        description="Contas vencidas ou com vencimento nos próximos 7 dias aparecem aqui."
+      />
     );
   }
 
