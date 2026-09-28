@@ -87,11 +87,11 @@ export function TodoBell({ data }: { data: DashboardData }) {
             ? `${items.length} ${plural(items.length, "pendência", "pendências")}`
             : "Sem pendências"
         }
-        className="relative flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card text-muted shadow-card transition-colors hover:text-foreground"
+        className="icon-chip relative h-10 w-10 transition-colors hover:bg-primary/15"
       >
         <Bell size={18} weight="light" aria-hidden />
         {items.length > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-premium px-1 text-[10px] font-bold text-white">
+          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-premium px-1 text-[9px] font-bold leading-none text-white ring-2 ring-background">
             {items.length}
           </span>
         )}

@@ -417,6 +417,13 @@ const periodOptions = [
 ];
 
 const categoryFilterAll = "all";
+const unassignedAccountFilter = "__sem_conta__";
+
+function matchesAccountFilter(entry: FinanceEntry, filter: string) {
+  if (filter === categoryFilterAll) return true;
+  if (filter === unassignedAccountFilter) return !entry.accountId;
+  return entry.accountId === filter;
+}
 const FINANCE_ICON_WEIGHT = "light" as const;
 const DONUT_COLORS = ["#f97316", "#3b82f6", "#22c55e", "#6b7280", "#ef4444"];
 
@@ -1161,6 +1168,8 @@ function InlineFilterButton({
   categoryOptions,
   supplier,
   supplierOptions,
+  account,
+  accountOptions,
   open,
   onToggle,
   onClose,
@@ -1169,6 +1178,7 @@ function InlineFilterButton({
   onCustomEndChange,
   onCategoryChange,
   onSupplierChange,
+  onAccountChange,
   onClear,
   ariaLabel = "Filtros",
 }: {
@@ -1179,6 +1189,8 @@ function InlineFilterButton({
   categoryOptions: { value: string; label: string }[];
   supplier?: string;
   supplierOptions?: { value: string; label: string }[];
+  account?: string;
+  accountOptions?: { value: string; label: string }[];
   open: boolean;
   onToggle: () => void;
   onClose: () => void;
@@ -1187,10 +1199,12 @@ function InlineFilterButton({
   onCustomEndChange: (value: string) => void;
   onCategoryChange: (value: string) => void;
   onSupplierChange?: (value: string) => void;
+  onAccountChange?: (value: string) => void;
   onClear: () => void;
   ariaLabel?: string;
 }) {
   const showSupplier = Boolean(supplierOptions && onSupplierChange);
+  const showAccount = Boolean(accountOptions && onAccountChange);
   const containerRef = useRef<HTMLDivElement>(null);
   const [closing, setClosing] = useState(false);
   const [panelReady, setPanelReady] = useState(false);
@@ -1317,6 +1331,15 @@ function InlineFilterButton({
                 value={supplier ?? categoryFilterAll}
                 options={supplierOptions!}
                 onChange={onSupplierChange!}
+                className="min-w-[14rem] flex-[1.2] space-y-2"
+              />
+            )}
+            {showAccount && (
+              <Dropdown
+                label="Conta"
+                value={account ?? categoryFilterAll}
+                options={accountOptions!}
+                onChange={onAccountChange!}
                 className="min-w-[14rem] flex-[1.2] space-y-2"
               />
             )}
@@ -1662,6 +1685,8 @@ function TransactionList({
   emptyDescription,
   accent = "default",
   accountNames,
+  accountOptions,
+  onBulkAssignAccount,
   filter,
   groupByMonth = false,
   groupInstallments = false,
@@ -1677,6 +1702,8 @@ function TransactionList({
   emptyDescription?: string;
   accent?: "default" | "expense";
   accountNames?: Map<string, string>;
+  accountOptions?: { value: string; label: string }[];
+  onBulkAssignAccount?: (ids: string[], accountId: string) => Promise<void>;
   filter?: React.ReactNode;
   groupByMonth?: boolean;
   groupInstallments?: boolean;
@@ -1688,7 +1715,20 @@ function TransactionList({
   onUpdateNotes?: (entry: FinanceEntry, notes: string | null) => Promise<void>;
 }) {
   const [page, setPage] = useState(0);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkAccountId, setBulkAccountId] = useState("");
+  const [bulkSaving, setBulkSaving] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const canSelect = Boolean(onBulkAssignAccount && accountOptions?.length);
+
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
   const editRowRef = useRef<HTMLElement>(null);
   const todayKeyValue = todayDateKey();
   const listItems = useMemo(() => {
@@ -1747,6 +1787,7 @@ function TransactionList({
 
   // Separate fixed columns so OBS / status / edit stay aligned across rows.
   const gridTemplateColumns = [
+    canSelect ? "28px" : null,
     "minmax(0, 1fr)",
     "150px",
     "110px",
@@ -1785,12 +1826,55 @@ function TransactionList({
   return (
     <div className="w-full">
       {filter && <div className="mb-2 flex justify-end px-3">{filter}</div>}
+      {canSelect && selectedIds.size > 0 && (
+        <div className="mb-2 flex flex-wrap items-end gap-3 rounded-lg border border-premium/30 bg-premium/5 px-3 py-2.5">
+          <p className="pb-2.5 text-sm font-semibold text-foreground">
+            {selectedIds.size} selecionado{selectedIds.size === 1 ? "" : "s"}
+          </p>
+          <Dropdown
+            label="Mover para a conta"
+            value={bulkAccountId}
+            options={accountOptions!}
+            placeholder="Selecione a conta"
+            onChange={setBulkAccountId}
+            className="min-w-[13rem]"
+          />
+          <Button
+            type="button"
+            variant="success"
+            loading={bulkSaving}
+            disabled={!bulkAccountId}
+            onClick={async () => {
+              if (!bulkAccountId) return;
+              setBulkSaving(true);
+              try {
+                await onBulkAssignAccount!(Array.from(selectedIds), bulkAccountId);
+                setSelectedIds(new Set());
+                setBulkAccountId("");
+              } finally {
+                setBulkSaving(false);
+              }
+            }}
+            className="mb-0.5"
+          >
+            Atribuir
+          </Button>
+          <button
+            type="button"
+            onClick={() => setSelectedIds(new Set())}
+            className="mb-3 text-xs font-semibold text-muted transition-colors hover:text-foreground"
+          >
+            Limpar seleção
+          </button>
+        </div>
+      )}
       <div className="overflow-x-auto">
         <div className="min-w-[860px]">
         <div
           className="grid items-center gap-x-4 border-b border-border px-3 py-3 text-xs font-semibold text-muted"
           style={{ gridTemplateColumns }}
         >
+          {canSelect && <span />}
           <span>Descrição</span>
           <span>{labelColumnTitle}</span>
           <span>Valor</span>
@@ -1882,6 +1966,15 @@ function TransactionList({
               } ${overdue ? "bg-danger/5" : ""}`}
               style={{ gridTemplateColumns }}
             >
+              {canSelect && (
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(entry.id)}
+                  onChange={() => toggleSelected(entry.id)}
+                  aria-label={`Selecionar ${entry.description}`}
+                  className="h-4 w-4 rounded border-border"
+                />
+              )}
               <div className="min-w-0">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <p className={`truncate text-sm font-semibold text-foreground ${nested ? "pl-4" : ""}`}>
@@ -2033,6 +2126,7 @@ function TransactionList({
                   }`}
                   style={{ gridTemplateColumns }}
                 >
+                  {canSelect && <span />}
                   <div className="min-w-0">
                     <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-foreground">
                       {expanded ? (
@@ -2369,6 +2463,8 @@ export function FinancePage() {
   const [revenueCategoryFilter, setRevenueCategoryFilter] = useState(categoryFilterAll);
   const [expenseCategoryFilter, setExpenseCategoryFilter] = useState(categoryFilterAll);
   const [expenseSupplierFilter, setExpenseSupplierFilter] = useState(categoryFilterAll);
+  const [revenueAccountFilter, setRevenueAccountFilter] = useState(categoryFilterAll);
+  const [expenseAccountFilter, setExpenseAccountFilter] = useState(categoryFilterAll);
   const [showFixedCostForm, setShowFixedCostForm] = useState(false);
   const [editingFixedCostId, setEditingFixedCostId] = useState<string | null>(null);
   const [fixedCostForm, setFixedCostForm] = useState<FixedCostForm>(initialFixedCostForm);
@@ -2902,6 +2998,11 @@ export function FinancePage() {
       label: name,
     })),
   ];
+  const accountFilterOptions = [
+    { value: categoryFilterAll, label: "Todas as contas" },
+    { value: unassignedAccountFilter, label: "Sem conta definida" },
+    ...accounts.map((account) => ({ value: account.id, label: account.name })),
+  ];
   const expenseCategoryFilterOptions = [
     { value: categoryFilterAll, label: "Todas as categorias" },
     ...[...new Set(expenseEntries.map((entry) => entry.category))].map((name) => ({
@@ -2913,7 +3014,8 @@ export function FinancePage() {
     (entry) =>
       (revenuePeriod === "all" || isDateInRange(entry.date, revenueRange)) &&
       (revenueCategoryFilter === categoryFilterAll ||
-        entry.category === revenueCategoryFilter)
+        entry.category === revenueCategoryFilter) &&
+      matchesAccountFilter(entry, revenueAccountFilter)
   );
   const filteredExpenseEntries = expenseEntries.filter(
     (entry) =>
@@ -2921,7 +3023,8 @@ export function FinancePage() {
       (expenseCategoryFilter === categoryFilterAll ||
         entry.category === expenseCategoryFilter) &&
       (expenseSupplierFilter === categoryFilterAll ||
-        entry.supplierId === expenseSupplierFilter)
+        entry.supplierId === expenseSupplierFilter) &&
+      matchesAccountFilter(entry, expenseAccountFilter)
   );
 
   const accountNames = useMemo(
@@ -3607,6 +3710,30 @@ export function FinancePage() {
       )
     );
     setError(updateError.message);
+  }
+
+  async function handleBulkAssignAccount(ids: string[], accountId: string) {
+    if (ids.length === 0 || !accountId) return;
+    setError(null);
+
+    const { error: updateError } = await supabase
+      .from("financial_transactions")
+      .update({ account_id: accountId })
+      .in("id", ids)
+      .eq("workshop_id", workshopId);
+
+    if (updateError) {
+      setError(updateError.message);
+      return;
+    }
+
+    setTransactions((prev) =>
+      prev.map((transaction) =>
+        ids.includes(transaction.id)
+          ? { ...transaction, account_id: accountId }
+          : transaction
+      )
+    );
   }
 
   async function handleUpdateTransactionNotes(
@@ -4638,6 +4765,8 @@ export function FinancePage() {
               <TransactionList
                 entries={filteredRevenueEntries}
                 accountNames={accountNames}
+                accountOptions={activeAccountOptions}
+                onBulkAssignAccount={handleBulkAssignAccount}
                 emptyMessage="Nenhuma receita encontrada."
                 groupByMonth={revenuePeriod !== "all"}
                 editingId={editingRevenueId}
@@ -4676,11 +4805,15 @@ export function FinancePage() {
                     onCustomStartChange={setRevenueCustomStart}
                     onCustomEndChange={setRevenueCustomEnd}
                     onCategoryChange={setRevenueCategoryFilter}
+                    account={revenueAccountFilter}
+                    accountOptions={accountFilterOptions}
+                    onAccountChange={setRevenueAccountFilter}
                     onClear={() => {
                       setRevenuePeriod("all");
                       setRevenueCustomStart(dateKey(startOfMonth(today)));
                       setRevenueCustomEnd(dateKey(today));
                       setRevenueCategoryFilter(categoryFilterAll);
+                      setRevenueAccountFilter(categoryFilterAll);
                     }}
                     ariaLabel="Filtros de receitas"
                   />
@@ -4735,6 +4868,8 @@ export function FinancePage() {
               <TransactionList
                 entries={filteredExpenseEntries}
                 accountNames={accountNames}
+                accountOptions={activeAccountOptions}
+                onBulkAssignAccount={handleBulkAssignAccount}
                 editingId={editingExpenseId}
                 editForm={
                   editingExpenseId ? (
@@ -4776,12 +4911,16 @@ export function FinancePage() {
                     onCustomEndChange={setExpenseCustomEnd}
                     onCategoryChange={setExpenseCategoryFilter}
                     onSupplierChange={setExpenseSupplierFilter}
+                    account={expenseAccountFilter}
+                    accountOptions={accountFilterOptions}
+                    onAccountChange={setExpenseAccountFilter}
                     onClear={() => {
                       setExpensePeriod("all");
                       setExpenseCustomStart(dateKey(startOfMonth(today)));
                       setExpenseCustomEnd(dateKey(today));
                       setExpenseCategoryFilter(categoryFilterAll);
                       setExpenseSupplierFilter(categoryFilterAll);
+                      setExpenseAccountFilter(categoryFilterAll);
                     }}
                     ariaLabel="Filtros de despesas"
                   />
