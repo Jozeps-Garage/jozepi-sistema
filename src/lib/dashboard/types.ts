@@ -56,6 +56,13 @@ export type DashboardStats = {
   total_clients: number;
 };
 
+/** Pendências que ninguém vê até alguém procurar. Zero some da tela. */
+export type DashboardTodo = {
+  unassignedTransactions: number;
+  pendingQuotes: number;
+  preRegisteredClients: number;
+};
+
 export type DashboardData = {
   greetingName: string;
   greeting: string;
@@ -69,6 +76,7 @@ export type DashboardData = {
   pendingExpenses: PendingExpenseRow[];
   monthlyChartData: MonthChartData[];
   maxChartValue: number;
+  todos: DashboardTodo;
 };
 
 export function getClientName(

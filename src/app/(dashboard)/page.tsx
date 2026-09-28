@@ -3,6 +3,7 @@ import type { MonthChartData } from "@/components/finance/revenue-expense-chart"
 import type {
   AppointmentRow,
   DashboardData,
+  DashboardTodo,
   NextAppointment,
   PendingExpenseRow,
   ProductRow,
@@ -11,7 +12,7 @@ import type {
 import { getProductStockPercent } from "@/lib/dashboard/types";
 import { createClient } from "@/lib/supabase/server";
 import { cashDate, getMonthlyRevenue, isPaidCashStatus } from "@/lib/finance/cash";
-import { toMoneyNumber } from "@/lib/finance/types";
+import { DEFAULT_ACCOUNT_NAME, toMoneyNumber } from "@/lib/finance/types";
 import {
   DEFAULT_TIME_ZONE,
   addDaysToDateKey,
@@ -76,6 +77,11 @@ export default async function DashboardPage() {
   let pendingExpenses: PendingExpenseRow[] = [];
   let monthlyChartData: MonthChartData[] = [];
   let maxChartValue = 1;
+  let todos: DashboardTodo = {
+    unassignedTransactions: 0,
+    pendingQuotes: 0,
+    preRegisteredClients: 0,
+  };
 
   let timeZone = DEFAULT_TIME_ZONE;
   let todayDateKey = dateKeyInTimeZone(now, timeZone);
@@ -303,9 +309,50 @@ export default async function DashboardPage() {
       1,
       ...monthlyChartData.flatMap((m) => [m.revenue, m.expense])
     );
+
+    // Pendências invisíveis. Cada consulta pode falhar sozinha (tabela ou coluna
+    // que a oficina ainda não migrou) sem derrubar o resto do dashboard.
+    // "Não classificado" é a conta genérica da migration 031, não ausência de
+    // conta: lançamento parado nela ainda não foi atribuído a caixa ou banco.
+    const { data: fallbackAccount } = await supabase
+      .from("financial_accounts")
+      .select("id")
+      .eq("workshop_id", workshopId)
+      .eq("name", DEFAULT_ACCOUNT_NAME)
+      .maybeSingle();
+
+    const unclassifiedFilter = fallbackAccount?.id
+      ? `account_id.is.null,account_id.eq.${fallbackAccount.id}`
+      : "account_id.is.null";
+
+    const [unassigned, pendingQuotes, preRegistered] = await Promise.all([
+      supabase
+        .from("financial_transactions")
+        .select("id", { count: "exact", head: true })
+        .eq("workshop_id", workshopId)
+        .or(unclassifiedFilter)
+        .neq("payment_status", "cancelado"),
+      supabase
+        .from("quotes")
+        .select("id", { count: "exact", head: true })
+        .eq("workshop_id", workshopId)
+        .eq("status", "pendente"),
+      supabase
+        .from("clients")
+        .select("id", { count: "exact", head: true })
+        .eq("workshop_id", workshopId)
+        .eq("pre_cadastro", true),
+    ]);
+
+    todos = {
+      unassignedTransactions: unassigned.count ?? 0,
+      pendingQuotes: pendingQuotes.count ?? 0,
+      preRegisteredClients: preRegistered.count ?? 0,
+    };
   }
 
   const data: DashboardData = {
+    todos,
     greeting: getGreeting(now, timeZone),
     greetingName: getDisplayName(profile?.full_name, user?.email),
     dateLabel: formatZonedDate(now, timeZone),
