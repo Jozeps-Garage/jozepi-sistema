@@ -15,6 +15,7 @@ import {
   Funnel,
   MagnifyingGlassPlus,
   Package,
+  Stack,
   PencilSimple,
   Plus,
   Trash,
@@ -436,6 +437,7 @@ function SortableColumnHeader({
   direction,
   onSort,
   align = "left",
+  icon: HeaderIcon,
 }: {
   label: string;
   column: ProductSortColumn;
@@ -443,6 +445,7 @@ function SortableColumnHeader({
   direction: ProductSortDirection;
   onSort: (column: ProductSortColumn) => void;
   align?: "left" | "right";
+  icon?: React.ComponentType<{ size?: number; weight?: "light"; "aria-hidden"?: boolean }>;
 }) {
   const isActive = activeColumn === column;
 
@@ -454,6 +457,7 @@ function SortableColumnHeader({
         align === "right" ? "justify-end" : ""
       } ${isActive ? "text-foreground" : "text-muted"}`}
     >
+      {HeaderIcon && <HeaderIcon size={13} weight={PRODUCT_ICON_WEIGHT} aria-hidden />}
       {label}
       {isActive ? (
         direction === "asc" ? (
@@ -1670,6 +1674,7 @@ export function ProductsPage() {
                     >
                       <SortableColumnHeader
                         label="Produto"
+                        icon={Package}
                         column="name"
                         activeColumn={sortColumn}
                         direction={sortDirection}
@@ -1680,6 +1685,7 @@ export function ProductsPage() {
                       </span>
                       <SortableColumnHeader
                         label="Valor"
+                        icon={CurrencyDollar}
                         column="value"
                         activeColumn={sortColumn}
                         direction={sortDirection}
@@ -1688,6 +1694,7 @@ export function ProductsPage() {
                       />
                       <SortableColumnHeader
                         label="Estoque atual"
+                        icon={Stack}
                         column="stock"
                         activeColumn={sortColumn}
                         direction={sortDirection}

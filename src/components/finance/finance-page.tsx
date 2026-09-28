@@ -8,6 +8,8 @@ import {
   CalendarCheck,
   CaretDown,
   CaretRight,
+  CaretUp,
+  CaretUpDown,
   ChartBar,
   ChartDonut,
   ChartLineUp,
@@ -1746,18 +1748,20 @@ function SortableHeader({
     >
       <HeaderIcon size={13} weight={FINANCE_ICON_WEIGHT} aria-hidden />
       <span className="truncate">{label}</span>
-      <CaretDown
-        size={11}
-        weight="bold"
-        aria-hidden
-        className={`shrink-0 transition-transform ${
-          active
-            ? sort?.direction === "asc"
-              ? "rotate-180 opacity-100"
-              : "opacity-100"
-            : "opacity-25"
-        }`}
-      />
+      {active ? (
+        sort?.direction === "asc" ? (
+          <CaretUp size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden className="shrink-0" />
+        ) : (
+          <CaretDown size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden className="shrink-0" />
+        )
+      ) : (
+        <CaretUpDown
+          size={12}
+          weight={FINANCE_ICON_WEIGHT}
+          aria-hidden
+          className="shrink-0 opacity-40"
+        />
+      )}
     </button>
   );
 }
