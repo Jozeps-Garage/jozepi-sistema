@@ -56,7 +56,7 @@ function createVehicleFormItem(vehicle?: Vehicle | null): VehicleFormItem {
       id: vehicle.id,
       brand: vehicle.brand,
       model: vehicle.model,
-      plate: vehicle.plate,
+      plate: vehicle.plate ?? "",
       year: vehicle.year ? String(vehicle.year) : "",
       photoUrl1: vehicle.photo_url_1,
       photoUrl2: vehicle.photo_url_2,
@@ -570,7 +570,7 @@ export function ClientsPage() {
     const term = search.toLowerCase();
     const vehicleMatch = client.vehicles?.some(
       (v) =>
-        v.plate.toLowerCase().includes(term) ||
+        (v.plate ?? "").toLowerCase().includes(term) ||
         v.brand.toLowerCase().includes(term) ||
         v.model.toLowerCase().includes(term)
     );
@@ -659,7 +659,7 @@ export function ClientsPage() {
       throw new Error("Oficina ou cliente não encontrado.");
     }
 
-    if (!vehicle.brand.trim() || !vehicle.model.trim() || !vehicle.plate.trim()) {
+    if (!vehicle.brand.trim() || !vehicle.model.trim()) {
       throw new Error("Preencha marca, modelo e placa do veículo.");
     }
 
@@ -934,7 +934,7 @@ export function ClientsPage() {
                         key={vehicle.id}
                         className="rounded px-1.5 py-0.5 text-[11px] font-bold tracking-wide text-muted ring-1 ring-border"
                       >
-                        {vehicle.plate.trim()}
+                        {vehicle.plate?.trim()}
                       </span>
                     ))}
                     {plated.length > 2 && (

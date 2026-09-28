@@ -3,7 +3,8 @@ export interface Vehicle {
   client_id: string;
   brand: string;
   model: string;
-  plate: string;
+  /** Nulo até alguém ver o carro: dá para cadastrar o cliente antes disso. */
+  plate: string | null;
   year: number | null;
   photo_url_1: string | null;
   photo_url_2: string | null;

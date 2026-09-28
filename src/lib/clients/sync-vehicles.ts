@@ -6,7 +6,7 @@ import {
 } from "@/lib/supabase/vehicle-photos";
 
 function isVehicleFilled(v: ClientFormData["vehicles"][0]) {
-  return v.brand.trim() || v.model.trim() || v.plate.trim();
+  return v.brand.trim() || v.model.trim() || (v.plate ?? "").trim();
 }
 
 /**
@@ -96,11 +96,13 @@ export async function syncVehicles(
 
   for (const v of complete) {
     const year = parseYear(v.year);
-    const plate = v.plate.trim().toUpperCase();
+    const plate = (v.plate ?? "").trim().toUpperCase();
     const basePayload = {
       brand: v.brand.trim(),
       model: v.model.trim(),
-      plate,
+      // NULL e não "": placa ausente precisa ser um só valor para as consultas
+      // que contam pendência não terem que checar os dois.
+      plate: plate || null,
       year,
       pre_cadastro: !plate,
     };

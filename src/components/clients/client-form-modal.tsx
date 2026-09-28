@@ -41,7 +41,7 @@ function mapVehicleFromClient(v: NonNullable<Client["vehicles"]>[0]): VehicleFor
     id: v.id,
     brand: v.brand,
     model: v.model,
-    plate: v.plate,
+    plate: v.plate ?? "",
     year: v.year ? String(v.year) : "",
     photoUrl1: v.photo_url_1,
     photoUrl2: v.photo_url_2,
