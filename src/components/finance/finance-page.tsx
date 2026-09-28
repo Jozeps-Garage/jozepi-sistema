@@ -1657,6 +1657,7 @@ function TransactionList({
   emptyMessage,
   emptyDescription,
   accent = "default",
+  accountNames,
   filter,
   groupByMonth = false,
   groupInstallments = false,
@@ -1671,6 +1672,7 @@ function TransactionList({
   emptyMessage: string;
   emptyDescription?: string;
   accent?: "default" | "expense";
+  accountNames?: Map<string, string>;
   filter?: React.ReactNode;
   groupByMonth?: boolean;
   groupInstallments?: boolean;
@@ -1743,7 +1745,6 @@ function TransactionList({
   const gridTemplateColumns = [
     "minmax(0, 1fr)",
     "150px",
-    "100px",
     "110px",
     showNotes ? "44px" : null,
     showPayment ? "108px" : null,
@@ -1788,7 +1789,6 @@ function TransactionList({
         >
           <span>Descrição</span>
           <span>{labelColumnTitle}</span>
-          <span>Data</span>
           <span>Valor</span>
           {showNotes && <span className="text-center">OBS</span>}
           {showPayment && <span>Status</span>}
@@ -1837,7 +1837,26 @@ function TransactionList({
             entry.kind === "automatic" && entry.serviceName
               ? entry.serviceName
               : undefined;
-          const displayDate = entry.dueDate || entry.date;
+          // O que o banco já sabia e a lista não mostrava: vencimento, data em
+          // que o dinheiro se moveu, e a conta que recebeu ou pagou.
+          const metaParts: string[] = [];
+          if (entry.dueDate) {
+            metaParts.push(
+              `${overdue ? "Venceu" : "Vence"} ${formatShortDate(entry.dueDate)}`
+            );
+          } else {
+            metaParts.push(`Lançado ${formatShortDate(entry.date)}`);
+          }
+          if (entry.effectiveDate) {
+            metaParts.push(
+              `${isRevenue ? "Recebido" : "Pago"} ${formatShortDate(entry.effectiveDate)}`
+            );
+          }
+          const accountName = entry.accountId
+            ? accountNames?.get(entry.accountId)
+            : undefined;
+          if (accountName) metaParts.push(accountName);
+
           if (editingId === entry.id && editForm) {
             return (
               <article
@@ -1896,12 +1915,16 @@ function TransactionList({
                 {displaySubtitle && (
                   <p className="mt-1 truncate text-xs text-muted">{displaySubtitle}</p>
                 )}
+                <p
+                  className={`mt-1 truncate text-xs ${
+                    overdue ? "font-semibold text-danger" : "text-muted"
+                  }`}
+                >
+                  {metaParts.join(" · ")}
+                </p>
               </div>
               <div className="min-w-0 truncate text-sm font-medium text-foreground">
                 {accent === "expense" ? entry.supplierName ?? "-" : entry.category}
-              </div>
-              <div className="text-sm font-medium text-foreground">
-                {formatShortDate(displayDate)}
               </div>
               <div
                 className={`text-sm font-bold ${
@@ -2023,7 +2046,6 @@ function TransactionList({
                   <div className="text-sm font-medium text-foreground">
                     {row.groupEntries[0]?.supplierName ?? "-"}
                   </div>
-                  <div className="text-sm font-medium text-muted">Parcelado</div>
                   <div className="text-sm font-bold text-danger">{formatCurrency(amount)}</div>
                   {showNotes && <span />}
                   {showPayment && <span />}
@@ -2898,9 +2920,13 @@ export function FinancePage() {
         entry.supplierId === expenseSupplierFilter)
   );
 
+  const accountNames = useMemo(
+    () => new Map(accounts.map((account) => [account.id, account.name])),
+    [accounts]
+  );
+
   const upcomingDueItems = useMemo(() => {
     const todayKeyValue = dateKey(today);
-    const accountNames = new Map(accounts.map((account) => [account.id, account.name]));
     return transactionEntries
       .filter((entry) =>
         inDueAlertWindow(
@@ -2931,7 +2957,7 @@ export function FinancePage() {
         accountName: entry.accountId ? accountNames.get(entry.accountId) : undefined,
         paymentStatus: entry.paymentStatus,
       }));
-  }, [accounts, today, transactionEntries]);
+  }, [accountNames, today, transactionEntries]);
 
   const reportMonths = Array.from({ length: 6 }, (_, index) =>
     addMonths(startOfMonth(today), index - 5)
@@ -4607,6 +4633,7 @@ export function FinancePage() {
               )}
               <TransactionList
                 entries={filteredRevenueEntries}
+                accountNames={accountNames}
                 emptyMessage="Nenhuma receita encontrada."
                 groupByMonth={revenuePeriod !== "all"}
                 editingId={editingRevenueId}
@@ -4703,6 +4730,7 @@ export function FinancePage() {
               )}
               <TransactionList
                 entries={filteredExpenseEntries}
+                accountNames={accountNames}
                 editingId={editingExpenseId}
                 editForm={
                   editingExpenseId ? (
