@@ -244,7 +244,7 @@ export function CashflowProjectionPanel({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-foreground">Fluxo de Caixa</h2>
+        <h2 className="section-title">Fluxo de Caixa</h2>
         <p className="mt-1 text-sm text-muted">
           Projeção a partir do saldo atual das contas ativas, somando pendências por vencimento.
         </p>
@@ -280,11 +280,11 @@ export function CashflowProjectionPanel({
       <section className="rounded-lg border border-border bg-card p-5 shadow-card">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-premium/10 text-premium">
+            <span className="icon-chip icon-chip-premium h-10 w-10">
               <ChartLineUp size={20} weight="light" aria-hidden />
             </span>
             <div>
-              <h3 className="text-lg font-semibold text-foreground">Evolução do saldo</h3>
+              <h3 className="section-title">Evolução do saldo</h3>
               <p className="text-sm text-muted">Realizado até hoje, projetado dali em diante</p>
             </div>
           </div>
@@ -325,7 +325,7 @@ export function CashflowProjectionPanel({
       </section>
 
       <section className="rounded-lg border border-border bg-card p-5 shadow-card">
-        <h3 className="text-lg font-semibold text-foreground">Movimentações futuras</h3>
+        <h3 className="section-title">Movimentações futuras</h3>
         <p className="mt-1 text-sm text-muted">
           Receitas e despesas em aberto com vencimento a partir de hoje, incluindo parcelas.
         </p>

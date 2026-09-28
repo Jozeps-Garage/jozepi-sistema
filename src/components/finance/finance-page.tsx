@@ -2271,7 +2271,7 @@ function TransactionFormCard({
       }
     >
       <div className="mb-4">
-        <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+        <h2 className="section-title">{title}</h2>
         <p className="mt-1 text-sm text-muted">{description}</p>
       </div>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -4512,11 +4512,11 @@ export function FinancePage() {
               <div className="space-y-6">
                 <section className="rounded-lg border border-border bg-card shadow-card p-5 shadow-card">
                   <div className="mb-5 flex items-center gap-3">
-                    <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <span className="icon-chip h-10 w-10">
                       <CalendarCheck size={20} weight={FINANCE_ICON_WEIGHT} aria-hidden />
                     </span>
                     <div>
-                      <h2 className="text-lg font-semibold text-foreground">
+                      <h2 className="section-title">
                         Resumo do dia
                       </h2>
                       <p className="text-sm text-muted">
@@ -4567,11 +4567,11 @@ export function FinancePage() {
                 <section className="rounded-lg border border-border bg-card shadow-card p-5 shadow-card">
                   <div className="mb-4 flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
-                      <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10 text-success">
+                      <span className="icon-chip h-10 w-10 bg-success/12 text-success">
                         <ChartBar size={20} weight={FINANCE_ICON_WEIGHT} aria-hidden />
                       </span>
                       <div>
-                        <h2 className="text-lg font-semibold text-foreground">
+                        <h2 className="section-title">
                           Receita vs despesa
                         </h2>
                         <p className="text-sm text-muted">
@@ -4606,11 +4606,11 @@ export function FinancePage() {
 
                 <section className="rounded-lg border border-border bg-card shadow-card p-5 shadow-card">
                   <div className="mb-5 flex items-center gap-3">
-                    <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <span className="icon-chip h-10 w-10">
                       <ChartDonut size={20} weight={FINANCE_ICON_WEIGHT} aria-hidden />
                     </span>
                     <div>
-                      <h2 className="text-lg font-semibold text-foreground">
+                      <h2 className="section-title">
                         Serviços que mais geram receita
                       </h2>
                       <p className="text-sm text-muted">Com base nas OS finalizadas.</p>
@@ -4665,7 +4665,7 @@ export function FinancePage() {
                 className="w-full cursor-pointer rounded-lg border border-border bg-card p-5 text-left shadow-card transition-all hover:-translate-y-0.5 hover:shadow-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 aria-label="Ver todas as receitas"
               >
-                <h2 className="text-lg font-semibold text-foreground">
+                <h2 className="section-title">
                   Últimas receitas
                 </h2>
                 <div className="mt-4 divide-y divide-border overflow-hidden rounded-lg border border-border bg-background shadow-card/50">
@@ -4756,7 +4756,7 @@ export function FinancePage() {
             <div className="space-y-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
-                  <h2 className="text-lg font-semibold text-foreground">
+                  <h2 className="section-title">
                     Receitas
                   </h2>
                   <p className="mt-1 text-sm text-muted">
@@ -4857,7 +4857,7 @@ export function FinancePage() {
             <div className="space-y-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
-                  <h2 className="text-lg font-semibold text-foreground">
+                  <h2 className="section-title">
                     Despesas
                   </h2>
                   <p className="mt-1 text-sm text-muted">
@@ -4980,7 +4980,7 @@ export function FinancePage() {
           {activeTab === "fixedCosts" && (
             <div className="space-y-5">
               <div>
-                <h2 className="text-lg font-semibold text-foreground">
+                <h2 className="section-title">
                   Custos Fixos
                 </h2>
                 <p className="mt-1 text-sm text-muted">
@@ -5036,7 +5036,7 @@ export function FinancePage() {
                   className="finance-manual-form-enter rounded-lg border border-border bg-card shadow-card p-4 shadow-card sm:p-5"
                 >
                   <div className="mb-4">
-                    <h2 className="text-lg font-semibold text-foreground">
+                    <h2 className="section-title">
                       {editingFixedCostId ? "Editar custo fixo" : "Novo custo fixo"}
                     </h2>
                     <p className="mt-1 text-sm text-muted">

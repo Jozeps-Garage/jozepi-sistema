@@ -220,7 +220,7 @@ export function AccountsPanel({
     <div className="space-y-5">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">Contas</h2>
+          <h2 className="section-title">Contas</h2>
           <p className="mt-1 text-sm text-muted">
             Saldos em caixa, banco e meios digitais. Transferências não entram no DRE.
           </p>

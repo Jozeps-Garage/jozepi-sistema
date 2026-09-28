@@ -179,7 +179,7 @@ export function CategoriesPanel({
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-lg font-semibold text-foreground">Categorias</h2>
+        <h2 className="section-title">Categorias</h2>
         <p className="mt-1 text-sm text-muted">
           Usadas nos lançamentos de receita e despesa. Desativar esconde do seletor, sem apagar o histórico.
         </p>

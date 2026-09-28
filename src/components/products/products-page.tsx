@@ -2280,7 +2280,7 @@ export function ProductsPage() {
       <section key="suppliers-tab" className="product-tab-panel-enter space-y-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-foreground">Fornecedores</h2>
+            <h2 className="section-title">Fornecedores</h2>
             <p className="mt-1 text-sm text-muted">
               Cadastre fornecedores para vincular produtos e reposições de estoque.
             </p>

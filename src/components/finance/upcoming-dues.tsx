@@ -115,11 +115,11 @@ export function UpcomingDuesSection({
   return (
     <section className="rounded-lg border border-border bg-card p-5 shadow-card">
       <div className="mb-4 flex items-center gap-3">
-        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-warning/10 text-warning">
+        <span className="icon-chip h-10 w-10 bg-warning/12 text-warning">
           <CalendarBlank size={20} weight="light" aria-hidden />
         </span>
         <div>
-          <h2 className="text-lg font-semibold text-foreground">Contas a vencer</h2>
+          <h2 className="section-title">Contas a vencer</h2>
           <p className="text-sm text-muted">
             Vencidas e próximas 7 dias
             {overdueCount > 0 ? ` · ${overdueCount} vencida${overdueCount === 1 ? "" : "s"}` : ""}

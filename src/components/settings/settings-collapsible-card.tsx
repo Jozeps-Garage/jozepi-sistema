@@ -33,7 +33,7 @@ export function SettingsCollapsibleCard({
           {icon}
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+          <h2 className="section-title">{title}</h2>
           <p className="mt-1 text-sm text-muted">{description}</p>
         </div>
         <ChevronDown
