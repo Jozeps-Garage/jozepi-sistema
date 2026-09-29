@@ -380,6 +380,7 @@ type FinanceDeleteConfirm =
   | { type: "transaction"; entry: FinanceEntry }
   | { type: "revertAppointment"; entry: FinanceEntry }
   | { type: "installmentGroup"; entry: FinanceEntry; remaining: FinanceEntry[] }
+  | { type: "wholeInstallment"; entries: FinanceEntry[] }
   | null;
 
 interface TransactionForm {
@@ -1775,6 +1776,8 @@ function TransactionList({
   accountNames,
   accountOptions,
   onBulkAssignAccount,
+  onEditGroup,
+  onDeleteGroup,
   filter,
   groupByMonth = false,
   groupInstallments = false,
@@ -1792,6 +1795,8 @@ function TransactionList({
   accountNames?: Map<string, string>;
   accountOptions?: { value: string; label: string }[];
   onBulkAssignAccount?: (ids: string[], accountId: string) => Promise<void>;
+  onEditGroup?: (entries: FinanceEntry[]) => void;
+  onDeleteGroup?: (entries: FinanceEntry[]) => void;
   filter?: React.ReactNode;
   groupByMonth?: boolean;
   groupInstallments?: boolean;
@@ -2309,7 +2314,52 @@ function TransactionList({
                   <div className="text-sm font-bold text-danger">{formatCurrency(amount)}</div>
                   {showNotes && <span />}
                   {showPayment && <span />}
-                  <span />
+                  <span className="flex items-center justify-end gap-0.5">
+                    {onEditGroup && (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onEditGroup(row.groupEntries);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            onEditGroup(row.groupEntries);
+                          }
+                        }}
+                        className="flex h-7 w-7 cursor-pointer items-center justify-center rounded text-muted/70 transition-colors hover:bg-background hover:text-foreground"
+                        title="Editar parcelamento"
+                        aria-label={`Editar parcelamento ${title}`}
+                      >
+                        <PencilSimple size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                      </span>
+                    )}
+                    {onDeleteGroup && (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onDeleteGroup(row.groupEntries);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            onDeleteGroup(row.groupEntries);
+                          }
+                        }}
+                        className="flex h-7 w-7 cursor-pointer items-center justify-center rounded text-muted/70 transition-colors hover:bg-background hover:text-danger"
+                        title="Excluir parcelamento"
+                        aria-label={`Excluir parcelamento ${title}`}
+                      >
+                        <Trash size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                      </span>
+                    )}
+                  </span>
                 </button>
               );
             }
@@ -2373,6 +2423,7 @@ function TransactionFormCard({
   buttonLabel,
   allowInstallments = false,
   embedded = false,
+  sharedFieldsOnly = false,
   onChange,
   onSubmit,
   onCancel,
@@ -2388,6 +2439,8 @@ function TransactionFormCard({
   buttonLabel: string;
   allowInstallments?: boolean;
   embedded?: boolean;
+  /** Edição do parcelamento inteiro: valor, datas e status são de cada parcela. */
+  sharedFieldsOnly?: boolean;
   onChange: (patch: Partial<TransactionForm>) => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
   onCancel: () => void;
@@ -2412,12 +2465,14 @@ function TransactionFormCard({
           value={form.description}
           onChange={(event) => onChange({ description: event.target.value })}
         />
-        <Input
-          label="Valor"
-          prefix="R$"
-          value={form.amount}
-          onChange={(event) => onChange({ amount: event.target.value })}
-        />
+        {!sharedFieldsOnly && (
+          <Input
+            label="Valor"
+            prefix="R$"
+            value={form.amount}
+            onChange={(event) => onChange({ amount: event.target.value })}
+          />
+        )}
         {supplierOptions && (
           <Dropdown
             label="Fornecedor (opcional)"
@@ -2455,6 +2510,7 @@ function TransactionFormCard({
           onChange={(categoryId) => onChange({ categoryId })}
           placeholder="Selecione a categoria"
         />
+        {!sharedFieldsOnly && (
         <Dropdown
           label="Status"
           value={form.installmentsEnabled ? "pendente" : form.paymentStatus}
@@ -2476,7 +2532,8 @@ function TransactionFormCard({
             })
           }
         />
-        {form.paymentStatus === "pago" && !form.installmentsEnabled && (
+        )}
+        {!sharedFieldsOnly && form.paymentStatus === "pago" && !form.installmentsEnabled && (
           <Input
             label="Data de efetivação"
             type="date"
@@ -2484,9 +2541,10 @@ function TransactionFormCard({
             onChange={(event) => onChange({ effectiveDate: event.target.value })}
           />
         )}
-        {(form.paymentStatus === "pendente" ||
-          form.paymentStatus === "parcial" ||
-          form.installmentsEnabled) && (
+        {!sharedFieldsOnly &&
+          (form.paymentStatus === "pendente" ||
+            form.paymentStatus === "parcial" ||
+            form.installmentsEnabled) && (
           <Input
             label="Vencimento"
             type="date"
@@ -2610,6 +2668,8 @@ export function FinancePage() {
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [editingRevenueId, setEditingRevenueId] = useState<string | null>(null);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  // Quando preenchido, salvar propaga os campos comuns para todas as parcelas.
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [showRevenueFilter, setShowRevenueFilter] = useState(false);
   const [showExpenseFilter, setShowExpenseFilter] = useState(false);
   const [savingRevenue, setSavingRevenue] = useState(false);
@@ -3427,6 +3487,7 @@ export function FinancePage() {
         "",
     });
     setEditingExpenseId(null);
+    setEditingGroupId(null);
   }
 
   function closeManualForm(type: TransactionType) {
@@ -3522,6 +3583,51 @@ export function FinancePage() {
     };
 
     if (transactionId) {
+      // Editando pelo cabeçalho do parcelamento: só os campos comuns mudam em
+      // todas as parcelas. Valor, vencimento e status são de cada uma.
+      if (type === "despesa" && editingGroupId) {
+        const base = installmentBaseDescription(form.description.trim());
+        const shared = {
+          category: categoryName,
+          category_id: form.categoryId,
+          account_id: form.accountId,
+          supplier_id: supplierId,
+          transaction_date: form.date,
+        };
+        const groupEntries = expenseEntries.filter(
+          (item) => item.installmentGroupId === editingGroupId
+        );
+
+        // Uma por uma: cada parcela mantém o "(n/total)" na descrição.
+        let groupError: { message: string } | null = null;
+        for (const item of groupEntries) {
+          const suffix =
+            item.installmentNumber && item.installmentTotal
+              ? ` (${item.installmentNumber}/${item.installmentTotal})`
+              : "";
+          const { error } = await supabase
+            .from("financial_transactions")
+            .update({ ...shared, description: `${base}${suffix}` })
+            .eq("id", item.id)
+            .eq("workshop_id", workshopId);
+          if (error) {
+            groupError = error;
+            break;
+          }
+        }
+
+        setSaving(false);
+        if (groupError) {
+          setFormError(formatSupplierSaveError(groupError.message));
+          return;
+        }
+
+        setEditingGroupId(null);
+        closeManualForm(type);
+        void loadFinanceData();
+        return;
+      }
+
       let { error: updateError } = await supabase
         .from("financial_transactions")
         .update({
@@ -3959,6 +4065,15 @@ export function FinancePage() {
     setExpenseError(null);
     setShowExpenseForm(false);
     setEditingExpenseId(entry.id);
+    setEditingGroupId(null);
+  }
+
+  /** Edita o parcelamento pelo cabeçalho: vale para todas as parcelas. */
+  function handleEditInstallmentGroup(entries: FinanceEntry[]) {
+    const first = entries[0];
+    if (!first) return;
+    handleEditExpense(first);
+    setEditingGroupId(first.installmentGroupId ?? null);
   }
 
   function resetFixedCostForm() {
@@ -4362,6 +4477,30 @@ export function FinancePage() {
       }
     }
     setDeleteConfirm({ type: "transaction", entry });
+  }
+
+  async function executeDeleteWholeInstallment(entries: FinanceEntry[]) {
+    setDeletingFinanceItem(true);
+    setError(null);
+    const ids = entries.map((item) => item.id);
+    try {
+      const { error: deleteError } = await supabase
+        .from("financial_transactions")
+        .delete()
+        .in("id", ids);
+
+      if (deleteError) {
+        setError(deleteError.message);
+        return;
+      }
+
+      setTransactions((prev) =>
+        prev.filter((transaction) => !ids.includes(transaction.id))
+      );
+      setDeleteConfirm(null);
+    } finally {
+      setDeletingFinanceItem(false);
+    }
   }
 
   async function executeDeleteInstallmentGroup(remaining: FinanceEntry[]) {
@@ -5037,15 +5176,22 @@ export function FinancePage() {
                   editingExpenseId ? (
                     <TransactionFormCard
                       embedded
-                      title="Editar despesa"
-                      description="Atualize os dados deste lançamento."
+                      title={editingGroupId ? "Editar parcelamento" : "Editar despesa"}
+                      description={
+                        editingGroupId
+                          ? "Vale para todas as parcelas. Valor, vencimento e status continuam sendo de cada uma."
+                          : "Atualize os dados deste lançamento."
+                      }
+                      sharedFieldsOnly={Boolean(editingGroupId)}
                       form={expenseForm}
                       categories={expenseCategorySelectOptions}
                       accountOptions={activeAccountOptions}
                       supplierOptions={expenseSupplierOptions}
                       loading={savingExpense}
                       error={expenseError}
-                      buttonLabel="Atualizar despesa"
+                      buttonLabel={
+                        editingGroupId ? "Atualizar parcelamento" : "Atualizar despesa"
+                      }
                       onChange={(patch) => setExpenseForm((prev) => ({ ...prev, ...patch }))}
                       onSubmit={(event) => handleSaveManualTransaction(event, "despesa")}
                       onCancel={() => closeManualForm("despesa")}
@@ -5055,6 +5201,10 @@ export function FinancePage() {
                 emptyMessage="Nenhuma despesa registrada"
                 emptyDescription="Use o botão + Nova despesa para adicionar um lançamento manual."
                 accent="expense"
+                onEditGroup={handleEditInstallmentGroup}
+                onDeleteGroup={(entries) =>
+                  setDeleteConfirm({ type: "wholeInstallment", entries })
+                }
                 groupInstallments
                 filter={
                   <InlineFilterButton
@@ -5498,6 +5648,28 @@ export function FinancePage() {
         onConfirm={() => {
           if (deleteConfirm?.type === "fixedCost") {
             void executeDeleteFixedCost(deleteConfirm.cost);
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        open={deleteConfirm?.type === "wholeInstallment"}
+        title="Excluir parcelamento"
+        description={
+          deleteConfirm?.type === "wholeInstallment"
+            ? `Apagar as ${deleteConfirm.entries.length} parcelas deste lançamento? ${
+                deleteConfirm.entries.filter((item) => item.paymentStatus === "pago").length
+              } já estão pagas e também serão apagadas.`
+            : ""
+        }
+        confirmLabel="Excluir parcelamento"
+        loading={deletingFinanceItem}
+        onCancel={() => {
+          if (!deletingFinanceItem) setDeleteConfirm(null);
+        }}
+        onConfirm={() => {
+          if (deleteConfirm?.type === "wholeInstallment") {
+            void executeDeleteWholeInstallment(deleteConfirm.entries);
           }
         }}
       />
