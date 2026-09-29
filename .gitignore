@@ -42,5 +42,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# rascunho pessoal, fica só na máquina
+PROMPT_REFAZER_APP.md
+
 # arquivos temporários do CLI do Supabase
 supabase/.temp
