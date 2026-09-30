@@ -20,7 +20,8 @@ import {
   emptyClientForm,
   emptyVehicle,
 } from "@/types/client";
-import { formatPhone, normalizePhone } from "@/lib/utils/format";
+import { formatPhone, normalizeOptionalPhone } from "@/lib/utils/format";
+import { vehicleName } from "@/lib/vehicles/format";
 
 interface ClientFormModalProps {
   open: boolean;
@@ -96,8 +97,8 @@ function VehicleEditorModal({
     event.preventDefault();
     setError(null);
 
-    if (!form.brand.trim() || !form.model.trim()) {
-      setError("Preencha marca e modelo do veículo.");
+    if (!form.model.trim()) {
+      setError("Preencha o veículo.");
       return;
     }
 
@@ -311,7 +312,7 @@ export function ClientFormModal({
     try {
       await onSave({
         ...form,
-        phone: normalizePhone(form.phone),
+        phone: normalizeOptionalPhone(form.phone) ?? "",
       });
       onClose();
     } catch (err) {
@@ -413,7 +414,7 @@ export function ClientFormModal({
                             Veículo {index + 1}
                           </span>
                           <p className="mt-1 truncate text-sm font-semibold text-foreground">
-                            {vehicle.brand || "Marca"} {vehicle.model || "Modelo"}
+                            {vehicleName(vehicle, "Veículo sem nome")}
                           </p>
                           <p className="mt-0.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary">
                             <IdentificationCard

@@ -13,6 +13,7 @@ import {
   BUSINESS_START_TIME,
   BUSINESS_END_TIME,
 } from "./constants";
+import { vehicleLabel } from "@/lib/vehicles/format";
 
 export function timeToMinutes(time: string) {
   const [hours, minutes] = time.split(":").map(Number);
@@ -404,9 +405,7 @@ export function mapOrderToAppointment(order: AppointmentOrderRow): Appointment {
     client: client?.name ?? "Cliente não encontrado",
     service: services.map((service) => service.name).join(", "),
     totalAmount: Number(order.total_amount) || 0,
-    vehicle: vehicle
-      ? `${vehicle.brand} ${vehicle.model} - ${vehicle.plate}`
-      : "Veículo não encontrado",
+    vehicle: vehicle ? vehicleLabel(vehicle) : "Veículo não encontrado",
     status: getAppointmentStatus(order.status),
     notes: order.notes?.trim() ?? "",
   };

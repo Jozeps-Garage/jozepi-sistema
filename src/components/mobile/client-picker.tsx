@@ -4,6 +4,7 @@ import { Car, MagnifyingGlass, PencilSimple, UserCircle } from "@phosphor-icons/
 import { useMemo, useState } from "react";
 import type { Client, Vehicle } from "@/types/client";
 import { formatPhone } from "@/lib/utils/format";
+import { vehicleName } from "@/lib/vehicles/format";
 
 interface ClientPickerProps {
   clients: Client[];
@@ -83,7 +84,8 @@ export function ClientPicker({
                       }`}
                     >
                       <Car size={14} weight="light" aria-hidden />
-                      {vehicle.brand} {vehicle.model} · {vehicle.plate}
+                      {vehicleName(vehicle)}
+                      {vehicle.plate ? ` · ${vehicle.plate}` : ""}
                     </button>
                   );
                 })}

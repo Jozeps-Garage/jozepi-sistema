@@ -37,6 +37,7 @@ import {
   wallClockInTimeZone,
 } from "@/lib/timezone";
 import { ensurePackageServicesInCatalog } from "@/lib/services/packages";
+import { vehicleLabel, vehicleName } from "@/lib/vehicles/format";
 import { type Client, type ClientFormData } from "@/types/client";
 import {
   fetchWorkshopProfile,
@@ -1144,8 +1145,8 @@ export function AgendaCalendar() {
   }));
   const vehicleOptions = selectedClientVehicles.map((vehicle) => ({
     value: vehicle.id,
-    label: `${vehicle.brand} ${vehicle.model}`,
-    description: `${vehicle.plate}${vehicle.year ? ` • ${vehicle.year}` : ""}`,
+    label: vehicleName(vehicle),
+    description: `${vehicle.plate || "Placa pendente"}${vehicle.year ? ` • ${vehicle.year}` : ""}`,
   }));
   const selectedServices = services.filter((service) =>
     form.serviceIds.includes(service.id)
@@ -1673,9 +1674,9 @@ export function AgendaCalendar() {
       return;
     }
 
-    const vehicleLabel = appointmentVehicle.pre_cadastro
+    const appointmentVehicleLabel = appointmentVehicle.pre_cadastro
       ? "Veículo a definir"
-      : `${appointmentVehicle.brand} ${appointmentVehicle.model} - ${appointmentVehicle.plate}`;
+      : vehicleLabel(appointmentVehicle);
     const serviceLabel = selectedServices.map((service) => service.name).join(", ");
 
     let resolvedCustomTotal = customTotalAmount;
@@ -1798,7 +1799,7 @@ export function AgendaCalendar() {
         client: appointmentClient.name,
         service: serviceLabel,
         totalAmount: appointmentTotal,
-        vehicle: vehicleLabel,
+        vehicle: appointmentVehicleLabel,
         status: currentStatus,
         notes: form.notes.trim(),
       };

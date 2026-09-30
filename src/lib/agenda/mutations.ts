@@ -7,7 +7,7 @@ import {
 import { syncVehicles } from "@/lib/clients/sync-vehicles";
 import { parsePositiveNumber } from "@/lib/products/catalog";
 import { getProductRemainingStock } from "@/lib/products/catalog";
-import { normalizePhone } from "@/lib/utils/format";
+import { normalizeOptionalPhone } from "@/lib/utils/format";
 import type {
   Appointment,
   AppointmentStatus,
@@ -406,7 +406,7 @@ export async function createClientWithVehicles(
     .from("clients")
     .insert({
       name: data.name.trim(),
-      phone: normalizePhone(data.phone),
+      phone: normalizeOptionalPhone(data.phone) ?? "",
       notes: data.notes.trim() || null,
       workshop_id: workshopId,
     })

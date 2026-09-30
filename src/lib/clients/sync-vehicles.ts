@@ -10,11 +10,13 @@ function isVehicleFilled(v: ClientFormData["vehicles"][0]) {
 }
 
 /**
- * Placa fica de fora: dá para cadastrar o cliente antes de ver o carro. O
- * veículo entra como pré-cadastro e a placa é cobrada depois.
+ * Só o campo "Veículo" é obrigatório. Placa fica de fora porque dá para
+ * cadastrar o cliente antes de ver o carro — entra como pré-cadastro e é
+ * cobrada depois. Marca e ano não têm mais campo no formulário: continuam no
+ * payload só para não apagar o que os veículos antigos já tinham.
  */
 function isVehicleComplete(v: ClientFormData["vehicles"][0]) {
-  return v.brand.trim() && v.model.trim();
+  return Boolean(v.model.trim());
 }
 
 function parseYear(year: string): number | null {
@@ -79,7 +81,7 @@ export async function syncVehicles(
   const incomplete = filled.filter((v) => !isVehicleComplete(v));
 
   if (incomplete.length > 0) {
-    throw new Error("Preencha marca e modelo de todos os veículos adicionados.");
+    throw new Error("Preencha o veículo de todos os carros adicionados.");
   }
 
   const complete = filled.filter(isVehicleComplete);

@@ -39,7 +39,7 @@ import {
 } from "@/lib/quotes/types";
 import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { createClient } from "@/lib/supabase/client";
-import { formatCurrency, normalizePhone } from "@/lib/utils/format";
+import { formatCurrency, normalizeOptionalPhone } from "@/lib/utils/format";
 import {
   formatMoneyInput,
   maskSignedCurrencyInput,
@@ -575,7 +575,7 @@ export function QuotesPage() {
 
     const payload = {
       name: data.name.trim(),
-      phone: normalizePhone(data.phone),
+      phone: normalizeOptionalPhone(data.phone) ?? "",
       notes: data.notes.trim() || null,
       pre_cadastro: false,
     };

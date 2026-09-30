@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { BottomSheet } from "@/components/mobile/bottom-sheet";
 import { createClientWithVehicles } from "@/lib/agenda/mutations";
 import { emptyVehicle, type Client } from "@/types/client";
-import { normalizePhone } from "@/lib/utils/format";
+import { normalizeOptionalPhone } from "@/lib/utils/format";
 import { maskPhone } from "@/lib/utils/masks";
 
 interface ClientSheetProps {
@@ -32,7 +32,6 @@ export function ClientSheet({
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
   const [addVehicle, setAddVehicle] = useState(false);
-  const [brand, setBrand] = useState("");
   const [model, setModel] = useState("");
   const [plate, setPlate] = useState("");
   const [saving, setSaving] = useState(false);
@@ -43,7 +42,6 @@ export function ClientSheet({
     setPhone("");
     setNotes("");
     setAddVehicle(false);
-    setBrand("");
     setModel("");
     setPlate("");
     setError(null);
@@ -64,7 +62,7 @@ export function ClientSheet({
       return;
     }
     try {
-      normalizePhone(phone);
+      normalizeOptionalPhone(phone);
     } catch {
       setError("Informe um telefone válido com DDD.");
       return;
@@ -76,7 +74,6 @@ export function ClientSheet({
             {
               ...emptyVehicle,
               uiKey: "novo",
-              brand: brand.trim(),
               model: model.trim(),
               plate: plate.trim().toUpperCase(),
             },
@@ -120,7 +117,7 @@ export function ClientSheet({
           autoFocus
         />
         <Input
-          label="Telefone"
+          label="Telefone (opcional)"
           value={phone}
           onChange={(event) => setPhone(maskPhone(event.target.value))}
           inputMode="tel"

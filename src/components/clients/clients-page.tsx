@@ -22,8 +22,9 @@ import { PlateIcon } from "@/components/ui/plate-icon";
 import { Input } from "@/components/ui/input";
 import { ModelAutocomplete } from "@/components/clients/model-autocomplete";
 import { ClientFormModal } from "@/components/clients/client-form-modal";
-import { formatDate, formatPhone, getWhatsAppUrl, normalizePhone } from "@/lib/utils/format";
+import { formatDate, formatPhone, getWhatsAppUrl, normalizeOptionalPhone } from "@/lib/utils/format";
 import { syncVehicles } from "@/lib/clients/sync-vehicles";
+import { vehicleLabel, vehicleName } from "@/lib/vehicles/format";
 import { deleteVehiclePhotoByUrl } from "@/lib/supabase/vehicle-photos";
 import {
   emptyVehicle,
@@ -322,11 +323,15 @@ function ClientVehiclesPanel({
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <p className="text-lg font-bold text-foreground">
-                        {vehicle.brand} {vehicle.model}
+                        {vehicleName(vehicle)}
                       </p>
-                      <p className="mt-1 flex items-center gap-1.5 text-sm font-semibold uppercase tracking-widest text-primary">
+                      <p
+                        className={`mt-1 flex items-center gap-1.5 text-sm font-semibold uppercase tracking-widest ${
+                          vehicle.plate ? "text-primary" : "text-warning"
+                        }`}
+                      >
                         <PlateIcon className="h-4 w-4 shrink-0" />
-                        {vehicle.plate}
+                        {vehicle.plate || "Placa pendente"}
                       </p>
                     </div>
                     <div className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
@@ -544,8 +549,8 @@ export function ClientsPage() {
       throw new Error("Oficina ou cliente não encontrado.");
     }
 
-    if (!vehicle.brand.trim() || !vehicle.model.trim()) {
-      throw new Error("Preencha marca, modelo e placa do veículo.");
+    if (!vehicle.model.trim()) {
+      throw new Error("Preencha o veículo.");
     }
 
     await syncVehicles(
@@ -556,15 +561,8 @@ export function ClientsPage() {
       vehicle.id ? [vehicle.id] : []
     );
 
-    // Veículo que veio de um pré-cadastro nasce vazio; ao receber marca, modelo e placa,
-    // deixa de ser marcação e vira veículo de verdade.
-    if (vehicle.id) {
-      await supabase
-        .from("vehicles")
-        .update({ pre_cadastro: false })
-        .eq("id", vehicle.id);
-    }
-
+    // `syncVehicles` já resolve o pré-cadastro pela placa: forçar false aqui
+    // apagava o aviso de placa faltando assim que alguém editasse o carro.
     await refreshClientVehicles(vehicleModalClient.id);
   }
 
@@ -575,7 +573,7 @@ export function ClientsPage() {
     // aqui, então quem chegou até o salvar já preencheu o que faltava.
     const payload = {
       name: data.name.trim(),
-      phone: normalizePhone(data.phone),
+      phone: normalizeOptionalPhone(data.phone) ?? "",
       notes: data.notes.trim() || null,
       pre_cadastro: false,
     };
@@ -963,7 +961,7 @@ export function ClientsPage() {
         title="Excluir veículo"
         description={
           deleteConfirm?.type === "vehicle"
-            ? `Deseja excluir ${deleteConfirm.vehicle.brand} ${deleteConfirm.vehicle.model} (${deleteConfirm.vehicle.plate})? Agendamentos vinculados também serão removidos.`
+            ? `Deseja excluir ${vehicleLabel(deleteConfirm.vehicle)}? Agendamentos vinculados também serão removidos.`
             : ""
         }
         confirmLabel="Excluir veículo"

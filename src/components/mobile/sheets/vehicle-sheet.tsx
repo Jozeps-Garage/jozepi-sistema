@@ -29,19 +29,15 @@ export function VehicleSheet({
   onChanged,
 }: VehicleSheetProps) {
   const [clientId, setClientId] = useState("");
-  const [brand, setBrand] = useState("");
   const [model, setModel] = useState("");
   const [plate, setPlate] = useState("");
-  const [year, setYear] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function reset() {
     setClientId("");
-    setBrand("");
     setModel("");
     setPlate("");
-    setYear("");
     setError(null);
   }
 
@@ -60,7 +56,7 @@ export function VehicleSheet({
       return;
     }
     if (!model.trim()) {
-      setError("Preencha marca, modelo e placa.");
+      setError("Preencha o veículo.");
       return;
     }
 
@@ -71,10 +67,8 @@ export function VehicleSheet({
         {
           ...emptyVehicle,
           uiKey: "novo",
-          brand: brand.trim(),
           model: model.trim(),
           plate: plate.trim().toUpperCase(),
-          year: year.trim(),
         },
       ]);
       onChanged?.();
