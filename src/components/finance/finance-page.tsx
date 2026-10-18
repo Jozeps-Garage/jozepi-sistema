@@ -136,6 +136,7 @@ interface FinancialTransaction {
   source: string | null;
   payment_status: PaymentStatus;
   notes: string | null;
+  items: unknown;
   transaction_date: string;
   effective_date: string | null;
   due_date: string | null;
@@ -382,6 +383,7 @@ interface FinanceEntry {
   serviceOrderId?: string;
   paymentStatus?: PaymentStatus;
   notes?: string;
+  items?: TransactionItem[];
   installmentGroupId?: string | null;
   installmentNumber?: number | null;
   installmentTotal?: number | null;
@@ -395,9 +397,20 @@ type FinanceDeleteConfirm =
   | { type: "wholeInstallment"; entries: FinanceEntry[] }
   | null;
 
+/** Linha de uma nota: o que foi comprado, quantos e por quanto cada um. */
+interface TransactionItem {
+  /** Só para a key do React; não vai para o banco. */
+  uiKey: string;
+  description: string;
+  quantity: string;
+  unitAmount: string;
+}
+
 interface TransactionForm {
   description: string;
   amount: string;
+  items: TransactionItem[];
+  notes: string;
   date: string;
   effectiveDate: string;
   dueDate: string;
@@ -671,6 +684,8 @@ const initialRevenueForm: TransactionForm = {
   supplierId: categoryFilterAll,
   installmentsEnabled: false,
   installmentCount: "3",
+  items: [],
+  notes: "",
 };
 
 const initialExpenseForm: TransactionForm = {
@@ -685,6 +700,8 @@ const initialExpenseForm: TransactionForm = {
   supplierId: categoryFilterAll,
   installmentsEnabled: false,
   installmentCount: "3",
+  items: [],
+  notes: "",
 };
 
 const initialFixedCostForm: FixedCostForm = {
@@ -993,6 +1010,8 @@ function formatSupplierSaveError(message: string) {
   return message;
 }
 
+const TRANSACTION_SELECT_PHASE3 =
+  "id, type, description, amount, category, category_id, account_id, service_order_id, supplier_id, product_id, source, payment_status, notes, items, transaction_date, effective_date, due_date, installment_group_id, installment_number, installment_total, created_at";
 const TRANSACTION_SELECT_PHASE2 =
   "id, type, description, amount, category, category_id, account_id, service_order_id, supplier_id, product_id, source, payment_status, notes, transaction_date, effective_date, due_date, installment_group_id, installment_number, installment_total, created_at";
 const TRANSACTION_SELECT_CASHFLOW =
@@ -1028,6 +1047,7 @@ function normalizeTransactionRow(
       "payment_status" in row
         ? normalizePaymentStatus(row.payment_status)
         : fallback?.payment_status ?? "pago",
+    items: row.items ?? [],
     notes:
       "notes" in row
         ? typeof row.notes === "string"
@@ -1072,6 +1092,7 @@ async function loadFinancialTransactions(
   workshopId: string
 ) {
   const attempts = [
+    TRANSACTION_SELECT_PHASE3,
     TRANSACTION_SELECT_PHASE2,
     TRANSACTION_SELECT_CASHFLOW,
     TRANSACTION_SELECT_WITH_NOTES,
@@ -1254,6 +1275,7 @@ async function fetchFinancialTransactionById(
   transactionId: string
 ) {
   const attempts = [
+    TRANSACTION_SELECT_PHASE3,
     TRANSACTION_SELECT_PHASE2,
     TRANSACTION_SELECT_CASHFLOW,
     TRANSACTION_SELECT_WITH_NOTES,
@@ -2496,6 +2518,33 @@ function TransactionList({
                         </div>
                       ))}
                     </dl>
+                    {entry.items && entry.items.length > 0 && (
+                      <div className="mt-4">
+                        <p className="label-caps">Itens da nota</p>
+                        <div className="mt-1.5 space-y-1">
+                          {entry.items.map((item) => {
+                            const quantity =
+                              parseFilterAmount(item.quantity) ?? 1;
+                            const unit =
+                              parseFilterAmount(item.unitAmount) ?? 0;
+                            return (
+                              <div
+                                key={item.uiKey}
+                                className="flex items-baseline justify-between gap-3 text-sm"
+                              >
+                                <span className="min-w-0 text-foreground">
+                                  {quantity > 1 ? `${quantity}× ` : ""}
+                                  {item.description || "Item"}
+                                </span>
+                                <span className="shrink-0 font-semibold text-foreground">
+                                  {formatCurrency(quantity * unit)}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                     {showNotes && onUpdateNotes ? (
                       <TransactionNotesField
                         notes={entry.notes ?? ""}
@@ -2699,6 +2748,56 @@ function TransactionList({
   );
 }
 
+/** Soma dos itens, ignorando linha em branco e número que não dá número. */
+function sumTransactionItems(items: TransactionItem[]) {
+  return items.reduce((total, item) => {
+    const quantity = parseFilterAmount(item.quantity) ?? 1;
+    const unit = parseFilterAmount(item.unitAmount) ?? 0;
+    return total + quantity * unit;
+  }, 0);
+}
+
+function createTransactionItem(): TransactionItem {
+  return {
+    uiKey:
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `item-${Date.now()}-${Math.random()}`,
+    description: "",
+    quantity: "1",
+    unitAmount: "",
+  };
+}
+
+/** Itens do banco (JSONB) para o formato do formulário. */
+function transactionItemsFromRow(value: unknown): TransactionItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((raw) => {
+    const item = (raw ?? {}) as Record<string, unknown>;
+    const quantity = Number(item.quantity);
+    const unit = Number(item.unitAmount);
+    return {
+      ...createTransactionItem(),
+      description: typeof item.description === "string" ? item.description : "",
+      quantity: Number.isFinite(quantity) && quantity > 0
+        ? formatMoneyInput(quantity).replace(",00", "")
+        : "1",
+      unitAmount: Number.isFinite(unit) ? formatMoneyInput(unit) : "",
+    };
+  });
+}
+
+/** Do formulário para o banco. Linha sem descrição e sem valor é descartada. */
+function transactionItemsToRow(items: TransactionItem[]) {
+  return items
+    .filter((item) => item.description.trim() || parseFilterAmount(item.unitAmount))
+    .map((item) => ({
+      description: item.description.trim(),
+      quantity: parseFilterAmount(item.quantity) ?? 1,
+      unitAmount: parseFilterAmount(item.unitAmount) ?? 0,
+    }));
+}
+
 function TransactionFormCard({
   title,
   description,
@@ -2710,6 +2809,7 @@ function TransactionFormCard({
   error,
   buttonLabel,
   allowInstallments = false,
+  allowItems = false,
   embedded = false,
   sharedFieldsOnly = false,
   onChange,
@@ -2726,6 +2826,8 @@ function TransactionFormCard({
   error: string | null;
   buttonLabel: string;
   allowInstallments?: boolean;
+  /** Lista de itens, como as linhas de uma nota fiscal. */
+  allowItems?: boolean;
   embedded?: boolean;
   /** Edição do parcelamento inteiro: valor, datas e status são de cada parcela. */
   sharedFieldsOnly?: boolean;
@@ -2733,6 +2835,28 @@ function TransactionFormCard({
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
   onCancel: () => void;
 }) {
+  const showItems = allowItems && !sharedFieldsOnly;
+  const itemsTotal = sumTransactionItems(form.items);
+
+  function updateItem(uiKey: string, patch: Partial<TransactionItem>) {
+    const items = form.items.map((item) =>
+      item.uiKey === uiKey ? { ...item, ...patch } : item
+    );
+    // O valor do lançamento segue a soma da nota. Continua editável depois,
+    // para quem precisa somar frete ou abater desconto.
+    onChange({ items, amount: formatMoneyInput(sumTransactionItems(items)) });
+  }
+
+  function removeItem(uiKey: string) {
+    const items = form.items.filter((item) => item.uiKey !== uiKey);
+    onChange({
+      items,
+      ...(items.length > 0
+        ? { amount: formatMoneyInput(sumTransactionItems(items)) }
+        : {}),
+    });
+  }
+
   return (
     <form
       onSubmit={onSubmit}
@@ -2841,6 +2965,89 @@ function TransactionFormCard({
           />
         )}
       </div>
+      {showItems && (
+        <div className="mt-4 rounded-lg border border-border bg-background p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span className="text-sm font-semibold text-foreground">Itens da nota</span>
+              <span className="mt-0.5 block text-xs text-muted">
+                Opcional. O valor do lançamento acompanha a soma.
+              </span>
+            </div>
+            {form.items.length > 0 && (
+              <span className="text-sm font-bold text-foreground">
+                {formatCurrency(itemsTotal)}
+              </span>
+            )}
+          </div>
+
+          {form.items.length > 0 && (
+            <div className="mt-3 space-y-2">
+              {form.items.map((item) => {
+                const quantity = parseFilterAmount(item.quantity) ?? 1;
+                const unit = parseFilterAmount(item.unitAmount) ?? 0;
+                return (
+                  <div
+                    key={item.uiKey}
+                    className="grid grid-cols-[minmax(0,1fr)_64px_96px_32px] items-end gap-2"
+                  >
+                    <Input
+                      label="Item"
+                      value={item.description}
+                      onChange={(event) =>
+                        updateItem(item.uiKey, { description: event.target.value })
+                      }
+                      placeholder="Fast Grafeno 500ml"
+                    />
+                    <Input
+                      label="Qtd"
+                      inputMode="decimal"
+                      value={item.quantity}
+                      onChange={(event) =>
+                        updateItem(item.uiKey, { quantity: event.target.value })
+                      }
+                    />
+                    <Input
+                      label="Unitário"
+                      prefix="R$"
+                      inputMode="decimal"
+                      value={item.unitAmount}
+                      onChange={(event) =>
+                        updateItem(item.uiKey, { unitAmount: event.target.value })
+                      }
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeItem(item.uiKey)}
+                      className="mb-1 flex h-8 w-8 items-center justify-center rounded-lg text-danger transition-colors hover:bg-danger/10"
+                      aria-label={`Remover ${item.description || "item"}`}
+                      title="Remover item"
+                    >
+                      <Trash size={15} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                    </button>
+                    {quantity > 1 && unit > 0 && (
+                      <p className="col-span-4 -mt-1 text-right text-xs text-muted">
+                        {formatCurrency(quantity * unit)}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() =>
+              onChange({ items: [...form.items, createTransactionItem()] })
+            }
+            className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-success/50 bg-success/5 px-3 py-2 text-xs font-semibold text-success transition-colors hover:border-success hover:bg-success/10"
+          >
+            <Plus size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+            Adicionar item
+          </button>
+        </div>
+      )}
       {allowInstallments && (
         <div className="mt-4 rounded-lg border border-border bg-background p-4">
           <button
@@ -2882,6 +3089,24 @@ function TransactionFormCard({
               />
             </div>
           )}
+        </div>
+      )}
+      {!sharedFieldsOnly && (
+        <div className="mt-4">
+          <label
+            htmlFor="transaction-notes"
+            className="label-caps mb-1.5 block"
+          >
+            Observações
+          </label>
+          <textarea
+            id="transaction-notes"
+            rows={3}
+            value={form.notes}
+            onChange={(event) => onChange({ notes: event.target.value })}
+            placeholder="Condição de pagamento, número da nota, o que mais precisar lembrar."
+            className="w-full resize-none rounded-lg border border-border bg-input px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted/60 focus:border-accent focus:ring-2 focus:ring-accent/20"
+          />
         </div>
       )}
       {error && (
@@ -3305,6 +3530,7 @@ export function FinancePage() {
         serviceOrderId: transaction.service_order_id ?? undefined,
         paymentStatus,
         notes: transaction.notes ?? "",
+        items: transactionItemsFromRow(transaction.items),
         installmentGroupId: transaction.installment_group_id,
         installmentNumber: transaction.installment_number,
         installmentTotal: transaction.installment_total,
@@ -3928,6 +4154,8 @@ export function FinancePage() {
       effective_date: effectiveDate,
       due_date: dueDate,
       transaction_date: form.date,
+      items: transactionItemsToRow(form.items),
+      notes: form.notes.trim() || null,
     };
 
     if (transactionId) {
@@ -4000,9 +4228,10 @@ export function FinancePage() {
         (isMissingColumnError(updateError, "category_id") ||
           isMissingColumnError(updateError, "account_id") ||
           isMissingColumnError(updateError, "effective_date") ||
-          isMissingColumnError(updateError, "due_date"))
+          isMissingColumnError(updateError, "due_date") ||
+          isMissingColumnError(updateError, "items"))
       ) {
-        const { category_id: _categoryId, account_id: _accountId, effective_date: _effectiveDate, due_date: _dueDate, ...legacyPayload } =
+        const { category_id: _categoryId, account_id: _accountId, effective_date: _effectiveDate, due_date: _dueDate, items: _items, ...legacyPayload } =
           transactionPayload;
         const legacyCashflow = await supabase
           .from("financial_transactions")
@@ -4121,9 +4350,10 @@ export function FinancePage() {
       (isMissingColumnError(insertError, "category_id") ||
         isMissingColumnError(insertError, "account_id") ||
         isMissingColumnError(insertError, "effective_date") ||
-        isMissingColumnError(insertError, "due_date"))
+        isMissingColumnError(insertError, "due_date") ||
+        isMissingColumnError(insertError, "items"))
     ) {
-      const { category_id: _categoryId, account_id: _accountId, effective_date: _effectiveDate, due_date: _dueDate, ...legacyPayload } =
+      const { category_id: _categoryId, account_id: _accountId, effective_date: _effectiveDate, due_date: _dueDate, items: _items, ...legacyPayload } =
         transactionPayload;
       const legacyCashflow = await supabase
         .from("financial_transactions")
@@ -4181,6 +4411,8 @@ export function FinancePage() {
       supplierId: categoryFilterAll,
       installmentsEnabled: false,
       installmentCount: "3",
+      items: entry.items ?? [],
+      notes: entry.notes ?? "",
     });
     setRevenueError(null);
     setShowRevenueForm(false);
@@ -4409,6 +4641,8 @@ export function FinancePage() {
       supplierId: entry.supplierId ?? categoryFilterAll,
       installmentsEnabled: false,
       installmentCount: "3",
+      items: entry.items ?? [],
+      notes: entry.notes ?? "",
     });
     setExpenseError(null);
     setShowExpenseForm(false);
@@ -5614,6 +5848,7 @@ export function FinancePage() {
                   error={expenseError}
                   buttonLabel="Salvar despesa"
                   allowInstallments
+                  allowItems
                   onChange={(patch) => setExpenseForm((prev) => ({ ...prev, ...patch }))}
                   onSubmit={(event) => handleSaveManualTransaction(event, "despesa")}
                   onCancel={() => closeManualForm("despesa")}
@@ -5636,6 +5871,7 @@ export function FinancePage() {
                           : "Atualize os dados deste lançamento."
                       }
                       sharedFieldsOnly={Boolean(editingGroupId)}
+                      allowItems
                       form={expenseForm}
                       categories={expenseCategorySelectOptions}
                       accountOptions={activeAccountOptions}
