@@ -478,6 +478,165 @@ function matchesAccountFilter(entry: FinanceEntry, filter: string) {
   if (filter === unassignedAccountFilter) return !entry.accountId;
   return entry.accountId === filter;
 }
+
+/**
+ * Tudo que dá para perguntar sobre um lançamento. Um objeto só em vez de um
+ * estado por campo: eram onze states e onze props espalhados entre receitas e
+ * despesas, e cada filtro novo multiplicava os dois lados.
+ */
+type FinanceFilterState = {
+  period: PeriodFilter;
+  /** Qual data o período compara: lançamento, vencimento ou efetivação. */
+  dateField: "date" | "dueDate" | "effectiveDate";
+  customStart: string;
+  customEnd: string;
+  search: string;
+  status: string;
+  origin: string;
+  category: string;
+  account: string;
+  /** Fornecedor nas despesas, cliente nas receitas. */
+  party: string;
+  minAmount: string;
+  maxAmount: string;
+};
+
+const financeStatusFilterOptions = [
+  { value: categoryFilterAll, label: "Todos os status" },
+  { value: "pendente", label: "Pendente" },
+  { value: "vencido", label: "Vencido" },
+  { value: "pago", label: "Pago" },
+  { value: "parcial", label: "Parcial" },
+  { value: "cancelado", label: "Cancelado" },
+];
+
+const financeOriginFilterOptions = [
+  { value: categoryFilterAll, label: "Todas as origens" },
+  { value: "automatic", label: "Agenda" },
+  { value: "fixed", label: "Custo fixo" },
+  { value: "manual", label: "Manual" },
+];
+
+function createFinanceFilterState(
+  customStart: string,
+  customEnd: string
+): FinanceFilterState {
+  return {
+    period: "all",
+    dateField: "date",
+    customStart,
+    customEnd,
+    search: "",
+    status: categoryFilterAll,
+    origin: categoryFilterAll,
+    category: categoryFilterAll,
+    account: categoryFilterAll,
+    party: categoryFilterAll,
+    minAmount: "",
+    maxAmount: "",
+  };
+}
+
+/**
+ * Mesma convenção do resto do app (parseCurrencyInput): ponto é separador de
+ * milhar e vírgula é decimal, então "1.000" é mil e não um. Diferença é que
+ * aqui campo vazio ou rabisco devolve null em vez de estourar — é filtro, não
+ * formulário.
+ */
+function parseFilterAmount(value: string) {
+  const cleaned = value.trim().replace(/[^\d,.-]/g, "");
+  if (!cleaned) return null;
+  const parsed = Number(cleaned.replace(/\./g, "").replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** Quantos filtros estão valendo — vira o contador no botão do funil. */
+function countActiveFinanceFilters(filters: FinanceFilterState) {
+  return [
+    filters.period !== "all",
+    Boolean(filters.search.trim()),
+    filters.status !== categoryFilterAll,
+    filters.origin !== categoryFilterAll,
+    filters.category !== categoryFilterAll,
+    filters.account !== categoryFilterAll,
+    filters.party !== categoryFilterAll,
+    parseFilterAmount(filters.minAmount) !== null,
+    parseFilterAmount(filters.maxAmount) !== null,
+  ].filter(Boolean).length;
+}
+
+function matchesFinanceFilter(
+  entry: FinanceEntry,
+  filters: FinanceFilterState,
+  range: { start: Date; end: Date },
+  todayKeyValue: string,
+  partyOf: (entry: FinanceEntry) => string | undefined
+) {
+  if (filters.period !== "all") {
+    const basis =
+      filters.dateField === "dueDate"
+        ? entry.dueDate
+        : filters.dateField === "effectiveDate"
+          ? entry.effectiveDate
+          : entry.date;
+    // Sem a data escolhida o lançamento não cabe no período: uma conta sem
+    // vencimento não entra num filtro por vencimento.
+    if (!basis || !isDateInRange(basis, range)) return false;
+  }
+
+  if (
+    filters.category !== categoryFilterAll &&
+    entry.category !== filters.category
+  ) {
+    return false;
+  }
+
+  if (!matchesAccountFilter(entry, filters.account)) return false;
+
+  if (filters.party !== categoryFilterAll && partyOf(entry) !== filters.party) {
+    return false;
+  }
+
+  if (filters.origin !== categoryFilterAll && entry.kind !== filters.origin) {
+    return false;
+  }
+
+  if (filters.status !== categoryFilterAll) {
+    // "Vencido" não é um status gravado: é pendente com vencimento no passado.
+    if (filters.status === "vencido") {
+      const overdue = isOverdue(
+        { payment_status: entry.paymentStatus, due_date: entry.dueDate },
+        todayKeyValue
+      );
+      if (!overdue) return false;
+    } else if (entry.paymentStatus !== filters.status) {
+      return false;
+    }
+  }
+
+  const min = parseFilterAmount(filters.minAmount);
+  if (min !== null && entry.amount < min) return false;
+  const max = parseFilterAmount(filters.maxAmount);
+  if (max !== null && entry.amount > max) return false;
+
+  const term = filters.search.trim().toLowerCase();
+  if (term) {
+    const haystack = [
+      entry.description,
+      entry.clientName,
+      entry.serviceName,
+      entry.supplierName,
+      entry.category,
+      entry.notes,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    if (!haystack.includes(term)) return false;
+  }
+
+  return true;
+}
 const FINANCE_ICON_WEIGHT = "light" as const;
 const DONUT_COLORS = ["#f97316", "#3b82f6", "#22c55e", "#6b7280", "#ef4444"];
 
@@ -1220,49 +1379,33 @@ const INLINE_FILTER_EXIT_MS = 300;
 
 function InlineFilterButton({
   value,
-  customStart,
-  customEnd,
-  category,
   categoryOptions,
-  supplier,
-  supplierOptions,
-  account,
   accountOptions,
+  partyOptions,
+  partyLabel,
+  settlementLabel,
   open,
   onToggle,
   onClose,
   onChange,
-  onCustomStartChange,
-  onCustomEndChange,
-  onCategoryChange,
-  onSupplierChange,
-  onAccountChange,
   onClear,
   ariaLabel = "Filtros",
 }: {
-  value: PeriodFilter;
-  customStart: string;
-  customEnd: string;
-  category: string;
+  value: FinanceFilterState;
   categoryOptions: { value: string; label: string }[];
-  supplier?: string;
-  supplierOptions?: { value: string; label: string }[];
-  account?: string;
-  accountOptions?: { value: string; label: string }[];
+  accountOptions: { value: string; label: string }[];
+  partyOptions: { value: string; label: string }[];
+  partyLabel: string;
+  /** "Recebimento" nas receitas, "Pagamento" nas despesas. */
+  settlementLabel: string;
   open: boolean;
   onToggle: () => void;
   onClose: () => void;
-  onChange: (value: PeriodFilter) => void;
-  onCustomStartChange: (value: string) => void;
-  onCustomEndChange: (value: string) => void;
-  onCategoryChange: (value: string) => void;
-  onSupplierChange?: (value: string) => void;
-  onAccountChange?: (value: string) => void;
+  onChange: (patch: Partial<FinanceFilterState>) => void;
   onClear: () => void;
   ariaLabel?: string;
 }) {
-  const showSupplier = Boolean(supplierOptions && onSupplierChange);
-  const showAccount = Boolean(accountOptions && onAccountChange);
+  const activeCount = countActiveFinanceFilters(value);
   const containerRef = useRef<HTMLDivElement>(null);
   const [closing, setClosing] = useState(false);
   const [panelReady, setPanelReady] = useState(false);
@@ -1330,25 +1473,32 @@ function InlineFilterButton({
     onToggle();
   }
 
-  function handleClear() {
-    onClear();
-  }
-
   return (
     <div ref={containerRef} className="relative inline-flex">
       <button
         type="button"
         onClick={handleToggle}
-        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors ${
-          open
+        className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+          open || activeCount > 0
             ? "border-premium/40 bg-premium/10 text-premium"
             : "border-border/80 bg-card text-foreground/70 hover:bg-background hover:text-foreground"
         }`}
-        aria-label="Abrir filtros"
+        aria-label={
+          activeCount > 0
+            ? `Abrir filtros (${activeCount} ${
+                activeCount === 1 ? "ativo" : "ativos"
+              })`
+            : "Abrir filtros"
+        }
         aria-expanded={open}
         title="Abrir filtros"
       >
         <Funnel size={16} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+        {activeCount > 0 && (
+          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-premium px-1 text-[9px] font-bold leading-none text-white ring-2 ring-card">
+            {activeCount}
+          </span>
+        )}
       </button>
 
       {showPanel && (
@@ -1356,9 +1506,7 @@ function InlineFilterButton({
           role="dialog"
           aria-modal="false"
           aria-label={ariaLabel}
-          className={`finance-inline-filter-card absolute right-0 top-full z-50 mt-2 w-max max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-card px-6 py-4 shadow-card transition-all duration-300 ease-out ${
-            showSupplier ? "md:min-w-[42rem]" : "md:min-w-[32rem]"
-          } ${
+          className={`finance-inline-filter-card absolute right-0 top-full z-50 mt-2 w-[min(46rem,calc(100vw-2rem))] rounded-lg border border-border bg-card px-6 py-5 shadow-card transition-all duration-300 ease-out ${
             panelVisible
               ? "translate-y-0 opacity-100"
               : "pointer-events-none -translate-y-2 opacity-0"
@@ -1368,44 +1516,120 @@ function InlineFilterButton({
               "-6px 8px 24px rgba(15, 23, 42, 0.1), 0 4px 12px rgba(15, 23, 42, 0.06)",
           }}
         >
-          <div className="flex flex-wrap items-end gap-6">
+          <Input
+            label="Buscar"
+            value={value.search}
+            onChange={(event) => onChange({ search: event.target.value })}
+            placeholder="Descrição, cliente, serviço, fornecedor ou observação"
+          />
+
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Dropdown
               label="Período"
-              value={value}
+              value={value.period}
               options={periodOptions}
-              onChange={(period) => onChange(period as PeriodFilter)}
-              className="min-w-[11rem] flex-1 space-y-2"
+              onChange={(period) => onChange({ period: period as PeriodFilter })}
+              className="space-y-2"
+            />
+            <Dropdown
+              label="Período sobre"
+              value={value.dateField}
+              options={[
+                { value: "date", label: "Data de lançamento" },
+                { value: "dueDate", label: "Vencimento" },
+                { value: "effectiveDate", label: settlementLabel },
+              ]}
+              onChange={(dateField) =>
+                onChange({
+                  dateField: dateField as FinanceFilterState["dateField"],
+                })
+              }
+              className="space-y-2"
+            />
+            <Dropdown
+              label="Status"
+              value={value.status}
+              options={financeStatusFilterOptions}
+              onChange={(status) => onChange({ status })}
+              className="space-y-2"
+            />
+            <Dropdown
+              label="Origem"
+              value={value.origin}
+              options={financeOriginFilterOptions}
+              onChange={(origin) => onChange({ origin })}
+              className="space-y-2"
             />
             <Dropdown
               label="Categoria"
-              value={category}
+              value={value.category}
               options={categoryOptions}
-              onChange={onCategoryChange}
-              className="min-w-[14rem] flex-[1.2] space-y-2"
+              onChange={(category) => onChange({ category })}
+              className="space-y-2"
             />
-            {showSupplier && (
-              <Dropdown
-                label="Fornecedor"
-                value={supplier ?? categoryFilterAll}
-                options={supplierOptions!}
-                onChange={onSupplierChange!}
-                className="min-w-[14rem] flex-[1.2] space-y-2"
+            <Dropdown
+              label={partyLabel}
+              value={value.party}
+              options={partyOptions}
+              onChange={(party) => onChange({ party })}
+              className="space-y-2"
+            />
+            <Dropdown
+              label="Conta"
+              value={value.account}
+              options={accountOptions}
+              onChange={(account) => onChange({ account })}
+              className="space-y-2"
+            />
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <Input
+              label="Valor mínimo"
+              inputMode="decimal"
+              value={value.minAmount}
+              onChange={(event) => onChange({ minAmount: event.target.value })}
+              placeholder="0,00"
+            />
+            <Input
+              label="Valor máximo"
+              inputMode="decimal"
+              value={value.maxAmount}
+              onChange={(event) => onChange({ maxAmount: event.target.value })}
+              placeholder="0,00"
+            />
+          </div>
+
+          {value.period === "custom" && (
+            <div className="mt-4 grid grid-cols-1 gap-4 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-3">
+              <Input
+                label="Início"
+                type="date"
+                value={value.customStart}
+                onChange={(event) => onChange({ customStart: event.target.value })}
               />
-            )}
-            {showAccount && (
-              <Dropdown
-                label="Conta"
-                value={account ?? categoryFilterAll}
-                options={accountOptions!}
-                onChange={onAccountChange!}
-                className="min-w-[14rem] flex-[1.2] space-y-2"
+              <Input
+                label="Fim"
+                type="date"
+                value={value.customEnd}
+                onChange={(event) => onChange({ customEnd: event.target.value })}
               />
-            )}
-            <div className="flex shrink-0 flex-col gap-2 border-l border-border pl-5">
+            </div>
+          )}
+
+          <div className="mt-5 flex items-center justify-between gap-3 border-t border-border pt-4">
+            <p className="text-xs text-muted">
+              {activeCount === 0
+                ? "Nenhum filtro aplicado"
+                : `${activeCount} ${
+                    activeCount === 1 ? "filtro aplicado" : "filtros aplicados"
+                  }`}
+            </p>
+            <div className="flex items-center gap-2">
               <Button
                 type="button"
                 variant="secondary"
-                onClick={handleClear}
+                onClick={onClear}
                 className="min-w-[5.5rem]"
               >
                 Limpar
@@ -1419,25 +1643,6 @@ function InlineFilterButton({
               </Button>
             </div>
           </div>
-
-          {value === "custom" && (
-            <div className="mt-4 flex flex-wrap gap-4 border-t border-border pt-4">
-              <Input
-                label="Início"
-                type="date"
-                value={customStart}
-                onChange={(event) => onCustomStartChange(event.target.value)}
-                className="w-40"
-              />
-              <Input
-                label="Fim"
-                type="date"
-                value={customEnd}
-                onChange={(event) => onCustomEndChange(event.target.value)}
-                className="w-40"
-              />
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -2748,17 +2953,12 @@ export function FinancePage() {
   const [savingExpense, setSavingExpense] = useState(false);
   const [revenueError, setRevenueError] = useState<string | null>(null);
   const [expenseError, setExpenseError] = useState<string | null>(null);
-  const [revenuePeriod, setRevenuePeriod] = useState<PeriodFilter>("all");
-  const [expensePeriod, setExpensePeriod] = useState<PeriodFilter>("all");
-  const [revenueCustomStart, setRevenueCustomStart] = useState(dateKey(startOfMonth(today)));
-  const [revenueCustomEnd, setRevenueCustomEnd] = useState(dateKey(today));
-  const [expenseCustomStart, setExpenseCustomStart] = useState(dateKey(startOfMonth(today)));
-  const [expenseCustomEnd, setExpenseCustomEnd] = useState(dateKey(today));
-  const [revenueCategoryFilter, setRevenueCategoryFilter] = useState(categoryFilterAll);
-  const [expenseCategoryFilter, setExpenseCategoryFilter] = useState(categoryFilterAll);
-  const [expenseSupplierFilter, setExpenseSupplierFilter] = useState(categoryFilterAll);
-  const [revenueAccountFilter, setRevenueAccountFilter] = useState(categoryFilterAll);
-  const [expenseAccountFilter, setExpenseAccountFilter] = useState(categoryFilterAll);
+  const [revenueFilters, setRevenueFilters] = useState<FinanceFilterState>(() =>
+    createFinanceFilterState(dateKey(startOfMonth(today)), dateKey(today))
+  );
+  const [expenseFilters, setExpenseFilters] = useState<FinanceFilterState>(() =>
+    createFinanceFilterState(dateKey(startOfMonth(today)), dateKey(today))
+  );
   const [showFixedCostForm, setShowFixedCostForm] = useState(false);
   const [editingFixedCostId, setEditingFixedCostId] = useState<string | null>(null);
   const [fixedCostForm, setFixedCostForm] = useState<FixedCostForm>(initialFixedCostForm);
@@ -3251,15 +3451,15 @@ export function FinancePage() {
   const growthPositive = monthGrowth >= 0;
 
   const revenueRange = getPeriodRange(
-    revenuePeriod,
-    revenueCustomStart,
-    revenueCustomEnd,
+    revenueFilters.period,
+    revenueFilters.customStart,
+    revenueFilters.customEnd,
     today
   );
   const expenseRange = getPeriodRange(
-    expensePeriod,
-    expenseCustomStart,
-    expenseCustomEnd,
+    expenseFilters.period,
+    expenseFilters.customStart,
+    expenseFilters.customEnd,
     today
   );
   const expenseSupplierFilterOptions = [
@@ -3292,6 +3492,19 @@ export function FinancePage() {
       label: name,
     })),
   ];
+  // Cliente só existe nas receitas que vieram da agenda, e vem como nome.
+  const revenueClientFilterOptions = [
+    { value: categoryFilterAll, label: "Todos os clientes" },
+    ...[
+      ...new Set(
+        revenueEntries
+          .map((entry) => entry.clientName)
+          .filter((name): name is string => Boolean(name))
+      ),
+    ]
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({ value: name, label: name })),
+  ];
   const accountFilterOptions = [
     { value: categoryFilterAll, label: "Todas as contas" },
     { value: unassignedAccountFilter, label: "Sem conta definida" },
@@ -3304,21 +3517,24 @@ export function FinancePage() {
       label: name,
     })),
   ];
-  const filteredRevenueEntries = revenueEntries.filter(
-    (entry) =>
-      (revenuePeriod === "all" || isDateInRange(entry.date, revenueRange)) &&
-      (revenueCategoryFilter === categoryFilterAll ||
-        entry.category === revenueCategoryFilter) &&
-      matchesAccountFilter(entry, revenueAccountFilter)
+  const todayKeyForFilters = dateKey(today);
+  const filteredRevenueEntries = revenueEntries.filter((entry) =>
+    matchesFinanceFilter(
+      entry,
+      revenueFilters,
+      revenueRange,
+      todayKeyForFilters,
+      (item) => item.clientName
+    )
   );
-  const filteredExpenseEntries = expenseEntries.filter(
-    (entry) =>
-      (expensePeriod === "all" || isDateInRange(entry.date, expenseRange)) &&
-      (expenseCategoryFilter === categoryFilterAll ||
-        entry.category === expenseCategoryFilter) &&
-      (expenseSupplierFilter === categoryFilterAll ||
-        entry.supplierId === expenseSupplierFilter) &&
-      matchesAccountFilter(entry, expenseAccountFilter)
+  const filteredExpenseEntries = expenseEntries.filter((entry) =>
+    matchesFinanceFilter(
+      entry,
+      expenseFilters,
+      expenseRange,
+      todayKeyForFilters,
+      (item) => item.supplierId
+    )
   );
 
   const accountNames = useMemo(
@@ -5142,7 +5358,7 @@ export function FinancePage() {
                 accountOptions={activeAccountOptions}
                 onBulkAssignAccount={handleBulkAssignAccount}
                 emptyMessage="Nenhuma receita encontrada."
-                groupByMonth={revenuePeriod !== "all"}
+                groupByMonth={revenueFilters.period !== "all"}
                 editingId={editingRevenueId}
                 editForm={
                   editingRevenueId ? (
@@ -5167,28 +5383,26 @@ export function FinancePage() {
                 onUpdateNotes={handleUpdateTransactionNotes}
                 filter={
                   <InlineFilterButton
-                    value={revenuePeriod}
-                    customStart={revenueCustomStart}
-                    customEnd={revenueCustomEnd}
-                    category={revenueCategoryFilter}
+                    value={revenueFilters}
                     categoryOptions={revenueCategoryFilterOptions}
+                    accountOptions={accountFilterOptions}
+                    partyOptions={revenueClientFilterOptions}
+                    partyLabel="Cliente"
+                    settlementLabel="Recebimento"
                     open={showRevenueFilter}
                     onToggle={() => setShowRevenueFilter(true)}
                     onClose={() => setShowRevenueFilter(false)}
-                    onChange={setRevenuePeriod}
-                    onCustomStartChange={setRevenueCustomStart}
-                    onCustomEndChange={setRevenueCustomEnd}
-                    onCategoryChange={setRevenueCategoryFilter}
-                    account={revenueAccountFilter}
-                    accountOptions={accountFilterOptions}
-                    onAccountChange={setRevenueAccountFilter}
-                    onClear={() => {
-                      setRevenuePeriod("all");
-                      setRevenueCustomStart(dateKey(startOfMonth(today)));
-                      setRevenueCustomEnd(dateKey(today));
-                      setRevenueCategoryFilter(categoryFilterAll);
-                      setRevenueAccountFilter(categoryFilterAll);
-                    }}
+                    onChange={(patch) =>
+                      setRevenueFilters((prev) => ({ ...prev, ...patch }))
+                    }
+                    onClear={() =>
+                      setRevenueFilters(
+                        createFinanceFilterState(
+                          dateKey(startOfMonth(today)),
+                          dateKey(today)
+                        )
+                      )
+                    }
                     ariaLabel="Filtros de receitas"
                   />
                 }
@@ -5281,32 +5495,26 @@ export function FinancePage() {
                 groupInstallments
                 filter={
                   <InlineFilterButton
-                    value={expensePeriod}
-                    customStart={expenseCustomStart}
-                    customEnd={expenseCustomEnd}
-                    category={expenseCategoryFilter}
+                    value={expenseFilters}
                     categoryOptions={expenseCategoryFilterOptions}
-                    supplier={expenseSupplierFilter}
-                    supplierOptions={expenseSupplierFilterOptions}
+                    accountOptions={accountFilterOptions}
+                    partyOptions={expenseSupplierFilterOptions}
+                    partyLabel="Fornecedor"
+                    settlementLabel="Pagamento"
                     open={showExpenseFilter}
                     onToggle={() => setShowExpenseFilter(true)}
                     onClose={() => setShowExpenseFilter(false)}
-                    onChange={setExpensePeriod}
-                    onCustomStartChange={setExpenseCustomStart}
-                    onCustomEndChange={setExpenseCustomEnd}
-                    onCategoryChange={setExpenseCategoryFilter}
-                    onSupplierChange={setExpenseSupplierFilter}
-                    account={expenseAccountFilter}
-                    accountOptions={accountFilterOptions}
-                    onAccountChange={setExpenseAccountFilter}
-                    onClear={() => {
-                      setExpensePeriod("all");
-                      setExpenseCustomStart(dateKey(startOfMonth(today)));
-                      setExpenseCustomEnd(dateKey(today));
-                      setExpenseCategoryFilter(categoryFilterAll);
-                      setExpenseSupplierFilter(categoryFilterAll);
-                      setExpenseAccountFilter(categoryFilterAll);
-                    }}
+                    onChange={(patch) =>
+                      setExpenseFilters((prev) => ({ ...prev, ...patch }))
+                    }
+                    onClear={() =>
+                      setExpenseFilters(
+                        createFinanceFilterState(
+                          dateKey(startOfMonth(today)),
+                          dateKey(today)
+                        )
+                      )
+                    }
                     ariaLabel="Filtros de despesas"
                   />
                 }
