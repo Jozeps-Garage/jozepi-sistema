@@ -1495,7 +1495,12 @@ function getPaymentStatusOption(status?: PaymentStatus) {
   );
 }
 
-function TransactionNotesIcon({
+/**
+ * Observação dentro do card aberto. Substitui o ícone que ficava na linha: lá
+ * ela era o único jeito de escrever a observação, e tirar o ícone sem trazer a
+ * edição para cá deixaria o campo só de leitura.
+ */
+function TransactionNotesField({
   notes,
   onUpdateNotes,
 }: {
@@ -1503,142 +1508,89 @@ function TransactionNotesIcon({
   onUpdateNotes: (notes: string | null) => Promise<void>;
 }) {
   const trimmedNotes = notes.trim();
-  const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState(!trimmedNotes);
+  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(trimmedNotes);
   const [saving, setSaving] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-
-    function handleClickOutside(event: MouseEvent) {
-      if (ref.current && !ref.current.contains(event.target as Node)) {
-        setOpen(false);
-        setEditing(!trimmedNotes);
-        setDraft(trimmedNotes);
-      }
-    }
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [open, trimmedNotes]);
-
-  async function handleSave() {
-    const next = draft.trim();
-    if (!next) return;
+  async function save(value: string | null) {
     setSaving(true);
     try {
-      await onUpdateNotes(next);
+      await onUpdateNotes(value);
       setEditing(false);
-      setOpen(false);
     } finally {
       setSaving(false);
     }
   }
 
-  async function handleRemove() {
-    setSaving(true);
-    try {
-      await onUpdateNotes(null);
-      setDraft("");
-      setEditing(true);
-      setOpen(false);
-    } finally {
-      setSaving(false);
-    }
+  if (editing) {
+    return (
+      <div className="mt-3">
+        <p className="label-caps">Observação</p>
+        <textarea
+          rows={3}
+          autoFocus
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          disabled={saving}
+          placeholder="Escreva uma observação..."
+          className="mt-1 w-full resize-none rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted/60 focus:border-primary/40 disabled:opacity-60"
+        />
+        <div className="mt-2 flex items-center justify-end gap-3">
+          {trimmedNotes && (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => void save(null)}
+              className="text-xs font-semibold text-danger transition-colors hover:text-danger/80 disabled:opacity-60"
+            >
+              Excluir observação
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => {
+              setDraft(trimmedNotes);
+              setEditing(false);
+            }}
+            className="text-xs font-semibold text-muted transition-colors hover:text-foreground disabled:opacity-60"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            disabled={saving || !draft.trim()}
+            onClick={() => void save(draft.trim())}
+            className="text-xs font-semibold text-success transition-colors hover:text-success/80 disabled:opacity-60"
+          >
+            {saving ? "Salvando..." : "Salvar"}
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div ref={ref} className="relative z-20 flex shrink-0 items-center justify-center">
+    <div className="mt-3">
+      <p className="label-caps">Observação</p>
+      {trimmedNotes ? (
+        <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
+          {trimmedNotes}
+        </p>
+      ) : (
+        <p className="mt-0.5 text-sm text-muted">Nenhuma observação.</p>
+      )}
       <button
         type="button"
         onClick={() => {
-          setOpen((value) => !value);
-          setEditing(!trimmedNotes);
           setDraft(trimmedNotes);
+          setEditing(true);
         }}
-        className={`inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 ${
-          trimmedNotes
-            ? "text-amber-600 hover:bg-amber-50 hover:text-amber-700"
-            : "text-muted hover:bg-background hover:text-foreground"
-        }`}
-        aria-label={trimmedNotes ? "Ver observação" : "Adicionar observação"}
-        title={trimmedNotes ? "Ver observação" : "Adicionar observação"}
+        className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-primary transition-colors hover:text-primary/80"
       >
-        <Note size={16} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+        <PencilSimple size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+        {trimmedNotes ? "Editar observação" : "Adicionar observação"}
       </button>
-
-      {open && (
-        <div className="absolute right-0 top-full z-40 mt-2 w-72 rounded-md border border-border bg-card p-3 shadow-lg">
-          <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-muted">
-            Observação
-          </p>
-
-          {editing || !trimmedNotes ? (
-            <div className="space-y-2">
-              <textarea
-                rows={3}
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                disabled={saving}
-                placeholder="Escreva uma observação..."
-                className="w-full resize-none border-0 border-b border-border bg-transparent px-0 py-1 text-xs text-foreground outline-none placeholder:text-muted/60 focus:border-primary/40 disabled:opacity-60"
-              />
-              <div className="flex justify-end gap-3">
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={() => {
-                    setOpen(false);
-                    setEditing(!trimmedNotes);
-                    setDraft(trimmedNotes);
-                  }}
-                  className="text-[11px] font-semibold text-muted hover:text-foreground disabled:opacity-60"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  disabled={saving || !draft.trim()}
-                  onClick={() => void handleSave()}
-                  className="text-[11px] font-semibold text-success hover:text-success/80 disabled:opacity-60"
-                >
-                  {saving ? "Salvando..." : "Salvar"}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <>
-              <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground">
-                {trimmedNotes}
-              </p>
-              <div className="mt-3 flex justify-end gap-2 border-t border-border/60 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditing(true);
-                    setDraft(trimmedNotes);
-                  }}
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-foreground transition-colors hover:text-success"
-                >
-                  <PencilSimple size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
-                  Editar
-                </button>
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={() => void handleRemove()}
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-danger transition-colors hover:text-danger/80 disabled:opacity-60"
-                >
-                  <Trash size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
-                  {saving ? "..." : "Excluir"}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -1927,7 +1879,6 @@ function TransactionList({
     "minmax(0, 1fr)",
     "150px",
     "110px",
-    showNotes ? "44px" : null,
     showPayment ? "108px" : null,
     "56px",
   ]
@@ -2042,7 +1993,6 @@ function TransactionList({
             sort={sort}
             onSort={toggleSort}
           />
-          {showNotes && <span className="text-center">OBS</span>}
           {showPayment && (
             <SortableHeader
               label="Status"
@@ -2270,17 +2220,6 @@ function TransactionList({
               >
                 {formatCurrency(entry.amount)}
               </div>
-              {showNotes && onUpdateNotes && (
-                <div
-                  className="flex justify-center"
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  <TransactionNotesIcon
-                    notes={entry.notes ?? ""}
-                    onUpdateNotes={(notes) => onUpdateNotes(entry, notes)}
-                  />
-                </div>
-              )}
               {showPayment && (
                 <div
                   className="flex min-w-0 items-center"
@@ -2341,13 +2280,20 @@ function TransactionList({
                         </div>
                       ))}
                     </dl>
-                    {entry.notes && (
-                      <div className="mt-3">
-                        <dt className="label-caps">Observação</dt>
-                        <dd className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
-                          {entry.notes}
-                        </dd>
-                      </div>
+                    {showNotes && onUpdateNotes ? (
+                      <TransactionNotesField
+                        notes={entry.notes ?? ""}
+                        onUpdateNotes={(notes) => onUpdateNotes(entry, notes)}
+                      />
+                    ) : (
+                      entry.notes && (
+                        <div className="mt-3">
+                          <p className="label-caps">Observação</p>
+                          <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
+                            {entry.notes}
+                          </p>
+                        </div>
+                      )
                     )}
                     {onEditTransaction && (
                       <div className="mt-4 flex justify-end">
@@ -2439,7 +2385,6 @@ function TransactionList({
                     {row.groupEntries[0]?.supplierName ?? "-"}
                   </div>
                   <div className="text-sm font-bold text-danger">{formatCurrency(amount)}</div>
-                  {showNotes && <span />}
                   {showPayment && <span />}
                   <span className="flex items-center justify-end gap-0.5">
                     {onEditGroup && (
