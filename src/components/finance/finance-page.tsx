@@ -950,10 +950,13 @@ async function syncFixedCostExpenses(
     "despesa",
     FIXED_COST_CATEGORY_NAME
   );
+  // Pendente, e não "pago": o sistema sabe que a conta venceu, não que alguém
+  // a pagou. Nascer paga escondia a conta da lista de contas a pagar e ainda
+  // descontava do saldo um dinheiro que não tinha saído.
   const cashflowInsert = {
     ...(defaults.accountId ? { account_id: defaults.accountId } : {}),
     ...(defaults.categoryId ? { category_id: defaults.categoryId } : {}),
-    payment_status: "pago" as const,
+    payment_status: "pendente" as const,
   };
 
   for (const cost of costs) {
@@ -1003,7 +1006,7 @@ async function syncFixedCostExpenses(
           })
           .eq("id", existing.id)
           .eq("workshop_id", workshopId)
-          .select(TRANSACTION_SELECT_CASHFLOW)
+          .select(TRANSACTION_SELECT_PHASE2)
           .maybeSingle();
 
         if (!error && data) {
@@ -1026,13 +1029,13 @@ async function syncFixedCostExpenses(
         transaction_date: paymentDate,
         source,
         ...cashflowInsert,
-        effective_date: paymentDate,
+        due_date: paymentDate,
       };
 
       const { data, error } = await supabase
         .from("financial_transactions")
         .insert(insertPayload)
-        .select(TRANSACTION_SELECT_CASHFLOW)
+        .select(TRANSACTION_SELECT_PHASE2)
         .single();
 
       if (error) {
@@ -1046,6 +1049,7 @@ async function syncFixedCostExpenses(
             category: FIXED_COST_CATEGORY_NAME,
             transaction_date: paymentDate,
             source,
+            payment_status: "pendente",
           })
           .select(TRANSACTION_SELECT_FULL)
           .single();
@@ -4339,10 +4343,10 @@ export function FinancePage() {
         source: pending.source,
         ...(defaults.accountId ? { account_id: defaults.accountId } : {}),
         ...(defaults.categoryId ? { category_id: defaults.categoryId } : {}),
-        payment_status: "pago",
-        effective_date: pending.paymentDate,
+        payment_status: "pendente",
+        due_date: pending.paymentDate,
       })
-      .select(TRANSACTION_SELECT_CASHFLOW)
+      .select(TRANSACTION_SELECT_PHASE2)
       .single();
 
     let saved: unknown = data;
@@ -4359,6 +4363,7 @@ export function FinancePage() {
           category: "Custo Fixo",
           transaction_date: pending.paymentDate,
           source: pending.source,
+          payment_status: "pendente",
         })
         .select(TRANSACTION_SELECT_FULL)
         .single();
