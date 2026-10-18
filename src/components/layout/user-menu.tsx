@@ -7,17 +7,19 @@ import { GearSix, SignOut } from "@phosphor-icons/react";
 import { UserRound } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
+import { sidebarLabelClass } from "@/components/layout/sidebar";
 
 const NAV_ICON_SIZE = 22;
 const NAV_ICON_WEIGHT = "light" as const;
 
 interface UserMenuProps {
+  expanded: boolean;
   email: string;
   fullName?: string;
   avatarUrl?: string | null;
 }
 
-export function UserMenu({ email, fullName, avatarUrl }: UserMenuProps) {
+export function UserMenu({ expanded, email, fullName, avatarUrl }: UserMenuProps) {
   const router = useRouter();
   const pathname = usePathname();
   const isSettingsActive = pathname.startsWith("/configuracoes");
@@ -37,7 +39,7 @@ export function UserMenu({ email, fullName, avatarUrl }: UserMenuProps) {
         title="Meu perfil"
       >
         <div className="flex h-11 w-14 shrink-0 items-center justify-center">
-          <div className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-white/10 text-sm font-semibold text-white transition-colors duration-300 group-hover:bg-white/15">
+          <div className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-white/10 text-sm font-semibold text-white transition-colors duration-300">
             {avatarUrl ? (
               <Image
                 src={avatarUrl}
@@ -54,7 +56,7 @@ export function UserMenu({ email, fullName, avatarUrl }: UserMenuProps) {
             )}
           </div>
         </div>
-        <div className="ml-3 w-44 translate-x-2 overflow-hidden opacity-0 transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:translate-x-0 group-hover:opacity-100">
+        <div className={`ml-3 w-44 overflow-hidden ${sidebarLabelClass(expanded)}`}>
           <p className="truncate text-sm font-medium text-white">
             {fullName ?? "Usuário"}
           </p>
@@ -76,7 +78,7 @@ export function UserMenu({ email, fullName, avatarUrl }: UserMenuProps) {
             aria-hidden
           />
         </span>
-        <span className="ml-3 translate-x-2 whitespace-nowrap opacity-0 transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:translate-x-0 group-hover:opacity-100">
+        <span className={`ml-3 whitespace-nowrap ${sidebarLabelClass(expanded)}`}>
           Configurações
         </span>
       </Link>
@@ -94,7 +96,7 @@ export function UserMenu({ email, fullName, avatarUrl }: UserMenuProps) {
             aria-hidden
           />
         </span>
-        <span className="ml-3 translate-x-2 whitespace-nowrap opacity-0 transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:translate-x-0 group-hover:opacity-100">
+        <span className={`ml-3 whitespace-nowrap ${sidebarLabelClass(expanded)}`}>
           Sair
         </span>
       </Button>
