@@ -31,7 +31,12 @@ import { createClient } from "@/lib/supabase/client";
 import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { formatCurrency, formatPhone, normalizeOptionalPhone } from "@/lib/utils/format";
 import { useBodyScrollLock } from "@/lib/utils/body-scroll-lock";
-import { formatCnpj, lookupCnpj } from "@/lib/cnpj/lookup";
+import {
+  formatCnpj,
+  isValidCnpj,
+  lookupCnpj,
+  onlyCnpjDigits,
+} from "@/lib/cnpj/lookup";
 import {
   createProductId,
   createProductPriceHistoryId,
@@ -716,6 +721,8 @@ export function ProductsPage() {
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
   const [supplierFormOpen, setSupplierFormOpen] = useState(false);
   const [cnpjLoading, setCnpjLoading] = useState(false);
+  /** Último CNPJ consultado: evita repetir a chamada a cada tecla depois do 14º dígito. */
+  const lastCnpjLookupRef = useRef("");
   const [cnpjMessage, setCnpjMessage] = useState<
     { tone: "error" | "warning" | "success"; text: string } | null
   >(null);
@@ -996,11 +1003,13 @@ export function ProductsPage() {
     setSupplierForm((prev) => ({ ...prev, ...patch }));
   }
 
-  async function handleCnpjLookup() {
+  async function handleCnpjLookup(raw?: string) {
+    const value = raw ?? supplierForm.document;
+    lastCnpjLookupRef.current = onlyCnpjDigits(value);
     setCnpjMessage(null);
     setCnpjLoading(true);
     try {
-      const data = await lookupCnpj(supplierForm.document);
+      const data = await lookupCnpj(value);
       setSupplierForm((prev) => ({
         ...prev,
         document: data.cnpj,
@@ -1029,14 +1038,23 @@ export function ProductsPage() {
     }
   }
 
+  /** Zera o que sobrou da consulta anterior ao abrir o formulário. */
+  function resetCnpjLookup(document = "") {
+    lastCnpjLookupRef.current = onlyCnpjDigits(document);
+    setCnpjMessage(null);
+  }
+
   function openSupplierForm() {
     setEditingSupplierId(null);
     setSupplierForm(emptySupplierForm);
     setSupplierError(null);
+    resetCnpjLookup();
     setSupplierFormOpen(true);
   }
 
   function startEditingSupplier(supplier: Supplier) {
+    // Editando: o CNPJ que já está salvo não dispara busca sozinho.
+    resetCnpjLookup(supplier.document ?? "");
     setEditingSupplierId(supplier.id);
     setSupplierForm({
       name: supplier.name,
@@ -2392,8 +2410,24 @@ export function ProductsPage() {
                     label="CNPJ"
                     value={supplierForm.document}
                     onChange={(event) => {
+                      const typed = event.target.value;
+                      const digits = onlyCnpjDigits(typed);
                       setCnpjMessage(null);
-                      updateSupplierForm({ document: event.target.value });
+                      updateSupplierForm({ document: typed });
+
+                      // Completou os 14 e os dígitos batem: busca sem esperar
+                      // clique. O ref segura a repetição enquanto o número não
+                      // muda — apagar e redigitar o mesmo CNPJ busca de novo.
+                      if (
+                        digits.length === 14 &&
+                        digits !== lastCnpjLookupRef.current &&
+                        isValidCnpj(digits)
+                      ) {
+                        updateSupplierForm({ document: formatCnpj(digits) });
+                        void handleCnpjLookup(digits);
+                      } else if (digits.length < 14) {
+                        lastCnpjLookupRef.current = "";
+                      }
                     }}
                     onBlur={(event) =>
                       updateSupplierForm({ document: formatCnpj(event.target.value) })
@@ -2410,7 +2444,7 @@ export function ProductsPage() {
                     className="sm:w-auto"
                   >
                     <MagnifyingGlass size={16} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-                    Buscar na Receita
+                    Buscar de novo
                   </Button>
                 </div>
                 {cnpjMessage && (
