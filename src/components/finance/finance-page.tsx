@@ -13,6 +13,7 @@ import {
   ArrowsClockwise,
   ArrowUp,
   CalendarBlank,
+  CaretLeft,
   CalendarCheck,
   CaretDown,
   CaretRight,
@@ -92,6 +93,7 @@ import {
 } from "@/lib/finance/types";
 
 type FinanceTab = "overview" | "revenues" | "expenses" | "fixedCosts" | "cashflow" | "accounts" | "categories";
+/** Sobrou para os intervalos fixos da visão geral; o filtro usa DateGranularity. */
 type PeriodFilter = "all" | "today" | "week" | "month" | "custom";
 type ChartInterval = "7d" | "1m" | "3m" | "6m" | "1a";
 
@@ -440,14 +442,6 @@ const tabs: { id: FinanceTab; label: string }[] = [
   { id: "categories", label: "Categorias" },
 ];
 
-const periodOptions = [
-  { value: "all", label: "Todos" },
-  { value: "today", label: "Hoje" },
-  { value: "week", label: "Semana" },
-  { value: "month", label: "Mês" },
-  { value: "custom", label: "Personalizado" },
-];
-
 const categoryFilterAll = "all";
 const unassignedAccountFilter = "__sem_conta__";
 
@@ -505,7 +499,9 @@ function matchesAccountFilter(entry: FinanceEntry, filter: string) {
  * despesas, e cada filtro novo multiplicava os dois lados.
  */
 type FinanceFilterState = {
-  period: PeriodFilter;
+  granularity: DateGranularity;
+  /** Um dia qualquer dentro do período visível; as setas andam com ele. */
+  anchor: string;
   /** Qual data o período compara: lançamento, vencimento ou pagamento. */
   dateField: "date" | "dueDate" | "effectiveDate";
   customStart: string;
@@ -542,7 +538,8 @@ function createFinanceFilterState(
   customEnd: string
 ): FinanceFilterState {
   return {
-    period: "all",
+    granularity: "all",
+    anchor: customEnd,
     dateField: "date",
     customStart,
     customEnd,
@@ -573,7 +570,7 @@ function parseFilterAmount(value: string) {
 /** Quantos filtros estão valendo — vira o contador no botão do funil. */
 function countActiveFinanceFilters(filters: FinanceFilterState) {
   return [
-    filters.period !== "all",
+    filters.granularity !== "all",
     Boolean(filters.search.trim()),
     filters.status !== categoryFilterAll,
     filters.origin !== categoryFilterAll,
@@ -592,7 +589,7 @@ function matchesFinanceFilter(
   todayKeyValue: string,
   partyOf: (entry: FinanceEntry) => string | undefined
 ) {
-  if (filters.period !== "all") {
+  if (filters.granularity !== "all") {
     const basis =
       filters.dateField === "dueDate"
         ? entry.dueDate
@@ -937,6 +934,150 @@ function getPeriodRange(
   }
 
   return { start: startOfMonth(baseDate), end: endOfMonth(baseDate) };
+}
+
+/**
+ * Período por granularidade e navegação, no lugar de "hoje / semana / mês".
+ * Escolhe-se o tamanho da janela uma vez e anda-se por ela com as setas, que é
+ * como se olha um histórico: não "este mês", e sim "qual mês".
+ */
+type DateGranularity =
+  | "all"
+  | "day"
+  | "week"
+  | "month"
+  | "quarter"
+  | "semester"
+  | "year"
+  | "custom";
+
+const dateGranularityOptions: { value: DateGranularity; label: string }[] = [
+  { value: "all", label: "Todo o período" },
+  { value: "day", label: "Diário" },
+  { value: "week", label: "Semanal" },
+  { value: "month", label: "Mensal" },
+  { value: "quarter", label: "Trimestral" },
+  { value: "semester", label: "Semestral" },
+  { value: "year", label: "Anual" },
+  { value: "custom", label: "Personalizado" },
+];
+
+function granularityBounds(granularity: DateGranularity, anchor: Date): DateRange {
+  const year = anchor.getFullYear();
+
+  if (granularity === "day") {
+    return { start: startOfDay(anchor), end: endOfDay(anchor) };
+  }
+  if (granularity === "week") return getWeekRange(anchor);
+  if (granularity === "month") {
+    return { start: startOfMonth(anchor), end: endOfMonth(anchor) };
+  }
+  if (granularity === "quarter") {
+    const firstMonth = Math.floor(anchor.getMonth() / 3) * 3;
+    return {
+      start: new Date(year, firstMonth, 1),
+      end: endOfMonth(new Date(year, firstMonth + 2, 1)),
+    };
+  }
+  if (granularity === "semester") {
+    const firstMonth = anchor.getMonth() < 6 ? 0 : 6;
+    return {
+      start: new Date(year, firstMonth, 1),
+      end: endOfMonth(new Date(year, firstMonth + 5, 1)),
+    };
+  }
+  return {
+    start: new Date(year, 0, 1),
+    end: endOfMonth(new Date(year, 11, 1)),
+  };
+}
+
+function resolveDateRange(
+  granularity: DateGranularity,
+  anchorKey: string,
+  customStart: string,
+  customEnd: string,
+  today: Date
+): DateRange {
+  if (granularity === "all") {
+    return { start: new Date(2000, 0, 1), end: endOfDay(today) };
+  }
+  if (granularity === "custom") {
+    return {
+      start: customStart ? startOfDay(parseLocalDate(customStart)) : startOfDay(today),
+      end: customEnd ? endOfDay(parseLocalDate(customEnd)) : endOfDay(today),
+    };
+  }
+  return granularityBounds(
+    granularity,
+    anchorKey ? parseLocalDate(anchorKey) : today
+  );
+}
+
+/** Quantos meses (ou dias) cada seta anda. */
+function shiftAnchor(
+  granularity: DateGranularity,
+  anchorKey: string,
+  direction: 1 | -1,
+  today: Date
+): string {
+  const anchor = anchorKey ? parseLocalDate(anchorKey) : today;
+
+  if (granularity === "day") return dateKey(addDaysTo(anchor, direction));
+  if (granularity === "week") return dateKey(addDaysTo(anchor, direction * 7));
+
+  const months =
+    granularity === "quarter"
+      ? 3
+      : granularity === "semester"
+        ? 6
+        : granularity === "year"
+          ? 12
+          : 1;
+  // Dia 1 para não pular fevereiro quando a âncora é 31.
+  return dateKey(
+    new Date(anchor.getFullYear(), anchor.getMonth() + direction * months, 1)
+  );
+}
+
+function addDaysTo(date: Date, days: number) {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+}
+
+function dateRangeLabel(
+  granularity: DateGranularity,
+  anchorKey: string,
+  customStart: string,
+  customEnd: string,
+  today: Date
+): string {
+  if (granularity === "all") return "Todo o período";
+  if (granularity === "custom") {
+    const from = customStart ? formatShortDate(customStart) : "início";
+    const to = customEnd ? formatShortDate(customEnd) : "hoje";
+    return `${from} – ${to}`;
+  }
+
+  const anchor = anchorKey ? parseLocalDate(anchorKey) : today;
+  const year = anchor.getFullYear();
+
+  if (granularity === "day") return formatShortDate(dateKey(anchor));
+  if (granularity === "week") {
+    const { start, end } = getWeekRange(anchor);
+    return `${formatShortDate(dateKey(start))} – ${formatShortDate(dateKey(end))}`;
+  }
+  if (granularity === "month") {
+    return `${getMonthLabel(anchor)} ${year}`;
+  }
+  if (granularity === "quarter") {
+    return `${Math.floor(anchor.getMonth() / 3) + 1}º tri ${year}`;
+  }
+  if (granularity === "semester") {
+    return `${anchor.getMonth() < 6 ? 1 : 2}º sem ${year}`;
+  }
+  return String(year);
 }
 
 function isDateInRange(date: string, range: DateRange) {
@@ -1410,13 +1551,184 @@ function SummaryCard({
 
 const INLINE_FILTER_EXIT_MS = 300;
 
+/**
+ * Controle só de datas, separado do funil: escolhe o tamanho da janela e anda
+ * por ela com as setas. O funil cuida do resto (status, categoria, valor).
+ */
+function DateRangeFilter({
+  value,
+  settlementLabel,
+  today,
+  onChange,
+}: {
+  value: FinanceFilterState;
+  /** "Recebimento" nas receitas, "Pagamento" nas despesas. */
+  settlementLabel: string;
+  today: Date;
+  onChange: (patch: Partial<FinanceFilterState>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const navigable = value.granularity !== "all" && value.granularity !== "custom";
+  const label = dateRangeLabel(
+    value.granularity,
+    value.anchor,
+    value.customStart,
+    value.customEnd,
+    today
+  );
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  function move(direction: 1 | -1) {
+    onChange({
+      anchor: shiftAnchor(value.granularity, value.anchor, direction, today),
+    });
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative flex items-center gap-0.5 rounded-lg border border-border bg-card p-0.5"
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        aria-expanded={open}
+        aria-label="Escolher período"
+        title="Escolher período"
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${
+          value.granularity === "all"
+            ? "text-foreground/70 hover:bg-background hover:text-foreground"
+            : "bg-premium/10 text-premium"
+        }`}
+      >
+        <CalendarBlank size={16} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+      </button>
+      <button
+        type="button"
+        onClick={() => move(-1)}
+        disabled={!navigable}
+        aria-label="Período anterior"
+        className="flex h-8 w-7 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
+      >
+        <CaretLeft size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+      </button>
+      {/* first-letter e não capitalize: "Todo o período" não vira "Todo O Período". */}
+      <span className="min-w-[7.5rem] px-1 text-center text-xs font-bold text-foreground first-letter:uppercase">
+        {label}
+      </span>
+      <button
+        type="button"
+        onClick={() => move(1)}
+        disabled={!navigable}
+        aria-label="Próximo período"
+        className="flex h-8 w-7 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
+      >
+        <CaretRight size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full z-50 mt-2 w-60 overflow-hidden rounded-lg border border-border bg-card shadow-card-hover">
+          <ul className="py-1">
+            {dateGranularityOptions.map((option) => (
+              <li key={option.value}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange({
+                      granularity: option.value,
+                      // Toda troca recomeça de hoje: manter a âncora antiga
+                      // levaria a "setembro" ao virar de anual para mensal.
+                      anchor: dateKey(today),
+                    });
+                    if (option.value !== "custom") setOpen(false);
+                  }}
+                  className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm transition-colors hover:bg-background ${
+                    value.granularity === option.value
+                      ? "font-bold text-foreground"
+                      : "text-muted"
+                  }`}
+                >
+                  {option.label}
+                  {value.granularity === option.value && (
+                    <Check size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+
+          {value.granularity === "custom" && (
+            <div className="space-y-3 border-t border-border px-4 py-3">
+              <Input
+                label="Início"
+                type="date"
+                value={value.customStart}
+                onChange={(event) => onChange({ customStart: event.target.value })}
+              />
+              <Input
+                label="Fim"
+                type="date"
+                value={value.customEnd}
+                onChange={(event) => onChange({ customEnd: event.target.value })}
+              />
+            </div>
+          )}
+
+          <div className="border-t border-border px-4 py-3">
+            <p className="label-caps mb-1.5">Comparar por</p>
+            <div className="flex flex-wrap gap-1">
+              {(
+                [
+                  { value: "date", label: "Lançamento" },
+                  { value: "dueDate", label: "Vencimento" },
+                  { value: "effectiveDate", label: settlementLabel },
+                ] as const
+              ).map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => onChange({ dateField: option.value })}
+                  className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+                    value.dateField === option.value
+                      ? "bg-primary text-white"
+                      : "bg-background text-muted hover:text-foreground"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function InlineFilterButton({
   value,
   categoryOptions,
   accountOptions,
   partyOptions,
   partyLabel,
-  settlementLabel,
   open,
   onToggle,
   onClose,
@@ -1429,8 +1741,6 @@ function InlineFilterButton({
   accountOptions: { value: string; label: string }[];
   partyOptions: { value: string; label: string }[];
   partyLabel: string;
-  /** "Recebimento" nas receitas, "Pagamento" nas despesas. */
-  settlementLabel: string;
   open: boolean;
   onToggle: () => void;
   onClose: () => void;
@@ -1558,28 +1868,6 @@ function InlineFilterButton({
 
           <div className="mt-4 grid grid-cols-1 gap-4 @md:grid-cols-2 @2xl:grid-cols-3">
             <Dropdown
-              label="Período"
-              value={value.period}
-              options={periodOptions}
-              onChange={(period) => onChange({ period: period as PeriodFilter })}
-              className="space-y-2"
-            />
-            <Dropdown
-              label="Período sobre"
-              value={value.dateField}
-              options={[
-                { value: "date", label: "Lançamento" },
-                { value: "dueDate", label: "Vencimento" },
-                { value: "effectiveDate", label: settlementLabel },
-              ]}
-              onChange={(dateField) =>
-                onChange({
-                  dateField: dateField as FinanceFilterState["dateField"],
-                })
-              }
-              className="space-y-2"
-            />
-            <Dropdown
               label="Status"
               value={value.status}
               options={financeStatusFilterOptions}
@@ -1632,23 +1920,6 @@ function InlineFilterButton({
               placeholder="0,00"
             />
           </div>
-
-          {value.period === "custom" && (
-            <div className="mt-4 grid grid-cols-1 gap-4 border-t border-border pt-4 @md:grid-cols-2 @2xl:grid-cols-3">
-              <Input
-                label="Início"
-                type="date"
-                value={value.customStart}
-                onChange={(event) => onChange({ customStart: event.target.value })}
-              />
-              <Input
-                label="Fim"
-                type="date"
-                value={value.customEnd}
-                onChange={(event) => onChange({ customEnd: event.target.value })}
-              />
-            </div>
-          )}
 
           <div className="mt-5 flex flex-col gap-3 border-t border-border pt-4 @sm:flex-row @sm:items-center @sm:justify-between">
             <p className="text-xs text-muted">
@@ -3806,14 +4077,16 @@ export function FinancePage() {
       : ((monthProfit - previousMonthProfit) / Math.abs(previousMonthProfit)) * 100;
   const growthPositive = monthGrowth >= 0;
 
-  const revenueRange = getPeriodRange(
-    revenueFilters.period,
+  const revenueRange = resolveDateRange(
+    revenueFilters.granularity,
+    revenueFilters.anchor,
     revenueFilters.customStart,
     revenueFilters.customEnd,
     today
   );
-  const expenseRange = getPeriodRange(
-    expenseFilters.period,
+  const expenseRange = resolveDateRange(
+    expenseFilters.granularity,
+    expenseFilters.anchor,
     expenseFilters.customStart,
     expenseFilters.customEnd,
     today
@@ -5879,7 +6152,7 @@ export function FinancePage() {
                 accountOptions={activeAccountOptions}
                 onBulkAssignAccount={handleBulkAssignAccount}
                 emptyMessage="Nenhuma receita encontrada."
-                groupByMonth={revenueFilters.period !== "all"}
+                groupByMonth={revenueFilters.granularity !== "all"}
                 editingId={editingRevenueId}
                 editForm={
                   editingRevenueId ? (
@@ -5903,13 +6176,21 @@ export function FinancePage() {
                 onChangePaymentStatus={handleChangePaymentStatus}
                 onUpdateNotes={handleUpdateTransactionNotes}
                 filter={
+                  <>
+                  <DateRangeFilter
+                    value={revenueFilters}
+                    settlementLabel="Recebimento"
+                    today={today}
+                    onChange={(patch) =>
+                      setRevenueFilters((prev) => ({ ...prev, ...patch }))
+                    }
+                  />
                   <InlineFilterButton
                     value={revenueFilters}
                     categoryOptions={revenueCategoryFilterOptions}
                     accountOptions={accountFilterOptions}
                     partyOptions={revenueClientFilterOptions}
                     partyLabel="Cliente"
-                    settlementLabel="Recebimento"
                     open={showRevenueFilter}
                     onToggle={() => setShowRevenueFilter(true)}
                     onClose={() => setShowRevenueFilter(false)}
@@ -5926,6 +6207,7 @@ export function FinancePage() {
                     }
                     ariaLabel="Filtros de receitas"
                   />
+                  </>
                 }
                 onDeleteTransaction={handleDeleteTransaction}
               />
@@ -6017,13 +6299,21 @@ export function FinancePage() {
                 }
                 groupInstallments
                 filter={
+                  <>
+                  <DateRangeFilter
+                    value={expenseFilters}
+                    settlementLabel="Pagamento"
+                    today={today}
+                    onChange={(patch) =>
+                      setExpenseFilters((prev) => ({ ...prev, ...patch }))
+                    }
+                  />
                   <InlineFilterButton
                     value={expenseFilters}
                     categoryOptions={expenseCategoryFilterOptions}
                     accountOptions={accountFilterOptions}
                     partyOptions={expenseSupplierFilterOptions}
                     partyLabel="Fornecedor"
-                    settlementLabel="Pagamento"
                     open={showExpenseFilter}
                     onToggle={() => setShowExpenseFilter(true)}
                     onClose={() => setShowExpenseFilter(false)}
@@ -6040,6 +6330,7 @@ export function FinancePage() {
                     }
                     ariaLabel="Filtros de despesas"
                   />
+                  </>
                 }
                 onEditTransaction={handleEditExpense}
                 onDeleteTransaction={handleDeleteTransaction}
