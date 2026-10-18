@@ -137,6 +137,7 @@ interface FinancialTransaction {
   payment_status: PaymentStatus;
   notes: string | null;
   items: unknown;
+  invoice_number: string | null;
   transaction_date: string;
   effective_date: string | null;
   due_date: string | null;
@@ -384,6 +385,7 @@ interface FinanceEntry {
   paymentStatus?: PaymentStatus;
   notes?: string;
   items?: TransactionItem[];
+  invoiceNumber?: string;
   installmentGroupId?: string | null;
   installmentNumber?: number | null;
   installmentTotal?: number | null;
@@ -409,6 +411,7 @@ interface TransactionItem {
 interface TransactionForm {
   description: string;
   amount: string;
+  invoiceNumber: string;
   items: TransactionItem[];
   notes: string;
   date: string;
@@ -684,6 +687,7 @@ const initialRevenueForm: TransactionForm = {
   supplierId: categoryFilterAll,
   installmentsEnabled: false,
   installmentCount: "3",
+  invoiceNumber: "",
   items: [],
   notes: "",
 };
@@ -700,6 +704,7 @@ const initialExpenseForm: TransactionForm = {
   supplierId: categoryFilterAll,
   installmentsEnabled: false,
   installmentCount: "3",
+  invoiceNumber: "",
   items: [],
   notes: "",
 };
@@ -1011,7 +1016,7 @@ function formatSupplierSaveError(message: string) {
 }
 
 const TRANSACTION_SELECT_PHASE3 =
-  "id, type, description, amount, category, category_id, account_id, service_order_id, supplier_id, product_id, source, payment_status, notes, items, transaction_date, effective_date, due_date, installment_group_id, installment_number, installment_total, created_at";
+  "id, type, description, amount, category, category_id, account_id, service_order_id, supplier_id, product_id, source, payment_status, notes, items, invoice_number, transaction_date, effective_date, due_date, installment_group_id, installment_number, installment_total, created_at";
 const TRANSACTION_SELECT_PHASE2 =
   "id, type, description, amount, category, category_id, account_id, service_order_id, supplier_id, product_id, source, payment_status, notes, transaction_date, effective_date, due_date, installment_group_id, installment_number, installment_total, created_at";
 const TRANSACTION_SELECT_CASHFLOW =
@@ -1048,6 +1053,8 @@ function normalizeTransactionRow(
         ? normalizePaymentStatus(row.payment_status)
         : fallback?.payment_status ?? "pago",
     items: row.items ?? [],
+    invoice_number:
+      typeof row.invoice_number === "string" ? row.invoice_number : null,
     notes:
       "notes" in row
         ? typeof row.notes === "string"
@@ -2103,6 +2110,40 @@ function TransactionList({
   const showPayment = Boolean(onChangePaymentStatus);
   const showNotes = Boolean(onUpdateNotes);
   const labelColumnTitle = accent === "expense" ? "Fornecedor" : "Categoria";
+  // Nota fiscal e parcela são conversa de despesa: receita da agenda não tem
+  // nem uma nem outra.
+  const isExpense = accent === "expense";
+
+  // Resumo do que está na tela: muda junto com o filtro, de propósito.
+  const summary = useMemo(() => {
+    const buckets = {
+      overdue: { count: 0, total: 0 },
+      settled: { count: 0, total: 0 },
+      upcoming: { count: 0, total: 0 },
+      all: { count: 0, total: 0 },
+    };
+
+    for (const entry of entries) {
+      buckets.all.count += 1;
+      buckets.all.total += entry.amount;
+
+      if (entry.paymentStatus === "cancelado") continue;
+      if (entry.paymentStatus === "pago") {
+        buckets.settled.count += 1;
+        buckets.settled.total += entry.amount;
+        continue;
+      }
+      const late = isOverdue(
+        { payment_status: entry.paymentStatus, due_date: entry.dueDate },
+        todayKeyValue
+      );
+      const bucket = late ? buckets.overdue : buckets.upcoming;
+      bucket.count += 1;
+      bucket.total += entry.amount;
+    }
+
+    return buckets;
+  }, [entries, todayKeyValue]);
   const canEditPaymentStatus = (_entry: FinanceEntry) => true;
 
   // Separate fixed columns so OBS / status / edit stay aligned across rows.
@@ -2111,7 +2152,9 @@ function TransactionList({
     // Cabe "15 out  Recebido 15 out", a combinação mais larga das duas abas.
     "168px",
     "minmax(0, 1fr)",
-    "150px",
+    isExpense ? "96px" : null,
+    "140px",
+    isExpense ? "72px" : null,
     "110px",
     showPayment ? "108px" : null,
     "56px",
@@ -2192,8 +2235,50 @@ function TransactionList({
           </button>
         </div>
       )}
+      <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+        {(
+          [
+            {
+              key: "overdue",
+              label: "Em atraso",
+              bucket: summary.overdue,
+              tone: "border-danger/30 bg-danger/5 text-danger",
+            },
+            {
+              key: "settled",
+              label: isExpense ? "Pago" : "Recebido",
+              bucket: summary.settled,
+              tone: "border-border bg-card text-success",
+            },
+            {
+              key: "upcoming",
+              label: isExpense ? "A pagar" : "A receber",
+              bucket: summary.upcoming,
+              tone: "border-border bg-card text-warning",
+            },
+            {
+              key: "all",
+              label: "Total",
+              bucket: summary.all,
+              tone: "border-border bg-card text-foreground",
+            },
+          ] as const
+        ).map((card) => (
+          <div
+            key={card.key}
+            className={`rounded-lg border px-3 py-2.5 ${card.tone}`}
+          >
+            <p className="label-caps text-muted">
+              {card.label} ({card.bucket.count})
+            </p>
+            <p className="mt-0.5 text-base font-bold">
+              {formatCurrency(card.bucket.total)}
+            </p>
+          </div>
+        ))}
+      </div>
       <div className="overflow-x-auto">
-        <div className="min-w-[980px]">
+        <div className={isExpense ? "min-w-[1120px]" : "min-w-[960px]"}>
         <div
           className="grid items-center gap-x-4 border-b border-border px-3 py-3 text-xs font-semibold text-muted"
           style={{ gridTemplateColumns }}
@@ -2213,6 +2298,7 @@ function TransactionList({
             sort={sort}
             onSort={toggleSort}
           />
+          {isExpense && <span>Nota fiscal</span>}
           <SortableHeader
             label={labelColumnTitle}
             icon={accent === "expense" ? Wallet : ChartDonut}
@@ -2220,6 +2306,7 @@ function TransactionList({
             sort={sort}
             onSort={toggleSort}
           />
+          {isExpense && <span className="text-center">Parcela</span>}
           <SortableHeader
             label="Valor"
             icon={accent === "expense" ? TrendDown : TrendUp}
@@ -2448,9 +2535,21 @@ function TransactionList({
                   {metaParts.join(" · ")}
                 </p>
               </div>
+              {isExpense && (
+                <div className="min-w-0 truncate text-sm text-muted">
+                  {entry.invoiceNumber || "-"}
+                </div>
+              )}
               <div className="min-w-0 truncate text-sm font-medium text-foreground">
                 {accent === "expense" ? entry.supplierName ?? "-" : entry.category}
               </div>
+              {isExpense && (
+                <div className="text-center text-sm text-muted">
+                  {entry.installmentNumber && entry.installmentTotal
+                    ? `${entry.installmentNumber}/${entry.installmentTotal}`
+                    : "-"}
+                </div>
+              )}
               <div
                 className={`text-sm font-bold ${
                   isRevenue ? "text-success" : "text-danger"
@@ -2646,9 +2745,17 @@ function TransactionList({
                       {hasOverdue ? " · parcela vencida" : ""}
                     </p>
                   </div>
+                  {isExpense && (
+                    <div className="min-w-0 truncate text-sm text-muted">
+                      {row.groupEntries[0]?.invoiceNumber || "-"}
+                    </div>
+                  )}
                   <div className="text-sm font-medium text-foreground">
                     {row.groupEntries[0]?.supplierName ?? "-"}
                   </div>
+                  {isExpense && (
+                    <div className="text-center text-sm text-muted">{total}x</div>
+                  )}
                   <div className="text-sm font-bold text-danger">{formatCurrency(amount)}</div>
                   {showPayment && <span />}
                   <span className="flex items-center justify-end gap-0.5">
@@ -2891,6 +2998,14 @@ function TransactionFormCard({
             value={form.supplierId}
             options={supplierOptions}
             onChange={(supplierId) => onChange({ supplierId })}
+          />
+        )}
+        {showItems && (
+          <Input
+            label="Nota fiscal (opcional)"
+            value={form.invoiceNumber}
+            onChange={(event) => onChange({ invoiceNumber: event.target.value })}
+            placeholder="1259"
           />
         )}
         <Input
@@ -3531,6 +3646,7 @@ export function FinancePage() {
         paymentStatus,
         notes: transaction.notes ?? "",
         items: transactionItemsFromRow(transaction.items),
+        invoiceNumber: transaction.invoice_number ?? undefined,
         installmentGroupId: transaction.installment_group_id,
         installmentNumber: transaction.installment_number,
         installmentTotal: transaction.installment_total,
@@ -4155,6 +4271,7 @@ export function FinancePage() {
       due_date: dueDate,
       transaction_date: form.date,
       items: transactionItemsToRow(form.items),
+      invoice_number: form.invoiceNumber.trim() || null,
       notes: form.notes.trim() || null,
     };
 
@@ -4229,9 +4346,10 @@ export function FinancePage() {
           isMissingColumnError(updateError, "account_id") ||
           isMissingColumnError(updateError, "effective_date") ||
           isMissingColumnError(updateError, "due_date") ||
-          isMissingColumnError(updateError, "items"))
+          isMissingColumnError(updateError, "items") ||
+          isMissingColumnError(updateError, "invoice_number"))
       ) {
-        const { category_id: _categoryId, account_id: _accountId, effective_date: _effectiveDate, due_date: _dueDate, items: _items, ...legacyPayload } =
+        const { category_id: _categoryId, account_id: _accountId, effective_date: _effectiveDate, due_date: _dueDate, items: _items, invoice_number: _invoiceNumber, ...legacyPayload } =
           transactionPayload;
         const legacyCashflow = await supabase
           .from("financial_transactions")
@@ -4351,9 +4469,10 @@ export function FinancePage() {
         isMissingColumnError(insertError, "account_id") ||
         isMissingColumnError(insertError, "effective_date") ||
         isMissingColumnError(insertError, "due_date") ||
-        isMissingColumnError(insertError, "items"))
+        isMissingColumnError(insertError, "items") ||
+        isMissingColumnError(insertError, "invoice_number"))
     ) {
-      const { category_id: _categoryId, account_id: _accountId, effective_date: _effectiveDate, due_date: _dueDate, items: _items, ...legacyPayload } =
+      const { category_id: _categoryId, account_id: _accountId, effective_date: _effectiveDate, due_date: _dueDate, items: _items, invoice_number: _invoiceNumber, ...legacyPayload } =
         transactionPayload;
       const legacyCashflow = await supabase
         .from("financial_transactions")
@@ -4411,6 +4530,7 @@ export function FinancePage() {
       supplierId: categoryFilterAll,
       installmentsEnabled: false,
       installmentCount: "3",
+      invoiceNumber: entry.invoiceNumber ?? "",
       items: entry.items ?? [],
       notes: entry.notes ?? "",
     });
@@ -4641,6 +4761,7 @@ export function FinancePage() {
       supplierId: entry.supplierId ?? categoryFilterAll,
       installmentsEnabled: false,
       installmentCount: "3",
+      invoiceNumber: entry.invoiceNumber ?? "",
       items: entry.items ?? [],
       notes: entry.notes ?? "",
     });
