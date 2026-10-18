@@ -13,6 +13,7 @@ import {
   EnvelopeSimple,
   Faders,
   Funnel,
+  MagnifyingGlass,
   MagnifyingGlassPlus,
   Package,
   Stack,
@@ -30,6 +31,7 @@ import { createClient } from "@/lib/supabase/client";
 import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { formatCurrency, formatPhone, normalizeOptionalPhone } from "@/lib/utils/format";
 import { useBodyScrollLock } from "@/lib/utils/body-scroll-lock";
+import { formatCnpj, lookupCnpj } from "@/lib/cnpj/lookup";
 import {
   createProductId,
   createProductPriceHistoryId,
@@ -713,6 +715,10 @@ export function ProductsPage() {
   const [editingSupplierId, setEditingSupplierId] = useState<string | null>(null);
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
   const [supplierFormOpen, setSupplierFormOpen] = useState(false);
+  const [cnpjLoading, setCnpjLoading] = useState(false);
+  const [cnpjMessage, setCnpjMessage] = useState<
+    { tone: "error" | "warning" | "success"; text: string } | null
+  >(null);
   const [supplierError, setSupplierError] = useState<string | null>(null);
   const [savingSupplier, setSavingSupplier] = useState(false);
   const [typeOptions, setTypeOptions] =
@@ -988,6 +994,39 @@ export function ProductsPage() {
 
   function updateSupplierForm(patch: Partial<SupplierForm>) {
     setSupplierForm((prev) => ({ ...prev, ...patch }));
+  }
+
+  async function handleCnpjLookup() {
+    setCnpjMessage(null);
+    setCnpjLoading(true);
+    try {
+      const data = await lookupCnpj(supplierForm.document);
+      setSupplierForm((prev) => ({
+        ...prev,
+        document: data.cnpj,
+        // O que já foi digitado manda: a consulta preenche o que está vazio,
+        // não reescreve o que você corrigiu à mão.
+        name: prev.name.trim() || data.nomeFantasia || data.razaoSocial,
+        phone: prev.phone.trim() || data.telefone,
+        email: prev.email.trim() || data.email,
+        cityState: prev.cityState.trim() || data.cidadeUf,
+      }));
+      setCnpjMessage(
+        data.ativa
+          ? { tone: "success", text: `${data.razaoSocial} · dados preenchidos.` }
+          : {
+              tone: "warning",
+              text: `${data.razaoSocial} · situação ${data.situacao.toLowerCase()} na Receita.`,
+            }
+      );
+    } catch (err) {
+      setCnpjMessage({
+        tone: "error",
+        text: err instanceof Error ? err.message : "Não foi possível consultar.",
+      });
+    } finally {
+      setCnpjLoading(false);
+    }
   }
 
   function openSupplierForm() {
@@ -2347,12 +2386,47 @@ export function ProductsPage() {
                 onChange={(event) => updateSupplierForm({ email: event.target.value })}
                 placeholder="contato@fornecedor.com"
               />
-              <Input
-                label="CNPJ"
-                value={supplierForm.document}
-                onChange={(event) => updateSupplierForm({ document: event.target.value })}
-                placeholder="00.000.000/0001-00"
-              />
+              <div className="md:col-span-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <Input
+                    label="CNPJ"
+                    value={supplierForm.document}
+                    onChange={(event) => {
+                      setCnpjMessage(null);
+                      updateSupplierForm({ document: event.target.value });
+                    }}
+                    onBlur={(event) =>
+                      updateSupplierForm({ document: formatCnpj(event.target.value) })
+                    }
+                    placeholder="00.000.000/0001-00"
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    loading={cnpjLoading}
+                    disabled={!supplierForm.document.trim()}
+                    onClick={() => void handleCnpjLookup()}
+                    className="sm:w-auto"
+                  >
+                    <MagnifyingGlass size={16} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
+                    Buscar na Receita
+                  </Button>
+                </div>
+                {cnpjMessage && (
+                  <p
+                    className={`mt-2 text-xs font-medium ${
+                      cnpjMessage.tone === "error"
+                        ? "text-danger"
+                        : cnpjMessage.tone === "warning"
+                          ? "text-warning"
+                          : "text-success"
+                    }`}
+                  >
+                    {cnpjMessage.text}
+                  </p>
+                )}
+              </div>
               <Input
                 label="Cidade/UF"
                 value={supplierForm.cityState}
