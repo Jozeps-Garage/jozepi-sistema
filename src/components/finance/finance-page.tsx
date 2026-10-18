@@ -535,12 +535,15 @@ const financeOriginFilterOptions = [
 
 function createFinanceFilterState(
   customStart: string,
-  customEnd: string
+  customEnd: string,
+  /** Despesa é conta a pagar, então a pergunta padrão dela é o vencimento.
+   *  Receita nasce de serviço prestado: a data que importa é o lançamento. */
+  dateField: FinanceFilterState["dateField"] = "date"
 ): FinanceFilterState {
   return {
     granularity: "all",
     anchor: customEnd,
-    dateField: "date",
+    dateField,
     customStart,
     customEnd,
     search: "",
@@ -1557,13 +1560,10 @@ const INLINE_FILTER_EXIT_MS = 300;
  */
 function DateRangeFilter({
   value,
-  settlementLabel,
   today,
   onChange,
 }: {
   value: FinanceFilterState;
-  /** "Recebimento" nas receitas, "Pagamento" nas despesas. */
-  settlementLabel: string;
   today: Date;
   onChange: (patch: Partial<FinanceFilterState>) => void;
 }) {
@@ -1691,35 +1691,6 @@ function DateRangeFilter({
               />
             </div>
           )}
-
-          <div className="border-t border-border px-4 py-3">
-            <p className="label-caps">Filtrar pela data de</p>
-            <p className="mb-2 mt-0.5 text-[11px] leading-snug text-muted">
-              Qual das três datas o período acima considera.
-            </p>
-            <div className="flex flex-wrap gap-1">
-              {(
-                [
-                  { value: "date", label: "Lançamento" },
-                  { value: "dueDate", label: "Vencimento" },
-                  { value: "effectiveDate", label: settlementLabel },
-                ] as const
-              ).map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => onChange({ dateField: option.value })}
-                  className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
-                    value.dateField === option.value
-                      ? "bg-primary text-white"
-                      : "bg-background text-muted hover:text-foreground"
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       )}
     </div>
@@ -1732,6 +1703,7 @@ function InlineFilterButton({
   accountOptions,
   partyOptions,
   partyLabel,
+  settlementLabel,
   open,
   onToggle,
   onClose,
@@ -1744,6 +1716,8 @@ function InlineFilterButton({
   accountOptions: { value: string; label: string }[];
   partyOptions: { value: string; label: string }[];
   partyLabel: string;
+  /** "Recebimento" nas receitas, "Pagamento" nas despesas. */
+  settlementLabel: string;
   open: boolean;
   onToggle: () => void;
   onClose: () => void;
@@ -1922,6 +1896,35 @@ function InlineFilterButton({
               onChange={(event) => onChange({ maxAmount: event.target.value })}
               placeholder="0,00"
             />
+          </div>
+
+          <div className="mt-4 border-t border-border pt-4">
+            <p className="label-caps">Filtrar pela data de</p>
+            <p className="mb-2 mt-0.5 text-xs text-muted">
+              Qual das três datas o período escolhido no calendário considera.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {(
+                [
+                  { value: "date", label: "Lançamento" },
+                  { value: "dueDate", label: "Vencimento" },
+                  { value: "effectiveDate", label: settlementLabel },
+                ] as const
+              ).map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => onChange({ dateField: option.value })}
+                  className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    value.dateField === option.value
+                      ? "bg-primary text-white"
+                      : "bg-background text-muted hover:text-foreground"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="mt-5 flex flex-col gap-3 border-t border-border pt-4 @sm:flex-row @sm:items-center @sm:justify-between">
@@ -3582,7 +3585,11 @@ export function FinancePage() {
     createFinanceFilterState(dateKey(startOfMonth(today)), dateKey(today))
   );
   const [expenseFilters, setExpenseFilters] = useState<FinanceFilterState>(() =>
-    createFinanceFilterState(dateKey(startOfMonth(today)), dateKey(today))
+    createFinanceFilterState(
+      dateKey(startOfMonth(today)),
+      dateKey(today),
+      "dueDate"
+    )
   );
   const [showFixedCostForm, setShowFixedCostForm] = useState(false);
   const [editingFixedCostId, setEditingFixedCostId] = useState<string | null>(null);
@@ -6182,7 +6189,6 @@ export function FinancePage() {
                   <>
                   <DateRangeFilter
                     value={revenueFilters}
-                    settlementLabel="Recebimento"
                     today={today}
                     onChange={(patch) =>
                       setRevenueFilters((prev) => ({ ...prev, ...patch }))
@@ -6194,6 +6200,7 @@ export function FinancePage() {
                     accountOptions={accountFilterOptions}
                     partyOptions={revenueClientFilterOptions}
                     partyLabel="Cliente"
+                    settlementLabel="Recebimento"
                     open={showRevenueFilter}
                     onToggle={() => setShowRevenueFilter(true)}
                     onClose={() => setShowRevenueFilter(false)}
@@ -6305,7 +6312,6 @@ export function FinancePage() {
                   <>
                   <DateRangeFilter
                     value={expenseFilters}
-                    settlementLabel="Pagamento"
                     today={today}
                     onChange={(patch) =>
                       setExpenseFilters((prev) => ({ ...prev, ...patch }))
@@ -6317,6 +6323,7 @@ export function FinancePage() {
                     accountOptions={accountFilterOptions}
                     partyOptions={expenseSupplierFilterOptions}
                     partyLabel="Fornecedor"
+                    settlementLabel="Pagamento"
                     open={showExpenseFilter}
                     onToggle={() => setShowExpenseFilter(true)}
                     onClose={() => setShowExpenseFilter(false)}
@@ -6327,7 +6334,8 @@ export function FinancePage() {
                       setExpenseFilters(
                         createFinanceFilterState(
                           dateKey(startOfMonth(today)),
-                          dateKey(today)
+                          dateKey(today),
+                          "dueDate"
                         )
                       )
                     }
