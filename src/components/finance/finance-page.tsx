@@ -503,7 +503,7 @@ function matchesAccountFilter(entry: FinanceEntry, filter: string) {
  */
 type FinanceFilterState = {
   period: PeriodFilter;
-  /** Qual data o período compara: lançamento, vencimento ou efetivação. */
+  /** Qual data o período compara: lançamento, vencimento ou pagamento. */
   dateField: "date" | "dueDate" | "effectiveDate";
   customStart: string;
   customEnd: string;
@@ -2947,7 +2947,7 @@ function TransactionFormCard({
         )}
         {!sharedFieldsOnly && form.paymentStatus === "pago" && !form.installmentsEnabled && (
           <Input
-            label="Data de efetivação"
+            label="Data de pagamento"
             type="date"
             value={form.effectiveDate}
             onChange={(event) => onChange({ effectiveDate: event.target.value })}

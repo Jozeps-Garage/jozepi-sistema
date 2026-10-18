@@ -42,7 +42,7 @@ export function sumPaidRevenueInRange(
 
 /**
  * Receita do mês no regime de caixa: lançamentos tipo receita já pagos,
- * pela data de efetivação (com fallback para a data de lançamento).
+ * pela data de pagamento (com fallback para a data de lançamento).
  */
 export async function getMonthlyRevenue(
   supabase: SupabaseClient,
