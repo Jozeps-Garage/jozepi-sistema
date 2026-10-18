@@ -2255,8 +2255,6 @@ function TransactionList({
   emptyDescription,
   accent = "default",
   accountNames,
-  accountOptions,
-  onBulkAssignAccount,
   onEditGroup,
   onDeleteGroup,
   filter,
@@ -2274,8 +2272,6 @@ function TransactionList({
   emptyDescription?: string;
   accent?: "default" | "expense";
   accountNames?: Map<string, string>;
-  accountOptions?: { value: string; label: string }[];
-  onBulkAssignAccount?: (ids: string[], accountId: string) => Promise<void>;
   onEditGroup?: (entries: FinanceEntry[]) => void;
   onDeleteGroup?: (entries: FinanceEntry[]) => void;
   filter?: React.ReactNode;
@@ -2289,30 +2285,9 @@ function TransactionList({
   onUpdateNotes?: (entry: FinanceEntry, notes: string | null) => Promise<void>;
 }) {
   const [page, setPage] = useState(0);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkAccountId, setBulkAccountId] = useState("");
-  const [bulkSaving, setBulkSaving] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   // Uma linha aberta por vez: a página já é longa.
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [selectionMode, setSelectionMode] = useState(false);
-  const selectionAvailable = Boolean(onBulkAssignAccount && accountOptions?.length);
-  const canSelect = selectionAvailable && selectionMode;
-
-  function exitSelection() {
-    setSelectionMode(false);
-    setSelectedIds(new Set());
-    setBulkAccountId("");
-  }
-
-  function toggleSelected(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
   const editRowRef = useRef<HTMLDivElement>(null);
   const todayKeyValue = todayDateKey();
 
@@ -2425,7 +2400,6 @@ function TransactionList({
 
   // Separate fixed columns so OBS / status / edit stay aligned across rows.
   const gridTemplateColumns = [
-    canSelect ? "28px" : null,
     // Cabe "15 out  Recebido 15 out", a combinação mais larga das duas abas.
     "168px",
     "minmax(0, 1fr)",
@@ -2454,63 +2428,8 @@ function TransactionList({
 
   return (
     <div className="w-full">
-      {(filter || selectionAvailable) && (
-        <div className="mb-2 flex items-center justify-end gap-2 px-3">
-          {selectionAvailable && !selectionMode && (
-            <button
-              type="button"
-              onClick={() => setSelectionMode(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-muted transition-colors hover:text-foreground"
-            >
-              <ListChecks size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
-              Selecionar
-            </button>
-          )}
-          {filter}
-        </div>
-      )}
-      {canSelect && (
-        <div className="mb-2 flex flex-wrap items-end gap-3 rounded-lg border border-premium/30 bg-premium/5 px-3 py-2.5">
-          <p className="pb-2.5 text-sm font-semibold text-foreground">
-            {selectedIds.size === 0
-              ? "Marque os lançamentos"
-              : `${selectedIds.size} selecionado${selectedIds.size === 1 ? "" : "s"}`}
-          </p>
-          <Dropdown
-            label="Mover para a conta"
-            value={bulkAccountId}
-            options={accountOptions!}
-            placeholder="Selecione a conta"
-            onChange={setBulkAccountId}
-            className="min-w-[13rem]"
-          />
-          <Button
-            type="button"
-            variant="success"
-            loading={bulkSaving}
-            disabled={!bulkAccountId || selectedIds.size === 0}
-            onClick={async () => {
-              if (!bulkAccountId || selectedIds.size === 0) return;
-              setBulkSaving(true);
-              try {
-                await onBulkAssignAccount!(Array.from(selectedIds), bulkAccountId);
-                exitSelection();
-              } finally {
-                setBulkSaving(false);
-              }
-            }}
-            className="mb-0.5"
-          >
-            Atribuir
-          </Button>
-          <button
-            type="button"
-            onClick={exitSelection}
-            className="mb-3 text-xs font-semibold text-muted transition-colors hover:text-foreground"
-          >
-            Cancelar
-          </button>
-        </div>
+      {filter && (
+        <div className="mb-2 flex items-center justify-end gap-2 px-3">{filter}</div>
       )}
       <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
         {(
@@ -2560,7 +2479,6 @@ function TransactionList({
           className="grid items-center gap-x-4 border-b border-border px-3 py-3 text-xs font-semibold text-muted"
           style={{ gridTemplateColumns }}
         >
-          {canSelect && <span />}
           <SortableHeader
             label="Data"
             icon={CalendarBlank}
@@ -2738,16 +2656,6 @@ function TransactionList({
               } ${cardBackground}`}
               style={{ gridTemplateColumns }}
             >
-              {canSelect && (
-                <input
-                  type="checkbox"
-                  checked={selectedIds.has(entry.id)}
-                  onChange={() => toggleSelected(entry.id)}
-                  onClick={(event) => event.stopPropagation()}
-                  aria-label={`Selecionar ${entry.description}`}
-                  className="h-4 w-4 rounded border-border"
-                />
-              )}
               <div className="flex min-w-0 items-center gap-2 text-xs font-semibold">
                 <span className="flex shrink-0 items-center gap-1.5 text-muted">
                   {open ? (
@@ -3000,8 +2908,7 @@ function TransactionList({
                   }`}
                   style={{ gridTemplateColumns }}
                 >
-                  {canSelect && <span />}
-                  <div
+                          <div
                     className={`flex items-center gap-1.5 text-xs font-semibold ${
                       hasOverdue ? "text-danger" : "text-muted"
                     }`}
@@ -4963,30 +4870,6 @@ export function FinancePage() {
     setError(updateError.message);
   }
 
-  async function handleBulkAssignAccount(ids: string[], accountId: string) {
-    if (ids.length === 0 || !accountId) return;
-    setError(null);
-
-    const { error: updateError } = await supabase
-      .from("financial_transactions")
-      .update({ account_id: accountId })
-      .in("id", ids)
-      .eq("workshop_id", workshopId);
-
-    if (updateError) {
-      setError(updateError.message);
-      return;
-    }
-
-    setTransactions((prev) =>
-      prev.map((transaction) =>
-        ids.includes(transaction.id)
-          ? { ...transaction, account_id: accountId }
-          : transaction
-      )
-    );
-  }
-
   async function handleUpdateTransactionNotes(
     entry: FinanceEntry,
     notes: string | null
@@ -6159,8 +6042,6 @@ export function FinancePage() {
               <TransactionList
                 entries={filteredRevenueEntries}
                 accountNames={accountNames}
-                accountOptions={activeAccountOptions}
-                onBulkAssignAccount={handleBulkAssignAccount}
                 emptyMessage="Nenhuma receita encontrada."
                 groupByMonth={revenueFilters.granularity !== "all"}
                 editingId={editingRevenueId}
@@ -6270,8 +6151,6 @@ export function FinancePage() {
               <TransactionList
                 entries={filteredExpenseEntries}
                 accountNames={accountNames}
-                accountOptions={activeAccountOptions}
-                onBulkAssignAccount={handleBulkAssignAccount}
                 editingId={editingExpenseId}
                 editForm={
                   editingExpenseId ? (
