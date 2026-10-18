@@ -22,6 +22,8 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { ClientFormModal } from "@/components/clients/client-form-modal";
+import { VehicleFormModal } from "@/components/clients/vehicle-form-modal";
+import { syncVehicles } from "@/lib/clients/sync-vehicles";
 import {
   SelectedCatalogItems,
   ServiceCatalogDialog,
@@ -38,7 +40,11 @@ import {
 } from "@/lib/timezone";
 import { ensurePackageServicesInCatalog } from "@/lib/services/packages";
 import { vehicleLabel, vehicleName } from "@/lib/vehicles/format";
-import { type Client, type ClientFormData } from "@/types/client";
+import {
+  type Client,
+  type ClientFormData,
+  type VehicleFormItem,
+} from "@/types/client";
 import {
   fetchWorkshopProfile,
   fetchWorkshopCapacity,
@@ -523,6 +529,8 @@ function AgendaDropdown({
   onSelect,
   onClear,
   clearLabel = "Limpar seleção",
+  createLabel,
+  onCreate,
 }: {
   id: string;
   value: string;
@@ -538,6 +546,9 @@ function AgendaDropdown({
   onSelect: (value: string) => void;
   onClear?: () => void;
   clearLabel?: string;
+  /** Primeira linha da lista: cria o registro que ainda não existe. */
+  createLabel?: string;
+  onCreate?: () => void;
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -601,6 +612,19 @@ function AgendaDropdown({
               placeholder={searchPlaceholder}
               className="mb-2 min-h-11 w-full rounded-lg border border-border bg-background px-3 py-3 text-base font-medium text-foreground placeholder:text-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 sm:min-h-0 sm:py-2.5 sm:text-sm"
             />
+          )}
+          {createLabel && onCreate && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery("");
+                onCreate();
+              }}
+              className="mb-2 flex min-h-11 w-full items-center gap-2 rounded-lg border border-dashed border-success/50 bg-success/5 px-3 py-3 text-left text-sm font-semibold text-success transition-colors hover:border-success hover:bg-success/10 sm:min-h-0 sm:py-2.5"
+            >
+              <Plus size={16} weight={AGENDA_ICON_WEIGHT} aria-hidden />
+              {createLabel}
+            </button>
           )}
           {selectedOption && onClear && (
             <button
@@ -690,6 +714,7 @@ export function AgendaCalendar() {
   const [loadingAppointments, setLoadingAppointments] = useState(true);
   const [savingAppointment, setSavingAppointment] = useState(false);
   const [clientModalOpen, setClientModalOpen] = useState(false);
+  const [vehicleModalOpen, setVehicleModalOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [formClosing, setFormClosing] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
@@ -2046,6 +2071,31 @@ export function AgendaCalendar() {
     setOpenSelectId(null);
   }
 
+  async function handleCreateVehicle(vehicle: VehicleFormItem) {
+    if (!workshopId || !selectedClient) {
+      throw new Error("Selecione um cliente antes de cadastrar o veículo.");
+    }
+
+    const existingIds = selectedClient.vehicles?.map((item) => item.id) ?? [];
+    await syncVehicles(supabase, workshopId, selectedClient.id, [vehicle], []);
+
+    const { data, error } = await fetchClients(supabase, workshopId);
+    if (error) throw new Error(error.message);
+
+    const refreshed = (data as Client[]) ?? [];
+    setClients(refreshed);
+
+    // O veículo novo é o que não estava na lista antes de salvar.
+    const saved = refreshed
+      .find((item) => item.id === selectedClient.id)
+      ?.vehicles?.find((item) => !existingIds.includes(item.id));
+
+    if (saved) {
+      setForm((prev) => ({ ...prev, vehicleId: saved.id }));
+    }
+    setOpenSelectId(null);
+  }
+
   return (
     <>
       <div className="mb-6 border-b border-border">
@@ -2595,6 +2645,11 @@ export function AgendaCalendar() {
                       }));
                       setOpenSelectId(null);
                     }}
+                    createLabel="Novo cliente"
+                    onCreate={() => {
+                      setOpenSelectId(null);
+                      setClientModalOpen(true);
+                    }}
                   />
                   {!loadingClients && clients.length === 0 && (
                     <p className="text-xs text-muted">
@@ -2625,9 +2680,9 @@ export function AgendaCalendar() {
                         : "Cliente sem veículo cadastrado."
                     }
                     options={vehicleOptions}
-                    disabled={
-                      !form.clientId || selectedClientVehicles.length === 0
-                    }
+                    // Só depende do cliente: sem isso, quem não tem veículo
+                    // nenhum não conseguiria abrir a lista para cadastrar um.
+                    disabled={!form.clientId}
                     open={openSelectId === "vehicle"}
                     onToggle={() =>
                       setOpenSelectId((current) =>
@@ -2640,6 +2695,11 @@ export function AgendaCalendar() {
                         vehicleId: value,
                       }));
                       setOpenSelectId(null);
+                    }}
+                    createLabel="Novo veículo"
+                    onCreate={() => {
+                      setOpenSelectId(null);
+                      setVehicleModalOpen(true);
                     }}
                     clearLabel="Limpar veículo"
                     onClear={() => {
@@ -3363,6 +3423,8 @@ export function AgendaCalendar() {
                       onSelect={(value) => { setForm((prev) => ({ ...prev, clientId: value, vehicleId: "" })); setOpenSelectId(null); }}
                       clearLabel="Limpar cliente"
                       onClear={() => { setForm((prev) => ({ ...prev, clientId: "", vehicleId: "" })); setOpenSelectId(null); }}
+                      createLabel="Novo cliente"
+                      onCreate={() => { setOpenSelectId(null); setClientModalOpen(true); }}
                     />
                   </div>
 
@@ -3375,10 +3437,12 @@ export function AgendaCalendar() {
                       placeholder={!form.clientId ? "Selecione um cliente primeiro" : selectedClientVehicles.length === 0 ? "Sem veículo cadastrado" : "Selecione um veículo"}
                       emptyMessage={!form.clientId ? "Selecione um cliente primeiro." : "Sem veículo cadastrado."}
                       options={vehicleOptions}
-                      disabled={!form.clientId || selectedClientVehicles.length === 0}
+                      disabled={!form.clientId}
                       open={openSelectId === "vehicle"}
                       onToggle={() => setOpenSelectId((c) => c === "vehicle" ? null : "vehicle")}
                       onSelect={(value) => { setForm((prev) => ({ ...prev, vehicleId: value })); setOpenSelectId(null); }}
+                      createLabel="Novo veículo"
+                      onCreate={() => { setOpenSelectId(null); setVehicleModalOpen(true); }}
                       clearLabel="Limpar veículo"
                       onClear={() => { setForm((prev) => ({ ...prev, vehicleId: "" })); setOpenSelectId(null); }}
                     />
@@ -3524,6 +3588,14 @@ export function AgendaCalendar() {
         onClose={() => setClientModalOpen(false)}
         onSave={handleCreateClient}
       />
+      {vehicleModalOpen && selectedClient && (
+        <VehicleFormModal
+          client={selectedClient}
+          closing={false}
+          onClose={() => setVehicleModalOpen(false)}
+          onSave={handleCreateVehicle}
+        />
+      )}
       {workshopId ? (
         <ServiceCatalogDialog
           open={catalogOpen}
