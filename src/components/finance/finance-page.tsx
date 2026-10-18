@@ -502,7 +502,7 @@ type FinanceFilterState = {
 };
 
 const financeStatusFilterOptions = [
-  { value: categoryFilterAll, label: "Todos os status" },
+  { value: categoryFilterAll, label: "Todos" },
   { value: "pendente", label: "Pendente" },
   { value: "vencido", label: "Vencido" },
   { value: "pago", label: "Pago" },
@@ -511,7 +511,7 @@ const financeStatusFilterOptions = [
 ];
 
 const financeOriginFilterOptions = [
-  { value: categoryFilterAll, label: "Todas as origens" },
+  { value: categoryFilterAll, label: "Todas" },
   { value: "automatic", label: "Agenda" },
   { value: "fixed", label: "Custo fixo" },
   { value: "manual", label: "Manual" },
@@ -1506,7 +1506,7 @@ function InlineFilterButton({
           role="dialog"
           aria-modal="false"
           aria-label={ariaLabel}
-          className={`finance-inline-filter-card absolute right-0 top-full z-50 mt-2 w-[min(46rem,calc(100vw-2rem))] rounded-lg border border-border bg-card px-6 py-5 shadow-card transition-all duration-300 ease-out ${
+          className={`finance-inline-filter-card @container absolute right-0 top-full z-50 mt-2 max-h-[min(80vh,38rem)] w-[min(46rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-border bg-card px-4 py-5 shadow-card transition-all duration-300 ease-out sm:px-6 ${
             panelVisible
               ? "translate-y-0 opacity-100"
               : "pointer-events-none -translate-y-2 opacity-0"
@@ -1523,7 +1523,7 @@ function InlineFilterButton({
             placeholder="Descrição, cliente, serviço, fornecedor ou observação"
           />
 
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-4 grid grid-cols-1 gap-4 @md:grid-cols-2 @2xl:grid-cols-3">
             <Dropdown
               label="Período"
               value={value.period}
@@ -1535,7 +1535,7 @@ function InlineFilterButton({
               label="Período sobre"
               value={value.dateField}
               options={[
-                { value: "date", label: "Data de lançamento" },
+                { value: "date", label: "Lançamento" },
                 { value: "dueDate", label: "Vencimento" },
                 { value: "effectiveDate", label: settlementLabel },
               ]}
@@ -1583,7 +1583,7 @@ function InlineFilterButton({
             />
           </div>
 
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-4 grid grid-cols-1 gap-4 @md:grid-cols-2 @2xl:grid-cols-3">
             <Input
               label="Valor mínimo"
               inputMode="decimal"
@@ -1601,7 +1601,7 @@ function InlineFilterButton({
           </div>
 
           {value.period === "custom" && (
-            <div className="mt-4 grid grid-cols-1 gap-4 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="mt-4 grid grid-cols-1 gap-4 border-t border-border pt-4 @md:grid-cols-2 @2xl:grid-cols-3">
               <Input
                 label="Início"
                 type="date"
@@ -1617,7 +1617,7 @@ function InlineFilterButton({
             </div>
           )}
 
-          <div className="mt-5 flex items-center justify-between gap-3 border-t border-border pt-4">
+          <div className="mt-5 flex flex-col gap-3 border-t border-border pt-4 @sm:flex-row @sm:items-center @sm:justify-between">
             <p className="text-xs text-muted">
               {activeCount === 0
                 ? "Nenhum filtro aplicado"
@@ -1630,14 +1630,14 @@ function InlineFilterButton({
                 type="button"
                 variant="secondary"
                 onClick={onClear}
-                className="min-w-[5.5rem]"
+                className="flex-1 @sm:min-w-[5.5rem] @sm:flex-none"
               >
                 Limpar
               </Button>
               <Button
                 type="button"
                 onClick={requestClose}
-                className="min-w-[5.5rem]"
+                className="flex-1 @sm:min-w-[5.5rem] @sm:flex-none"
               >
                 Aplicar
               </Button>
@@ -3463,7 +3463,7 @@ export function FinancePage() {
     today
   );
   const expenseSupplierFilterOptions = [
-    { value: categoryFilterAll, label: "Todos os fornecedores" },
+    { value: categoryFilterAll, label: "Todos" },
     ...suppliers.map((supplier) => ({
       value: supplier.id,
       label: supplier.name,
@@ -3486,7 +3486,7 @@ export function FinancePage() {
     (category) => ({ value: category.id, label: category.name })
   );
   const revenueCategoryFilterOptions = [
-    { value: categoryFilterAll, label: "Todas as categorias" },
+    { value: categoryFilterAll, label: "Todas" },
     ...[...new Set(revenueEntries.map((entry) => entry.category))].map((name) => ({
       value: name,
       label: name,
@@ -3494,7 +3494,7 @@ export function FinancePage() {
   ];
   // Cliente só existe nas receitas que vieram da agenda, e vem como nome.
   const revenueClientFilterOptions = [
-    { value: categoryFilterAll, label: "Todos os clientes" },
+    { value: categoryFilterAll, label: "Todos" },
     ...[
       ...new Set(
         revenueEntries
@@ -3506,12 +3506,12 @@ export function FinancePage() {
       .map((name) => ({ value: name, label: name })),
   ];
   const accountFilterOptions = [
-    { value: categoryFilterAll, label: "Todas as contas" },
+    { value: categoryFilterAll, label: "Todas" },
     { value: unassignedAccountFilter, label: "Sem conta definida" },
     ...accounts.map((account) => ({ value: account.id, label: account.name })),
   ];
   const expenseCategoryFilterOptions = [
-    { value: categoryFilterAll, label: "Todas as categorias" },
+    { value: categoryFilterAll, label: "Todas" },
     ...[...new Set(expenseEntries.map((entry) => entry.category))].map((name) => ({
       value: name,
       label: name,
