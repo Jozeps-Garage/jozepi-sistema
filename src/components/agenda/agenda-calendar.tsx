@@ -2590,24 +2590,12 @@ export function AgendaCalendar() {
                   )}
                 </div>
                 <div className="space-y-2.5">
-                  <div className="flex items-center justify-between gap-3">
-                    <label
-                      htmlFor="agenda-client"
-                      className="block text-sm font-semibold text-foreground"
-                    >
-                      Cliente
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOpenSelectId(null);
-                        setClientModalOpen(true);
-                      }}
-                      className="min-h-11 text-sm font-semibold text-success transition-colors hover:text-success/80 sm:min-h-0 sm:text-xs"
-                    >
-                      Novo cliente
-                    </button>
-                  </div>
+                  <label
+                    htmlFor="agenda-client"
+                    className="block text-sm font-semibold text-foreground"
+                  >
+                    Cliente
+                  </label>
                   <AgendaDropdown
                     id="agenda-client"
                     value={form.clientId}
@@ -2653,7 +2641,8 @@ export function AgendaCalendar() {
                   />
                   {!loadingClients && clients.length === 0 && (
                     <p className="text-xs text-muted">
-                      Nenhum cliente cadastrado. Use Novo cliente para criar.
+                      Nenhum cliente cadastrado. Abra a lista para criar o
+                      primeiro.
                     </p>
                   )}
                 </div>
@@ -3402,12 +3391,7 @@ export function AgendaCalendar() {
 
                   {/* Cliente */}
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <label htmlFor="modal-client" className="text-sm font-semibold text-foreground">Cliente</label>
-                      <button type="button" onClick={() => { setOpenSelectId(null); setClientModalOpen(true); }} className="text-xs font-semibold text-success transition-colors hover:text-success/80">
-                        Novo cliente
-                      </button>
-                    </div>
+                    <label htmlFor="modal-client" className="text-sm font-semibold text-foreground">Cliente</label>
                     <AgendaDropdown
                       id="modal-client"
                       value={form.clientId}
