@@ -522,7 +522,7 @@ function AgendaDropdown({
   options,
   disabled = false,
   open,
-  searchable = false,
+  searchable,
   searchPlaceholder = "Digite para pesquisar",
   noResultsMessage = "Nenhum resultado encontrado.",
   onToggle,
@@ -539,6 +539,7 @@ function AgendaDropdown({
   options: SelectOption[];
   disabled?: boolean;
   open: boolean;
+  /** Omitido, liga sozinho em lista longa. Passe true/false para forçar. */
   searchable?: boolean;
   searchPlaceholder?: string;
   noResultsMessage?: string;
@@ -553,9 +554,11 @@ function AgendaDropdown({
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const selectedOption = options.find((option) => option.value === value);
+  // Mesma régua do Dropdown comum: lista longa ganha busca sozinha.
+  const canSearch = searchable ?? options.length > 6;
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
   const filteredOptions =
-    searchable && normalizedSearchQuery
+    canSearch && normalizedSearchQuery
       ? options.filter((option) =>
           [option.label, option.description]
             .filter(Boolean)
@@ -566,10 +569,10 @@ function AgendaDropdown({
       : options;
 
   useEffect(() => {
-    if (searchable) {
+    if (canSearch) {
       window.setTimeout(() => searchInputRef.current?.focus(), 0);
     }
-  }, [open, searchable]);
+  }, [open, canSearch]);
 
   return (
     <div className="relative">
@@ -597,7 +600,7 @@ function AgendaDropdown({
 
       {open && !disabled && (
         <div className="absolute left-0 right-0 top-full z-50 mt-2 max-h-64 overflow-y-auto rounded-lg border border-border bg-white p-2 shadow-xl ring-1 ring-slate-900/5">
-          {searchable && (
+          {canSearch && (
             <input
               ref={searchInputRef}
               value={searchQuery}

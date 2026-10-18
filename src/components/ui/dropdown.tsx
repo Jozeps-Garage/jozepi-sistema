@@ -24,12 +24,16 @@ interface DropdownProps {
   createPlaceholder?: string;
   onCreateOption?: (label: string) => string | void;
   onDeleteOption?: (value: string) => void;
+  /** Omitido, liga sozinho em lista longa. Passe true/false para forçar. */
   searchable?: boolean;
   searchPlaceholder?: string;
   compact?: boolean;
 }
 
 const DROPDOWN_EXIT_MS = 160;
+/** Daqui para cima rolar a lista custa mais que digitar. Abaixo disso a
+ *  caixa de busca seria mais estorvo que ajuda (status tem seis opções). */
+const DROPDOWN_SEARCH_THRESHOLD = 6;
 const DROPDOWN_ICON_WEIGHT = "light" as const;
 
 export function Dropdown({
@@ -46,7 +50,7 @@ export function Dropdown({
   createPlaceholder = "Digite o nome",
   onCreateOption,
   onDeleteOption,
-  searchable = false,
+  searchable,
   searchPlaceholder = "Buscar...",
   compact = false,
 }: DropdownProps) {
@@ -59,12 +63,13 @@ export function Dropdown({
   const closeTimeoutRef = useRef<number | null>(null);
   const inputId = id ?? label?.toLowerCase().replace(/\s/g, "-") ?? "dropdown";
   const selectedOption = options.find((option) => option.value === value);
+  const canSearch = searchable ?? options.length > DROPDOWN_SEARCH_THRESHOLD;
 
   const visibleOptions = useMemo(() => {
-    if (!searchable || !searchQuery.trim()) return options;
+    if (!canSearch || !searchQuery.trim()) return options;
     const query = searchQuery.trim().toLowerCase();
     return options.filter((option) => option.label.toLowerCase().includes(query));
-  }, [options, searchable, searchQuery]);
+  }, [options, canSearch, searchQuery]);
 
   function clearCloseTimeout() {
     if (closeTimeoutRef.current) {
@@ -193,7 +198,7 @@ export function Dropdown({
             closing ? "dropdown-menu-exit" : "dropdown-menu-enter"
           )}
         >
-          {searchable && (
+          {canSearch && (
             <div className="relative mb-2 shrink-0">
               <MagnifyingGlass
                 size={15}
@@ -211,7 +216,7 @@ export function Dropdown({
             </div>
           )}
           <div role="listbox" aria-labelledby={inputId} className="min-h-0 flex-1 space-y-1 overflow-y-auto">
-            {searchable && visibleOptions.length === 0 && (
+            {canSearch && visibleOptions.length === 0 && (
               <p className="px-3 py-2 text-sm text-muted">Nenhum resultado encontrado.</p>
             )}
             {visibleOptions.map((option) => {
