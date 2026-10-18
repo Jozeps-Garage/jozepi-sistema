@@ -2166,6 +2166,15 @@ function TransactionList({
               : []),
             { label: "Origem", value: originLabel },
           ];
+          // Aberta, a linha e o painel viram um card só: o fundo é o mesmo e a
+          // borda de baixo sai, sobrando só a que separa um card do próximo.
+          const cardBackground = overdue
+            ? "bg-danger/5"
+            : open
+              ? "bg-background"
+              : nested
+                ? "bg-background/40"
+                : "";
 
           return (
             <Fragment key={entry.id}>
@@ -2179,9 +2188,9 @@ function TransactionList({
                 event.preventDefault();
                 setExpandedId(open ? null : entry.id);
               }}
-              className={`grid cursor-pointer items-center gap-x-4 border-b border-border/70 px-3 py-3 transition-colors hover:bg-background/70 ${
-                nested ? "bg-background/40" : ""
-              } ${overdue ? "bg-danger/5" : ""} ${open ? "bg-background/70" : ""}`}
+              className={`grid cursor-pointer items-center gap-x-4 px-3 py-3 transition-colors ${
+                open ? "" : "border-b border-border/70 hover:bg-background/70"
+              } ${cardBackground}`}
               style={{ gridTemplateColumns }}
             >
               {canSelect && (
@@ -2314,7 +2323,7 @@ function TransactionList({
             {open && (
               <div
                 ref={isEditing ? editRowRef : undefined}
-                className={`border-b border-border bg-background px-3 py-4 ${
+                className={`border-b border-border px-3 pb-4 ${cardBackground} ${
                   nested ? "pl-7" : ""
                 }`}
               >
@@ -2333,7 +2342,7 @@ function TransactionList({
                       ))}
                     </dl>
                     {entry.notes && (
-                      <div className="mt-3 border-t border-border pt-3">
+                      <div className="mt-3">
                         <dt className="label-caps">Observação</dt>
                         <dd className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
                           {entry.notes}
