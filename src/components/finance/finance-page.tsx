@@ -1664,6 +1664,8 @@ function monthKeyFromDateStr(dateStr: string): string {
 }
 
 const TRANSACTION_PAGE_SIZE = 30;
+/** Quantos itens os rankings mostram antes de "Ver todos". */
+const RANKING_PREVIEW_SIZE = 5;
 
 const PAYMENT_STATUS_OPTIONS: {
   value: PaymentStatus;
@@ -2973,6 +2975,8 @@ export function FinancePage() {
   const [launchErrors, setLaunchErrors] = useState<Record<string, string>>({});
   const [overviewChartInterval, setOverviewChartInterval] = useState<ChartInterval>("6m");
   const [overviewChartMode, setOverviewChartMode] = useState<ChartMode>("bars");
+  const [showAllServiceRanking, setShowAllServiceRanking] = useState(false);
+  const [showAllClientRanking, setShowAllClientRanking] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [savingTransfer, setSavingTransfer] = useState(false);
   const [transferError, setTransferError] = useState<string | null>(null);
@@ -3731,10 +3735,12 @@ export function FinancePage() {
     });
     return acc;
   }, {});
-  const serviceRanking = Object.entries(serviceRevenue)
+  const serviceRankingAll = Object.entries(serviceRevenue)
     .map(([name, amount]) => ({ name, amount }))
-    .sort((a, b) => b.amount - a.amount)
-    .slice(0, 5);
+    .sort((a, b) => b.amount - a.amount);
+  // O donut continua sendo os cinco primeiros: fatia por fatia, mais que isso
+  // vira rodela ilegível.
+  const serviceRanking = serviceRankingAll.slice(0, RANKING_PREVIEW_SIZE);
   const serviceTotal = serviceRanking.reduce((total, item) => total + item.amount, 0);
   const donutSegments = serviceRanking.reduce<
     { name: string; amount: number; dash: number; offset: number }[]
@@ -3744,7 +3750,7 @@ export function FinancePage() {
     return [...segments, { ...item, dash, offset: -previous }];
   }, []);
 
-  const clientRanking = Object.values(
+  const clientRankingAll = Object.values(
     reportOrders.reduce<Record<string, { name: string; amount: number }>>((acc, order) => {
       const clientName = firstRelation(order.clients)?.name ?? "Cliente não encontrado";
       acc[clientName] = {
@@ -3753,9 +3759,8 @@ export function FinancePage() {
       };
       return acc;
     }, {})
-  )
-    .sort((a, b) => b.amount - a.amount)
-    .slice(0, 5);
+  ).sort((a, b) => b.amount - a.amount);
+  const clientRanking = clientRankingAll.slice(0, RANKING_PREVIEW_SIZE);
 
   const todayOrders = reportOrders.filter((order) => {
     const orderDate = getOrderDate(order);
@@ -5282,21 +5287,61 @@ export function FinancePage() {
                           />
                         ))}
                       </svg>
-                      <div className="space-y-3">
-                        {serviceRanking.map((item, index) => (
-                          <div key={item.name} className="flex items-center justify-between gap-3 rounded-lg bg-background px-4 py-3">
-                            <span className="flex min-w-0 items-center gap-2.5 truncate text-sm font-semibold text-foreground">
-                              <span
-                                className="h-3 w-3 shrink-0 rounded-full"
-                                style={{ background: DONUT_COLORS[index % DONUT_COLORS.length] }}
-                              />
-                              {index + 1}. {item.name}
-                            </span>
-                            <span className="shrink-0 text-sm font-bold text-foreground">
-                              {formatCurrency(item.amount)}
-                            </span>
-                          </div>
-                        ))}
+                      <div>
+                        <div
+                          className={`space-y-3 ${
+                            showAllServiceRanking
+                              ? "max-h-80 overflow-y-auto pr-1"
+                              : ""
+                          }`}
+                        >
+                          {(showAllServiceRanking
+                            ? serviceRankingAll
+                            : serviceRanking
+                          ).map((item, index) => (
+                            <div key={item.name} className="flex items-center justify-between gap-3 rounded-lg bg-background px-4 py-3">
+                              <span className="flex min-w-0 items-center gap-2.5 truncate text-sm font-semibold text-foreground">
+                                {/* Fora dos cinco do donut a bolinha some: repetir
+                                    a cor diria que o item é aquela fatia. */}
+                                <span
+                                  className={`h-3 w-3 shrink-0 rounded-full ${
+                                    index < RANKING_PREVIEW_SIZE ? "" : "bg-border"
+                                  }`}
+                                  style={
+                                    index < RANKING_PREVIEW_SIZE
+                                      ? { background: DONUT_COLORS[index % DONUT_COLORS.length] }
+                                      : undefined
+                                  }
+                                />
+                                {index + 1}. {item.name}
+                              </span>
+                              <span className="shrink-0 text-sm font-bold text-foreground">
+                                {formatCurrency(item.amount)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                        {serviceRankingAll.length > RANKING_PREVIEW_SIZE && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setShowAllServiceRanking((value) => !value)
+                            }
+                            className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-primary transition-colors hover:text-primary/80"
+                          >
+                            {showAllServiceRanking ? (
+                              <>
+                                <CaretUp size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                                Ver menos
+                              </>
+                            ) : (
+                              <>
+                                <CaretDown size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                                Ver todos os {serviceRankingAll.length} serviços
+                              </>
+                            )}
+                          </button>
+                        )}
                       </div>
                     </div>
                   ) : (
@@ -5381,9 +5426,16 @@ export function FinancePage() {
                       <p className="text-xs text-muted">Clientes que mais gastaram.</p>
                     </div>
                   </div>
-                  <div className="space-y-1.5">
+                  <div
+                    className={`space-y-1.5 ${
+                      showAllClientRanking ? "max-h-72 overflow-y-auto pr-1" : ""
+                    }`}
+                  >
                     {clientRanking.length > 0 ? (
-                      clientRanking.map((client, index) => (
+                      (showAllClientRanking
+                        ? clientRankingAll
+                        : clientRanking
+                      ).map((client, index) => (
                         <div key={client.name} className="flex items-center justify-between gap-2 rounded-lg bg-background px-3 py-2">
                           <span className="min-w-0 truncate text-xs font-semibold text-foreground">
                             {index + 1}. {client.name}
@@ -5397,6 +5449,25 @@ export function FinancePage() {
                       <p className="py-4 text-center text-xs text-muted">Nenhum cliente com receita finalizada.</p>
                     )}
                   </div>
+                  {clientRankingAll.length > RANKING_PREVIEW_SIZE && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllClientRanking((value) => !value)}
+                      className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-primary transition-colors hover:text-primary/80"
+                    >
+                      {showAllClientRanking ? (
+                        <>
+                          <CaretUp size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                          Ver menos
+                        </>
+                      ) : (
+                        <>
+                          <CaretDown size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                          Ver todos os {clientRankingAll.length} clientes
+                        </>
+                      )}
+                    </button>
+                  )}
                 </section>
               </div>
             </div>
