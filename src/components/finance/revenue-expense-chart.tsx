@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 
 export type MonthChartData = { label: string; revenue: number; expense: number };
 
-const REVENUE_COLOR = "#1a2744";
+// Verde de --success, o mesmo de "Pago" e dos valores de receita na lista.
+// O azul anterior era --primary: cor de marca, não de dinheiro entrando.
+const REVENUE_COLOR = "#059669";
 const EXPENSE_COLOR = "#e05555";
 const PROFIT_COLOR = "#c9a84c";
 
