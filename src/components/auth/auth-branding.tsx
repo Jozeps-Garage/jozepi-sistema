@@ -1,4 +1,5 @@
 import { CheckCircle2 } from "lucide-react";
+import { JozepsLogo } from "@/components/ui/jozeps-logo";
 
 const features = [
   "Gestão completa de clientes e veículos",
@@ -14,15 +15,8 @@ export function AuthBranding() {
       <div className="absolute -right-20 -top-20 h-80 w-80 rounded-full bg-premium/10 blur-3xl" />
       <div className="absolute -bottom-20 -left-20 h-80 w-80 rounded-full bg-premium/5 blur-3xl" />
 
-      <div className="relative z-10 font-brand">
-        <div className="inline-flex flex-col">
-          <span className="block text-[2.15rem] font-bold uppercase leading-none tracking-[0.16em] text-white">
-            Jozep&apos;s Garage
-          </span>
-          <span className="mt-3 block text-[0.7rem] font-semibold uppercase tracking-[0.58em] text-white/45">
-            ESTÉTICA AUTOMOTIVA
-          </span>
-        </div>
+      <div className="relative z-10">
+        <JozepsLogo className="w-72 text-white" />
       </div>
 
       <div className="relative z-10 space-y-6">

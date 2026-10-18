@@ -15,6 +15,7 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserMenu } from "./user-menu";
+import { JozepsLogo } from "@/components/ui/jozeps-logo";
 
 const NAV_ICON_SIZE = 22;
 const NAV_ICON_WEIGHT = "light" as const;
@@ -93,33 +94,24 @@ export function Sidebar({
             aria-expanded={expanded}
             aria-label={expanded ? "Recolher menu" : "Expandir menu"}
             title={expanded ? "Recolher menu" : "Expandir menu"}
-            className="font-brand flex h-14 w-full items-center rounded-lg leading-none text-white transition-colors duration-300 hover:bg-sidebar-hover"
+            className="flex h-14 w-full items-center rounded-lg text-white transition-colors duration-300 hover:bg-sidebar-hover"
           >
+            {/* Fechada cabe só "Jozep's"; aberta entra a marca inteira. */}
             <span
-              className={`flex w-14 shrink-0 flex-col justify-center text-left transition-opacity duration-300 ${
+              className={`flex w-14 shrink-0 items-center justify-center transition-opacity duration-300 ${
                 expanded ? "opacity-0" : "opacity-100"
               }`}
             >
-              <span className="text-[8.5px] font-bold uppercase tracking-[0.11em]">
-                Jozep&apos;s
-              </span>
-              <span className="mt-0.5 text-[10px] font-bold uppercase tracking-[0.09em]">
-                Garage
-              </span>
+              <JozepsLogo variant="lockup" className="w-14 text-white" />
             </span>
             <span
-              className={`-ml-14 whitespace-nowrap text-left ${SIDEBAR_REVEAL} ${
+              className={`-ml-14 block ${SIDEBAR_REVEAL} ${
                 expanded
                   ? "ml-0 translate-x-0 opacity-100"
                   : "translate-x-3 opacity-0"
               }`}
             >
-              <span className="block text-[1.08rem] font-bold uppercase leading-none tracking-[0.06em] text-white">
-                Jozep&apos;s Garage
-              </span>
-              <span className="mt-1.5 block text-[7px] font-semibold uppercase tracking-[0.34em] text-white/45">
-                ESTÉTICA AUTOMOTIVA
-              </span>
+              <JozepsLogo className="w-40 text-white" />
             </span>
             {expanded && (
               <span className="ml-auto flex w-9 shrink-0 justify-center">
