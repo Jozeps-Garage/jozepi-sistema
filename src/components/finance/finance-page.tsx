@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ArrowsClockwise,
   ArrowUp,
@@ -1816,6 +1824,8 @@ function TransactionList({
   const [bulkAccountId, setBulkAccountId] = useState("");
   const [bulkSaving, setBulkSaving] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  // Uma linha aberta por vez: a página já é longa.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
   const selectionAvailable = Boolean(onBulkAssignAccount && accountOptions?.length);
   const canSelect = selectionAvailable && selectionMode;
@@ -1834,7 +1844,7 @@ function TransactionList({
       return next;
     });
   }
-  const editRowRef = useRef<HTMLElement>(null);
+  const editRowRef = useRef<HTMLDivElement>(null);
   const todayKeyValue = todayDateKey();
 
   // null mantém a ordem que a página já entrega (lançamento mais recente).
@@ -1913,12 +1923,13 @@ function TransactionList({
   // Separate fixed columns so OBS / status / edit stay aligned across rows.
   const gridTemplateColumns = [
     canSelect ? "28px" : null,
+    "84px",
     "minmax(0, 1fr)",
     "150px",
     "110px",
     showNotes ? "44px" : null,
     showPayment ? "108px" : null,
-    "72px",
+    "56px",
   ]
     .filter(Boolean)
     .join(" ");
@@ -1997,29 +2008,26 @@ function TransactionList({
         </div>
       )}
       <div className="overflow-x-auto">
-        <div className="min-w-[860px]">
+        <div className="min-w-[900px]">
         <div
           className="grid items-center gap-x-4 border-b border-border px-3 py-3 text-xs font-semibold text-muted"
           style={{ gridTemplateColumns }}
         >
           {canSelect && <span />}
-          <span className="flex min-w-0 items-center gap-3">
-            <SortableHeader
-              label="Descrição"
-              icon={Note}
-              sortKey="description"
-              sort={sort}
-              onSort={toggleSort}
-            />
-            {/* A data vive na linha de metadados desta mesma célula. */}
-            <SortableHeader
-              label="Data"
-              icon={CalendarBlank}
-              sortKey="date"
-              sort={sort}
-              onSort={toggleSort}
-            />
-          </span>
+          <SortableHeader
+            label="Data"
+            icon={CalendarBlank}
+            sortKey="date"
+            sort={sort}
+            onSort={toggleSort}
+          />
+          <SortableHeader
+            label="Descrição"
+            icon={Note}
+            sortKey="description"
+            sort={sort}
+            onSort={toggleSort}
+          />
           <SortableHeader
             label={labelColumnTitle}
             icon={accent === "expense" ? Wallet : ChartDonut}
@@ -2091,11 +2099,12 @@ function TransactionList({
               : undefined;
           // O que o banco já sabia e a lista não mostrava: vencimento, data em
           // que o dinheiro se moveu, e a conta que recebeu ou pagou.
+          // A data de lançamento agora é a primeira coluna, então aqui só
+          // entra o que ela não conta.
           const metaParts: string[] = [];
           if (isRevenue) {
             // Receita é serviço prestado: interessa quando entrou, não o
             // vencimento. Só o atraso continua valendo como aviso.
-            metaParts.push(`Lançado ${formatShortDate(entry.date)}`);
             if (overdue && entry.dueDate) {
               metaParts.push(`Venceu ${formatShortDate(entry.dueDate)}`);
             }
@@ -2103,8 +2112,6 @@ function TransactionList({
             metaParts.push(
               `${overdue ? "Venceu" : "Vence"} ${formatShortDate(entry.dueDate)}`
             );
-          } else {
-            metaParts.push(`Lançado ${formatShortDate(entry.date)}`);
           }
           if (entry.effectiveDate) {
             metaParts.push(
@@ -2116,25 +2123,65 @@ function TransactionList({
             : undefined;
           if (accountName) metaParts.push(accountName);
 
-          if (editingId === entry.id && editForm) {
-            return (
-              <article
-                key={entry.id}
-                ref={editRowRef}
-                className={`border-b border-border bg-background px-3 py-4 ${
-                  nested ? "pl-7" : ""
-                }`}
-              >
-                {editForm}
-              </article>
-            );
-          }
+          const isEditing = editingId === entry.id && Boolean(editForm);
+          const open = expandedId === entry.id || isEditing;
+          const originLabel =
+            entry.kind === "automatic"
+              ? "Agenda"
+              : entry.kind === "fixed"
+                ? "Custo fixo"
+                : "Manual";
+          const details: { label: string; value: string }[] = [
+            { label: "Descrição", value: entry.description },
+            ...(entry.serviceName
+              ? [{ label: "Serviço", value: entry.serviceName }]
+              : []),
+            ...(entry.clientName
+              ? [{ label: "Cliente", value: entry.clientName }]
+              : []),
+            { label: "Categoria", value: entry.category || "-" },
+            ...(accent === "expense"
+              ? [{ label: "Fornecedor", value: entry.supplierName ?? "-" }]
+              : []),
+            { label: "Valor", value: formatCurrency(entry.amount) },
+            { label: "Lançado em", value: formatShortDate(entry.date) },
+            {
+              label: "Vencimento",
+              value: entry.dueDate ? formatShortDate(entry.dueDate) : "-",
+            },
+            {
+              label: isRevenue ? "Recebido em" : "Pago em",
+              value: entry.effectiveDate
+                ? formatShortDate(entry.effectiveDate)
+                : "-",
+            },
+            { label: "Conta", value: accountName ?? "Não classificado" },
+            ...(entry.installmentNumber && entry.installmentTotal
+              ? [
+                  {
+                    label: "Parcela",
+                    value: `${entry.installmentNumber} de ${entry.installmentTotal}`,
+                  },
+                ]
+              : []),
+            { label: "Origem", value: originLabel },
+          ];
+
           return (
+            <Fragment key={entry.id}>
             <article
-              key={entry.id}
-              className={`grid items-center gap-x-4 border-b border-border/70 px-3 py-3 transition-colors hover:bg-background/70 ${
+              role="button"
+              tabIndex={0}
+              aria-expanded={open}
+              onClick={() => setExpandedId(open ? null : entry.id)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                setExpandedId(open ? null : entry.id);
+              }}
+              className={`grid cursor-pointer items-center gap-x-4 border-b border-border/70 px-3 py-3 transition-colors hover:bg-background/70 ${
                 nested ? "bg-background/40" : ""
-              } ${overdue ? "bg-danger/5" : ""}`}
+              } ${overdue ? "bg-danger/5" : ""} ${open ? "bg-background/70" : ""}`}
               style={{ gridTemplateColumns }}
             >
               {canSelect && (
@@ -2142,10 +2189,23 @@ function TransactionList({
                   type="checkbox"
                   checked={selectedIds.has(entry.id)}
                   onChange={() => toggleSelected(entry.id)}
+                  onClick={(event) => event.stopPropagation()}
                   aria-label={`Selecionar ${entry.description}`}
                   className="h-4 w-4 rounded border-border"
                 />
               )}
+              <div
+                className={`flex items-center gap-1.5 text-xs font-semibold ${
+                  overdue ? "text-danger" : "text-muted"
+                }`}
+              >
+                {open ? (
+                  <CaretDown size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                ) : (
+                  <CaretRight size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                )}
+                {formatShortDate(entry.date)}
+              </div>
               <div className="min-w-0">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <p className={`truncate text-sm font-semibold text-foreground ${nested ? "pl-4" : ""}`}>
@@ -2202,7 +2262,10 @@ function TransactionList({
                 {formatCurrency(entry.amount)}
               </div>
               {showNotes && onUpdateNotes && (
-                <div className="flex justify-center">
+                <div
+                  className="flex justify-center"
+                  onClick={(event) => event.stopPropagation()}
+                >
                   <TransactionNotesIcon
                     notes={entry.notes ?? ""}
                     onUpdateNotes={(notes) => onUpdateNotes(entry, notes)}
@@ -2210,7 +2273,10 @@ function TransactionList({
                 </div>
               )}
               {showPayment && (
-                <div className="flex min-w-0 items-center">
+                <div
+                  className="flex min-w-0 items-center"
+                  onClick={(event) => event.stopPropagation()}
+                >
                   {canEditPaymentStatus(entry) ? (
                     <PaymentStatusSelect
                       value={entry.paymentStatus}
@@ -2225,18 +2291,11 @@ function TransactionList({
                   )}
                 </div>
               )}
-              <div className="flex items-center justify-end gap-1.5">
-                {onEditTransaction && (
-                  <button
-                    type="button"
-                    onClick={() => onEditTransaction(entry)}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-primary transition-colors hover:bg-primary/10"
-                    aria-label={`Editar ${entry.description}`}
-                    title="Editar lançamento"
-                  >
-                    <PencilSimple size={16} weight={FINANCE_ICON_WEIGHT} aria-hidden />
-                  </button>
-                )}
+              {/* Editar mudou de lugar: fica dentro do card que abre abaixo. */}
+              <div
+                className="flex items-center justify-end"
+                onClick={(event) => event.stopPropagation()}
+              >
                 {onDeleteTransaction ? (
                   <button
                     type="button"
@@ -2248,12 +2307,60 @@ function TransactionList({
                     <Trash size={16} weight={FINANCE_ICON_WEIGHT} aria-hidden />
                   </button>
                 ) : (
-                  !onEditTransaction && (
-                    <span className="text-xs font-semibold text-muted">-</span>
-                  )
+                  <span className="text-xs font-semibold text-muted">-</span>
                 )}
               </div>
             </article>
+            {open && (
+              <div
+                ref={isEditing ? editRowRef : undefined}
+                className={`border-b border-border bg-background px-3 py-4 ${
+                  nested ? "pl-7" : ""
+                }`}
+              >
+                {isEditing ? (
+                  editForm
+                ) : (
+                  <>
+                    <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 lg:grid-cols-4">
+                      {details.map((item) => (
+                        <div key={item.label} className="min-w-0">
+                          <dt className="label-caps">{item.label}</dt>
+                          <dd className="mt-0.5 break-words text-sm font-semibold text-foreground">
+                            {item.value}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                    {entry.notes && (
+                      <div className="mt-3 border-t border-border pt-3">
+                        <dt className="label-caps">Observação</dt>
+                        <dd className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
+                          {entry.notes}
+                        </dd>
+                      </div>
+                    )}
+                    {onEditTransaction && (
+                      <div className="mt-4 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => onEditTransaction(entry)}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/10"
+                        >
+                          <PencilSimple
+                            size={14}
+                            weight={FINANCE_ICON_WEIGHT}
+                            aria-hidden
+                          />
+                          Editar lançamento
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+            </Fragment>
           );
           };
 
@@ -2298,16 +2405,23 @@ function TransactionList({
                   style={{ gridTemplateColumns }}
                 >
                   {canSelect && <span />}
+                  <div
+                    className={`flex items-center gap-1.5 text-xs font-semibold ${
+                      hasOverdue ? "text-danger" : "text-muted"
+                    }`}
+                  >
+                    {expanded ? (
+                      <CaretDown size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                    ) : (
+                      <CaretRight size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                    )}
+                    {formatShortDate(row.groupEntries[0]?.date ?? "")}
+                  </div>
                   <div className="min-w-0">
-                    <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-foreground">
-                      {expanded ? (
-                        <CaretDown size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
-                      ) : (
-                        <CaretRight size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
-                      )}
+                    <p className="truncate text-sm font-semibold text-foreground">
                       {title} ({total}x)
                     </p>
-                    <p className="mt-0.5 pl-5 text-xs text-muted">
+                    <p className="mt-0.5 text-xs text-muted">
                       {paidCount}/{row.groupEntries.length} pagas
                       {hasOverdue ? " · parcela vencida" : ""}
                     </p>
