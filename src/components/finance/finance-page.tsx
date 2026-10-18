@@ -2086,7 +2086,8 @@ function TransactionList({
   // Separate fixed columns so OBS / status / edit stay aligned across rows.
   const gridTemplateColumns = [
     canSelect ? "28px" : null,
-    "84px",
+    // Cabe "15 out  Recebido 15 out", a combinação mais larga das duas abas.
+    "168px",
     "minmax(0, 1fr)",
     "150px",
     "110px",
@@ -2170,7 +2171,7 @@ function TransactionList({
         </div>
       )}
       <div className="overflow-x-auto">
-        <div className="min-w-[900px]">
+        <div className="min-w-[980px]">
         <div
           className="grid items-center gap-x-4 border-b border-border px-3 py-3 text-xs font-semibold text-muted"
           style={{ gridTemplateColumns }}
@@ -2258,26 +2259,23 @@ function TransactionList({
             entry.kind === "automatic" && entry.serviceName
               ? entry.serviceName
               : undefined;
-          // O que o banco já sabia e a lista não mostrava: vencimento, data em
-          // que o dinheiro se moveu, e a conta que recebeu ou pagou.
-          // A data de lançamento agora é a primeira coluna, então aqui só
-          // entra o que ela não conta.
+          // Ao lado da data de lançamento fica a data que ainda interessa:
+          // enquanto não há pagamento é o vencimento, em vermelho; assim que o
+          // dinheiro se move, é a data em que se moveu — e o vencimento volta
+          // para a linha de baixo, onde já morava.
+          const settled = Boolean(entry.effectiveDate);
+          const sideDate = settled ? entry.effectiveDate : entry.dueDate;
+          const sideLabel = settled
+            ? isRevenue
+              ? "Recebido"
+              : "Pago"
+            : overdue
+              ? "Venceu"
+              : "Vence";
+
           const metaParts: string[] = [];
-          if (isRevenue) {
-            // Receita é serviço prestado: interessa quando entrou, não o
-            // vencimento. Só o atraso continua valendo como aviso.
-            if (overdue && entry.dueDate) {
-              metaParts.push(`Venceu ${formatShortDate(entry.dueDate)}`);
-            }
-          } else if (entry.dueDate) {
-            metaParts.push(
-              `${overdue ? "Venceu" : "Vence"} ${formatShortDate(entry.dueDate)}`
-            );
-          }
-          if (entry.effectiveDate) {
-            metaParts.push(
-              `${isRevenue ? "Recebido" : "Pago"} ${formatShortDate(entry.effectiveDate)}`
-            );
+          if (settled && entry.dueDate) {
+            metaParts.push(`Vence ${formatShortDate(entry.dueDate)}`);
           }
           const accountName = entry.accountId
             ? accountNames?.get(entry.accountId)
@@ -2364,17 +2362,24 @@ function TransactionList({
                   className="h-4 w-4 rounded border-border"
                 />
               )}
-              <div
-                className={`flex items-center gap-1.5 text-xs font-semibold ${
-                  overdue ? "text-danger" : "text-muted"
-                }`}
-              >
-                {open ? (
-                  <CaretDown size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
-                ) : (
-                  <CaretRight size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+              <div className="flex min-w-0 items-center gap-2 text-xs font-semibold">
+                <span className="flex shrink-0 items-center gap-1.5 text-muted">
+                  {open ? (
+                    <CaretDown size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                  ) : (
+                    <CaretRight size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                  )}
+                  {formatShortDate(entry.date)}
+                </span>
+                {sideDate && (
+                  <span
+                    className={`truncate ${
+                      settled ? "text-foreground/70" : "text-danger"
+                    }`}
+                  >
+                    {sideLabel} {formatShortDate(sideDate)}
+                  </span>
                 )}
-                {formatShortDate(entry.date)}
               </div>
               <div className="min-w-0">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
