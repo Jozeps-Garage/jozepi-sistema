@@ -14,17 +14,22 @@ function fmt(value: number): string {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+export type ChartMode = "bars" | "line";
+
 interface RevenueExpenseChartProps {
   data: MonthChartData[];
   maxValue: number;
   /** Compact mode: no profit line, shorter height — used on dashboard */
   compact?: boolean;
+  /** Barras para poucos pontos; linha aguenta a série semanal, que é longa. */
+  mode?: ChartMode;
 }
 
 export function RevenueExpenseChart({
   data,
   maxValue,
   compact = false,
+  mode = "bars",
 }: RevenueExpenseChartProps) {
   const [mounted, setMounted] = useState(false);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
@@ -37,6 +42,18 @@ export function RevenueExpenseChart({
 
   const N = data.length;
   const selectedItem = selectedIndex !== null ? data[selectedIndex] : null;
+  const isLine = mode === "line";
+
+  /** Onde o ponto i cai na horizontal. Barras ficam no centro da coluna; a
+   *  linha encosta nas bordas para ocupar a largura toda. */
+  const xAt = (i: number) =>
+    isLine ? (N > 1 ? (i / (N - 1)) * 100 : 50) : ((i + 0.5) / N) * 100;
+  const yAt = (value: number) =>
+    (1 - Math.max(0, Math.min(value / maxValue, 1))) * 100;
+  const linePoints = (key: "revenue" | "expense") =>
+    data.map((item, i) => `${xAt(i)},${yAt(item[key])}`).join(" ");
+  // Semana a semana num ano são 52 rótulos: mostra um a cada N para caber.
+  const labelStep = Math.max(1, Math.ceil(N / 8));
 
   // SVG profit line: viewBox 0 0 100 100, maps to the bar area
   const profitPoints = data.map((item, i) => {
@@ -61,7 +78,7 @@ export function RevenueExpenseChart({
           <div
             className="pointer-events-none absolute z-20 min-w-[150px] rounded-xl border border-border bg-card px-3 py-2.5 shadow-xl text-xs"
             style={{
-              left: `calc(${((tooltipIdx + 0.5) / N) * 100}% - 75px)`,
+              left: `calc(${xAt(tooltipIdx)}% - 75px)`,
               top: "8px",
             }}
           >
@@ -100,7 +117,8 @@ export function RevenueExpenseChart({
         )}
 
         {/* Bars */}
-        {data.map((item, i) => {
+        {!isLine &&
+          data.map((item, i) => {
           const revH = mounted
             ? Math.max(3, (item.revenue / maxValue) * 100)
             : 2;
@@ -155,14 +173,92 @@ export function RevenueExpenseChart({
               </span>
             </div>
           );
-        })}
+          })}
+
+        {/* Linha: duas séries sobre a mesma área, com zonas de hover por cima */}
+        {isLine && (
+          <>
+            {/* O <svg> é elemento substituído: com height auto ele se dimensiona
+                pela proporção do viewBox e ignora o `bottom`. Quem segura as
+                medidas é esta div; o SVG só preenche. */}
+            <div
+              className="pointer-events-none absolute"
+              style={{
+                left: "16px",
+                right: "16px",
+                top: "12px",
+                bottom: compact ? "24px" : "32px",
+              }}
+            >
+            <svg
+              aria-hidden
+              className="h-full w-full"
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+            >
+              {(["expense", "revenue"] as const).map((key) => (
+                <polyline
+                  key={key}
+                  points={linePoints(key)}
+                  fill="none"
+                  stroke={key === "revenue" ? REVENUE_COLOR : EXPENSE_COLOR}
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  vectorEffect="non-scaling-stroke"
+                  style={{ opacity: mounted ? 1 : 0, transition: "opacity 0.5s" }}
+                />
+              ))}
+              {/* Ponto só quando a série é curta: em 52 semanas vira ruído. */}
+              {N <= 14 &&
+                (["expense", "revenue"] as const).map((key) =>
+                  data.map((item, i) => (
+                    <line
+                      key={`${key}-${i}`}
+                      x1={xAt(i)}
+                      y1={yAt(item[key])}
+                      x2={xAt(i)}
+                      y2={yAt(item[key])}
+                      stroke={key === "revenue" ? REVENUE_COLOR : EXPENSE_COLOR}
+                      strokeWidth={hoveredIndex === i ? 9 : 6}
+                      strokeLinecap="round"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  ))
+                )}
+            </svg>
+            </div>
+
+            <div className="absolute inset-0 flex items-end px-4">
+              {data.map((item, i) => (
+                <div
+                  key={item.label}
+                  className="flex h-full min-w-0 flex-1 cursor-default select-none flex-col justify-end"
+                  onMouseEnter={() => setHoveredIndex(i)}
+                  onMouseLeave={() => setHoveredIndex(null)}
+                >
+                  <span
+                    className={`truncate pb-1 text-center text-[11px] font-semibold capitalize transition-colors ${
+                      hoveredIndex === i ? "text-foreground" : "text-muted"
+                    }`}
+                  >
+                    {i % labelStep === 0 || i === N - 1 ? item.label : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
 
         {/* Profit line SVG overlay (full chart only) */}
         {!compact && mounted && (
-          <svg
-            aria-hidden
+          <div
             className="pointer-events-none absolute"
             style={{ left: "16px", right: "16px", top: "16px", bottom: "40px" }}
+          >
+          <svg
+            aria-hidden
+            className="h-full w-full"
             viewBox="0 0 100 100"
             preserveAspectRatio="none"
           >
@@ -190,6 +286,7 @@ export function RevenueExpenseChart({
               />
             ))}
           </svg>
+          </div>
         )}
       </div>
 

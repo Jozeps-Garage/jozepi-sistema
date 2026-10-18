@@ -19,6 +19,7 @@ import {
   CaretUp,
   CaretUpDown,
   ChartBar,
+  ChartLine,
   ChartDonut,
   ChartLineUp,
   Check,
@@ -49,7 +50,10 @@ import { AccountsPanel, type AccountStatementLine } from "@/components/finance/a
 import { CategoriesPanel } from "@/components/finance/categories-panel";
 import { UpcomingDuesSection } from "@/components/finance/upcoming-dues";
 import { CashflowProjectionPanel } from "@/components/finance/cashflow-projection";
-import { RevenueExpenseChart } from "@/components/finance/revenue-expense-chart";
+import {
+  RevenueExpenseChart,
+  type ChartMode,
+} from "@/components/finance/revenue-expense-chart";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -2968,6 +2972,7 @@ export function FinancePage() {
   const [launchingCostId, setLaunchingCostId] = useState<string | null>(null);
   const [launchErrors, setLaunchErrors] = useState<Record<string, string>>({});
   const [overviewChartInterval, setOverviewChartInterval] = useState<ChartInterval>("6m");
+  const [overviewChartMode, setOverviewChartMode] = useState<ChartMode>("bars");
   const [showTransfer, setShowTransfer] = useState(false);
   const [savingTransfer, setSavingTransfer] = useState(false);
   const [transferError, setTransferError] = useState<string | null>(null);
@@ -3595,6 +3600,19 @@ export function FinancePage() {
   const dayLabels = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
   const overviewChartData = useMemo(() => {
+    const bucket = (label: string, start: Date, end: Date) => {
+      const range = { start, end };
+      return {
+        label,
+        revenue: sumEntries(
+          revenueEntries.filter((e) => isDateInRange(e.date, range))
+        ),
+        expense: sumEntries(
+          expenseEntries.filter((e) => isDateInRange(e.date, range))
+        ),
+      };
+    };
+
     if (overviewChartInterval === "7d") {
       return Array.from({ length: 7 }, (_, i) => {
         const d = subDays(today, 6 - i);
@@ -3606,6 +3624,38 @@ export function FinancePage() {
         };
       });
     }
+    // Em linha o período vira semanas: o mês a mês não mostra o movimento
+    // dentro do mês, e a linha aguenta a série longa que a barra não aguenta.
+    if (overviewChartMode === "line") {
+      const monthsBack =
+        overviewChartInterval === "1m"
+          ? 0
+          : overviewChartInterval === "3m"
+            ? 2
+            : overviewChartInterval === "1a"
+              ? 11
+              : 5;
+      const periodStart = startOfMonth(addMonths(today, -monthsBack));
+      // Para no dia de hoje: semanas futuras entrariam zeradas e a linha
+      // despencaria no fim por falta de dado, não por queda de verdade.
+      const periodEnd = endOfDay(today);
+      const weeks: { label: string; start: Date; end: Date }[] = [];
+      const cursor = new Date(periodStart);
+
+      while (cursor <= periodEnd) {
+        const weekEnd = new Date(cursor);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        weeks.push({
+          label: `${cursor.getDate()}/${cursor.getMonth() + 1}`,
+          start: new Date(cursor),
+          end: endOfDay(weekEnd > periodEnd ? periodEnd : weekEnd),
+        });
+        cursor.setDate(cursor.getDate() + 7);
+      }
+
+      return weeks.map(({ label, start, end }) => bucket(label, start, end));
+    }
+
     if (overviewChartInterval === "1m") {
       const monthStart = startOfMonth(today);
       const monthEnd = endOfMonth(today);
@@ -3656,7 +3706,7 @@ export function FinancePage() {
       });
     }
     return monthlyReport;
-  }, [overviewChartInterval, revenueEntries, expenseEntries, today, monthlyReport]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [overviewChartInterval, overviewChartMode, revenueEntries, expenseEntries, today, monthlyReport]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const overviewChartMaxValue = useMemo(
     () => Math.max(1, ...overviewChartData.flatMap((item) => [item.revenue, item.expense])),
@@ -5136,30 +5186,70 @@ export function FinancePage() {
                         </h2>
                         <p className="text-sm text-muted">
                           {chartIntervalOptions.find((o) => o.value === overviewChartInterval)?.title ?? ""}
+                          {/* 7D já é dia a dia e 1M já é por semana no título. */}
+                          {overviewChartMode === "line" &&
+                          overviewChartInterval !== "7d" &&
+                          overviewChartInterval !== "1m"
+                            ? " · semana a semana"
+                            : ""}
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center rounded-lg border border-border bg-background p-0.5">
-                      {chartIntervalOptions.map((opt) => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => setOverviewChartInterval(opt.value)}
-                          className={`rounded-md px-2.5 py-1 text-xs font-bold transition-all ${
-                            overviewChartInterval === opt.value
-                              ? "bg-primary text-white shadow-sm"
-                              : "text-muted hover:text-foreground"
-                          }`}
-                          aria-pressed={overviewChartInterval === opt.value}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex items-center rounded-lg border border-border bg-background p-0.5">
+                        {(
+                          [
+                            { value: "bars", label: "Barras", icon: ChartBar },
+                            { value: "line", label: "Linha", icon: ChartLine },
+                          ] as const
+                        ).map((opt) => {
+                          const ModeIcon = opt.icon;
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              onClick={() => setOverviewChartMode(opt.value)}
+                              className={`flex h-7 w-8 items-center justify-center rounded-md transition-all ${
+                                overviewChartMode === opt.value
+                                  ? "bg-primary text-white shadow-sm"
+                                  : "text-muted hover:text-foreground"
+                              }`}
+                              aria-pressed={overviewChartMode === opt.value}
+                              aria-label={`Ver em ${opt.label.toLowerCase()}`}
+                              title={`Ver em ${opt.label.toLowerCase()}`}
+                            >
+                              <ModeIcon
+                                size={15}
+                                weight={FINANCE_ICON_WEIGHT}
+                                aria-hidden
+                              />
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="flex items-center rounded-lg border border-border bg-background p-0.5">
+                        {chartIntervalOptions.map((opt) => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => setOverviewChartInterval(opt.value)}
+                            className={`rounded-md px-2.5 py-1 text-xs font-bold transition-all ${
+                              overviewChartInterval === opt.value
+                                ? "bg-primary text-white shadow-sm"
+                                : "text-muted hover:text-foreground"
+                            }`}
+                            aria-pressed={overviewChartInterval === opt.value}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                   <RevenueExpenseChart
                     data={overviewChartData}
                     maxValue={overviewChartMaxValue}
+                    mode={overviewChartMode}
                     compact
                   />
                 </section>
