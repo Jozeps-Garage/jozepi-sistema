@@ -1693,7 +1693,10 @@ function DateRangeFilter({
           )}
 
           <div className="border-t border-border px-4 py-3">
-            <p className="label-caps mb-1.5">Comparar por</p>
+            <p className="label-caps">Filtrar pela data de</p>
+            <p className="mb-2 mt-0.5 text-[11px] leading-snug text-muted">
+              Qual das três datas o período acima considera.
+            </p>
             <div className="flex flex-wrap gap-1">
               {(
                 [
