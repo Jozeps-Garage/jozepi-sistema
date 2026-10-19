@@ -2441,126 +2441,138 @@ export function ProductsPage() {
             <h3 className="text-sm font-semibold text-foreground">
               {editingSupplierId ? "Editar fornecedor" : "Novo fornecedor"}
             </h3>
-            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-              <Input
-                label="Razão social"
-                value={supplierForm.name}
-                onChange={(event) => updateSupplierForm({ name: event.target.value })}
-                placeholder="Distribuidora Auto Clean LTDA"
-              />
-              <Input
-                label="Nome fantasia (opcional)"
-                value={supplierForm.tradeName}
-                onChange={(event) => updateSupplierForm({ tradeName: event.target.value })}
-                placeholder="Auto Clean"
-              />
-              <Input
-                label="Nome do contato"
-                value={supplierForm.contactName}
-                onChange={(event) =>
-                  updateSupplierForm({ contactName: event.target.value })
-                }
-                placeholder="Carlos Souza"
-              />
-              <Input
-                label="Telefone"
-                value={supplierForm.phone}
-                onChange={(event) => updateSupplierForm({ phone: event.target.value })}
-                placeholder="(51) 99999-9999"
-              />
-              <Input
-                label="E-mail"
-                type="email"
-                value={supplierForm.email}
-                onChange={(event) => updateSupplierForm({ email: event.target.value })}
-                placeholder="contato@fornecedor.com"
-              />
-              <div className="md:col-span-2">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                  <Input
-                    label="CNPJ"
-                    value={supplierForm.document}
-                    onChange={(event) => {
-                      const typed = event.target.value;
-                      const digits = onlyCnpjDigits(typed);
-                      setCnpjMessage(null);
-                      updateSupplierForm({ document: typed });
+            {/* Esquerda: a empresa, que o CNPJ preenche. Direita: contato e
+                anotações, que só você sabe. */}
+            <div className="mt-4 grid grid-cols-1 gap-x-6 gap-y-4 md:grid-cols-2">
+              <div className="space-y-4">
+                <div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                    <Input
+                      label="CNPJ"
+                      value={supplierForm.document}
+                      onChange={(event) => {
+                        const typed = event.target.value;
+                        const digits = onlyCnpjDigits(typed);
+                        setCnpjMessage(null);
+                        updateSupplierForm({ document: typed });
 
-                      // Completou os 14 e os dígitos batem: busca sem esperar
-                      // clique. O ref segura a repetição enquanto o número não
-                      // muda — apagar e redigitar o mesmo CNPJ busca de novo.
-                      if (
-                        digits.length === 14 &&
-                        digits !== lastCnpjLookupRef.current &&
-                        isValidCnpj(digits)
-                      ) {
-                        updateSupplierForm({ document: formatCnpj(digits) });
-                        void handleCnpjLookup(digits);
-                      } else if (digits.length < 14) {
-                        lastCnpjLookupRef.current = "";
+                        // Completou os 14 e os dígitos batem: busca sem esperar
+                        // clique. O ref segura a repetição enquanto o número não
+                        // muda — apagar e redigitar o mesmo CNPJ busca de novo.
+                        if (
+                          digits.length === 14 &&
+                          digits !== lastCnpjLookupRef.current &&
+                          isValidCnpj(digits)
+                        ) {
+                          updateSupplierForm({ document: formatCnpj(digits) });
+                          void handleCnpjLookup(digits);
+                        } else if (digits.length < 14) {
+                          lastCnpjLookupRef.current = "";
+                        }
+                      }}
+                      onBlur={(event) =>
+                        updateSupplierForm({ document: formatCnpj(event.target.value) })
                       }
-                    }}
-                    onBlur={(event) =>
-                      updateSupplierForm({ document: formatCnpj(event.target.value) })
-                    }
-                    placeholder="00.000.000/0001-00"
-                    className="flex-1"
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    loading={cnpjLoading}
-                    disabled={!supplierForm.document.trim()}
-                    onClick={() => void handleCnpjLookup()}
-                    className="sm:w-auto"
-                  >
-                    <MagnifyingGlass size={16} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-                    Buscar de novo
-                  </Button>
-                </div>
-                {cnpjMessage && (
+                      placeholder="00.000.000/0001-00"
+                      className="flex-1"
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      loading={cnpjLoading}
+                      disabled={!supplierForm.document.trim()}
+                      onClick={() => void handleCnpjLookup()}
+                      className="sm:w-auto"
+                    >
+                      <MagnifyingGlass size={16} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
+                      Buscar
+                    </Button>
+                  </div>
                   <p
                     className={`mt-2 text-xs font-medium ${
-                      cnpjMessage.tone === "error"
-                        ? "text-danger"
-                        : cnpjMessage.tone === "warning"
-                          ? "text-warning"
-                          : "text-success"
+                      cnpjMessage
+                        ? cnpjMessage.tone === "error"
+                          ? "text-danger"
+                          : cnpjMessage.tone === "warning"
+                            ? "text-warning"
+                            : "text-success"
+                        : "text-muted"
                     }`}
                   >
-                    {cnpjMessage.text}
+                    {cnpjMessage?.text ??
+                      "Digite o CNPJ e os dados da empresa vêm sozinhos."}
                   </p>
-                )}
-              </div>
-              <Input
-                label="Cidade/UF"
-                value={supplierForm.cityState}
-                onChange={(event) => updateSupplierForm({ cityState: event.target.value })}
-                placeholder="Caxias do Sul/RS"
-              />
-              <Input
-                label="Endereço (opcional)"
-                value={supplierForm.address}
-                onChange={(event) => updateSupplierForm({ address: event.target.value })}
-                placeholder="Rua das Oficinas, 120 - Centro"
-              />
-              <Input
-                label="CEP (opcional)"
-                value={supplierForm.zipCode}
-                onChange={(event) => updateSupplierForm({ zipCode: event.target.value })}
-                placeholder="95010-000"
-              />
-              <div className="space-y-1.5">
-                <label className="block text-sm font-semibold text-foreground">
-                  Observações
-                </label>
-                <textarea
-                  value={supplierForm.notes}
-                  onChange={(event) => updateSupplierForm({ notes: event.target.value })}
-                  rows={4}
-                  className="w-full resize-none rounded-lg border border-border bg-input px-4 py-3 text-base text-foreground placeholder:text-muted/60 transition-colors focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 sm:py-2.5 sm:text-sm"
-                  placeholder="Condições de pagamento, entrega, contato..."
+                </div>
+
+                <Input
+                  label="Razão social"
+                  value={supplierForm.name}
+                  onChange={(event) => updateSupplierForm({ name: event.target.value })}
+                  placeholder="Distribuidora Auto Clean LTDA"
                 />
+                <Input
+                  label="Nome fantasia (opcional)"
+                  value={supplierForm.tradeName}
+                  onChange={(event) => updateSupplierForm({ tradeName: event.target.value })}
+                  placeholder="Auto Clean"
+                />
+                <Input
+                  label="Endereço (opcional)"
+                  value={supplierForm.address}
+                  onChange={(event) => updateSupplierForm({ address: event.target.value })}
+                  placeholder="Rua das Oficinas, 120 - Centro"
+                />
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Input
+                    label="Cidade/UF"
+                    value={supplierForm.cityState}
+                    onChange={(event) => updateSupplierForm({ cityState: event.target.value })}
+                    placeholder="Caxias do Sul/RS"
+                  />
+                  <Input
+                    label="CEP (opcional)"
+                    value={supplierForm.zipCode}
+                    onChange={(event) => updateSupplierForm({ zipCode: event.target.value })}
+                    placeholder="95010-000"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <Input
+                  label="Nome do contato"
+                  value={supplierForm.contactName}
+                  onChange={(event) =>
+                    updateSupplierForm({ contactName: event.target.value })
+                  }
+                  placeholder="Carlos Souza"
+                />
+                <Input
+                  label="Telefone"
+                  value={supplierForm.phone}
+                  onChange={(event) => updateSupplierForm({ phone: event.target.value })}
+                  placeholder="(51) 99999-9999"
+                />
+                <Input
+                  label="E-mail"
+                  type="email"
+                  value={supplierForm.email}
+                  onChange={(event) => updateSupplierForm({ email: event.target.value })}
+                  placeholder="contato@fornecedor.com"
+                />
+                <div className="space-y-1.5">
+                  <label htmlFor="supplier-notes" className="label-caps">
+                    Observações
+                  </label>
+                  <textarea
+                    id="supplier-notes"
+                    value={supplierForm.notes}
+                    onChange={(event) => updateSupplierForm({ notes: event.target.value })}
+                    rows={6}
+                    className="w-full resize-none rounded-lg border border-border bg-input px-4 py-3 text-base text-foreground placeholder:text-muted/60 transition-colors focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 sm:py-2.5 sm:text-sm"
+                    placeholder="Condições de pagamento, entrega, contato..."
+                  />
+                </div>
               </div>
             </div>
             <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
