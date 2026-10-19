@@ -5821,7 +5821,10 @@ export function FinancePage() {
       </div>
 
       <div className="rounded-lg border border-border bg-card shadow-card p-1.5 shadow-card">
-        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+        {/* Cabem quantas couberem numa linha só: a escada fixa de colunas era
+            para sete abas e deixava a Caixa sozinha embaixo depois que
+            sobraram cinco. */}
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-1.5">
           {tabs.map((tab) => (
             <button
               key={tab.id}
