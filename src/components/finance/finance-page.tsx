@@ -25,6 +25,7 @@ import {
   ChartLineUp,
   Check,
   CheckCircle,
+  Package,
   CircleHalf,
   Funnel,
   ListChecks,
@@ -417,6 +418,18 @@ interface TransactionItem {
   description: string;
   quantity: string;
   unitAmount: string;
+  /** Produto do estoque, quando a linha veio de lá. Vazio: item avulso. */
+  productId: string;
+  volumeMl: string;
+}
+
+/** O que o lançamento precisa saber do estoque — não o cadastro inteiro. */
+interface StockProduct {
+  id: string;
+  name: string;
+  volumeMl: string;
+  totalCost: string;
+  stockRemaining: string;
 }
 
 interface TransactionForm {
@@ -2937,6 +2950,9 @@ function TransactionList({
                                 <span className="min-w-0 text-foreground">
                                   {quantity > 1 ? `${quantity}× ` : ""}
                                   {item.description || "Item"}
+                                  {item.volumeMl ? (
+                                    <span className="text-muted"> · {item.volumeMl} ml</span>
+                                  ) : null}
                                 </span>
                                 <span className="shrink-0 font-semibold text-foreground">
                                   {formatCurrency(quantity * unit)}
@@ -3186,6 +3202,8 @@ function createTransactionItem(): TransactionItem {
     description: "",
     quantity: "1",
     unitAmount: "",
+    productId: "",
+    volumeMl: "",
   };
 }
 
@@ -3203,6 +3221,8 @@ function transactionItemsFromRow(value: unknown): TransactionItem[] {
         ? formatMoneyInput(quantity).replace(",00", "")
         : "1",
       unitAmount: Number.isFinite(unit) ? formatMoneyInput(unit) : "",
+      productId: typeof item.productId === "string" ? item.productId : "",
+      volumeMl: typeof item.volumeMl === "string" ? item.volumeMl : "",
     };
   });
 }
@@ -3215,7 +3235,111 @@ function transactionItemsToRow(items: TransactionItem[]) {
       description: item.description.trim(),
       quantity: parseFilterAmount(item.quantity) ?? 1,
       unitAmount: parseFilterAmount(item.unitAmount) ?? 0,
+      productId: item.productId || undefined,
+      volumeMl: item.volumeMl.trim() || undefined,
     }));
+}
+
+/**
+ * O campo de produto da linha da nota. Continua aceitando texto livre — nem
+ * tudo que entra numa nota está no estoque — mas enquanto você digita ele
+ * oferece o que já existe lá, e escolher traz nome, volume e último custo.
+ */
+function ProductPicker({
+  item,
+  products,
+  onPick,
+  onType,
+}: {
+  item: TransactionItem;
+  products: StockProduct[];
+  onPick: (product: StockProduct) => void;
+  onType: (description: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const closeTimeoutRef = useRef<number | null>(null);
+
+  const matches = useMemo(() => {
+    const term = item.description.trim().toLowerCase();
+    const base = term
+      ? products.filter((product) => product.name.toLowerCase().includes(term))
+      : products;
+    return base.slice(0, 8);
+  }, [item.description, products]);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimeoutRef.current) window.clearTimeout(closeTimeoutRef.current);
+    };
+  }, []);
+
+  const exactPick =
+    item.productId &&
+    products.find((product) => product.id === item.productId)?.name ===
+      item.description.trim();
+
+  return (
+    <div
+      className="relative"
+      onBlur={() => {
+        // Espera o clique na sugestão acontecer antes de fechar a lista.
+        closeTimeoutRef.current = window.setTimeout(() => setOpen(false), 120);
+      }}
+      onFocus={() => {
+        if (closeTimeoutRef.current) window.clearTimeout(closeTimeoutRef.current);
+        setOpen(true);
+      }}
+    >
+      <Input
+        id={`item-${item.uiKey}-produto`}
+        label="Produto ou serviço"
+        value={item.description}
+        onChange={(event) => onType(event.target.value)}
+        placeholder="Comece a digitar e escolha do estoque"
+        compact
+        suffix={
+          exactPick ? (
+            <Package size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+          ) : undefined
+        }
+      />
+      {open && products.length > 0 && (
+        <div className="absolute left-0 right-0 top-full z-40 mt-1 max-h-56 overflow-y-auto rounded-lg border border-border bg-card p-1.5 shadow-card-hover">
+          {matches.length === 0 ? (
+            <p className="px-2.5 py-2 text-xs text-muted">
+              Nada no estoque com esse nome. Pode seguir digitando: vai entrar
+              como item avulso.
+            </p>
+          ) : (
+            matches.map((product) => (
+              <button
+                key={product.id}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  onPick(product);
+                  setOpen(false);
+                }}
+                className="flex w-full items-baseline justify-between gap-3 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-background"
+              >
+                <span className="min-w-0 truncate text-sm font-semibold text-foreground">
+                  {product.name}
+                </span>
+                <span className="shrink-0 text-[11px] font-medium text-muted">
+                  {[
+                    product.volumeMl ? `${product.volumeMl} ml` : "",
+                    product.stockRemaining ? `${product.stockRemaining} em estoque` : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -3255,6 +3379,7 @@ function TransactionFormCard({
   onCreateCategory,
   onManageCategories,
   onCreateSupplier,
+  stockProducts = [],
   loading,
   error,
   buttonLabel,
@@ -3278,6 +3403,8 @@ function TransactionFormCard({
   supplierOptions?: { value: string; label: string }[];
   /** Abre o cadastro rápido a partir do próprio dropdown. */
   onCreateSupplier?: () => void;
+  /** Catálogo para sugerir nas linhas da nota. Vazio: só texto livre. */
+  stockProducts?: StockProduct[];
   loading: boolean;
   error: string | null;
   buttonLabel: string;
@@ -3451,48 +3578,85 @@ function TransactionFormCard({
                 return (
                   <div
                     key={item.uiKey}
-                    className="grid grid-cols-[minmax(0,1fr)_64px_96px_32px] items-end gap-2"
+                    className="flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-2"
                   >
-                    <Input
-                      label="Item"
-                      value={item.description}
-                      onChange={(event) =>
-                        updateItem(item.uiKey, { description: event.target.value })
-                      }
-                      placeholder="Fast Grafeno 500ml"
-                      compact
-                    />
-                    <Input
-                      label="Qtd"
-                      inputMode="decimal"
-                      value={item.quantity}
-                      onChange={(event) =>
-                        updateItem(item.uiKey, { quantity: event.target.value })
-                      }
-                      compact
-                    />
-                    <Input
-                      label="Unitário"
-                      prefix="R$"
-                      inputMode="decimal"
-                      value={item.unitAmount}
-                      onChange={(event) =>
-                        updateItem(item.uiKey, { unitAmount: event.target.value })
-                      }
-                      compact
-                      className="pl-9"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeItem(item.uiKey)}
-                      className="mb-1 flex h-8 w-8 items-center justify-center rounded-lg text-danger transition-colors hover:bg-danger/10"
-                      aria-label={`Remover ${item.description || "item"}`}
-                      title="Remover item"
-                    >
-                      <Trash size={15} weight={FINANCE_ICON_WEIGHT} aria-hidden />
-                    </button>
+                    <div className="min-w-0 flex-1">
+                      <ProductPicker
+                        item={item}
+                        products={stockProducts}
+                        onType={(description) =>
+                          // Digitou por cima: a linha deixa de apontar para o
+                          // produto do estoque até escolher de novo.
+                          updateItem(item.uiKey, { description, productId: "" })
+                        }
+                        onPick={(product) =>
+                          updateItem(item.uiKey, {
+                            description: product.name,
+                            productId: product.id,
+                            volumeMl: product.volumeMl,
+                            // Só sugere o custo se o campo ainda está vazio.
+                            // O catálogo guarda "89"; o campo quer "89,00".
+                            unitAmount:
+                              item.unitAmount.trim() ||
+                              (parseFilterAmount(product.totalCost) !== null
+                                ? formatMoneyInput(parseFilterAmount(product.totalCost)!)
+                                : ""),
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="flex items-end gap-2">
+                      <div className="w-20">
+                        <Input
+                          id={`item-${item.uiKey}-ml`}
+                          label="ML"
+                          inputMode="decimal"
+                          value={item.volumeMl}
+                          onChange={(event) =>
+                            updateItem(item.uiKey, { volumeMl: event.target.value })
+                          }
+                          placeholder="500"
+                          compact
+                        />
+                      </div>
+                      <div className="w-16">
+                        <Input
+                          id={`item-${item.uiKey}-qtd`}
+                          label="Qtd"
+                          inputMode="decimal"
+                          value={item.quantity}
+                          onChange={(event) =>
+                            updateItem(item.uiKey, { quantity: event.target.value })
+                          }
+                          compact
+                        />
+                      </div>
+                      <div className="w-28">
+                        <Input
+                          id={`item-${item.uiKey}-valor`}
+                          label="Valor"
+                          prefix="R$"
+                          inputMode="decimal"
+                          value={item.unitAmount}
+                          onChange={(event) =>
+                            updateItem(item.uiKey, { unitAmount: event.target.value })
+                          }
+                          compact
+                          className="pl-9"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeItem(item.uiKey)}
+                        className="mb-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-danger transition-colors hover:bg-danger/10"
+                        aria-label={`Remover ${item.description || "item"}`}
+                        title="Remover item"
+                      >
+                        <Trash size={15} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                      </button>
+                    </div>
                     {quantity > 1 && unit > 0 && (
-                      <p className="col-span-4 -mt-1 text-right text-xs text-muted">
+                      <p className="-mt-1 text-right text-xs text-muted sm:sr-only">
                         {formatCurrency(quantity * unit)}
                       </p>
                     )}
@@ -3814,6 +3978,7 @@ export function FinancePage() {
   const [orders, setOrders] = useState<CompletedOrder[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierFormOpen, setSupplierFormOpen] = useState(false);
+  const [stockProducts, setStockProducts] = useState<StockProduct[]>([]);
   /** Conta aberta no extrato. Fica aqui porque a projeção some enquanto há uma. */
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   /** Tipo cujas categorias estão abertas para renomear/desativar. */
@@ -3908,6 +4073,7 @@ export function FinancePage() {
       { data: ordersData, error: ordersError },
       suppliersResult,
       fixedCostsResult,
+      productsResult,
     ] =
       await Promise.all([
         supabase
@@ -3938,6 +4104,12 @@ export function FinancePage() {
         supabase
           .from("fixed_costs")
           .select(FIXED_COST_SELECT_FULL)
+          .eq("workshop_id", profileWorkshopId)
+          .order("name", { ascending: true }),
+        // Só o que a linha da nota precisa: nome, volume, custo e saldo.
+        supabase
+          .from("products")
+          .select("id, name, volume_ml, total_cost, stock_remaining")
           .eq("workshop_id", profileWorkshopId)
           .order("name", { ascending: true }),
       ]);
@@ -4001,6 +4173,25 @@ export function FinancePage() {
       setSuppliers(storedSuppliers);
     } else {
       setSuppliers(sortSuppliers((suppliersResult.data as Supplier[] | null) ?? []));
+    }
+
+    // Estoque é conveniência na hora de lançar: se falhar, o campo de produto
+    // vira texto livre e o lançamento segue.
+    if (productsResult.error) {
+      setStockProducts([]);
+    } else {
+      setStockProducts(
+        ((productsResult.data as Record<string, unknown>[] | null) ?? []).map(
+          (row) => ({
+            id: String(row.id),
+            name: String(row.name ?? ""),
+            volumeMl: typeof row.volume_ml === "string" ? row.volume_ml : "",
+            totalCost: typeof row.total_cost === "string" ? row.total_cost : "",
+            stockRemaining:
+              typeof row.stock_remaining === "string" ? row.stock_remaining : "",
+          })
+        )
+      );
     }
 
     const storedFixedCosts = applyStoredPaymentDays(
@@ -6619,6 +6810,7 @@ export function FinancePage() {
                   accountOptions={activeAccountOptions}
                   supplierOptions={expenseSupplierOptions}
                   onCreateSupplier={() => setSupplierFormOpen(true)}
+                  stockProducts={stockProducts}
                   loading={savingExpense}
                   error={expenseError}
                   buttonLabel="Salvar despesa"
@@ -6652,6 +6844,7 @@ export function FinancePage() {
                       accountOptions={activeAccountOptions}
                       supplierOptions={expenseSupplierOptions}
                       onCreateSupplier={() => setSupplierFormOpen(true)}
+                      stockProducts={stockProducts}
                       loading={savingExpense}
                       error={expenseError}
                       buttonLabel={
