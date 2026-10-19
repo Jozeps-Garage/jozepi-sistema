@@ -93,7 +93,7 @@ import {
   type FinancialTransfer,
 } from "@/lib/finance/types";
 
-type FinanceTab = "overview" | "revenues" | "expenses" | "fixedCosts" | "cashflow" | "accounts" | "categories";
+type FinanceTab = "overview" | "revenues" | "expenses" | "fixedCosts" | "cash" | "categories";
 /** Sobrou para os intervalos fixos da visão geral; o filtro usa DateGranularity. */
 type PeriodFilter = "all" | "today" | "week" | "month" | "custom";
 type ChartInterval = "7d" | "1m" | "3m" | "6m" | "1a";
@@ -444,8 +444,7 @@ const tabs: { id: FinanceTab; label: string }[] = [
   { id: "revenues", label: "Receitas" },
   { id: "expenses", label: "Despesas" },
   { id: "fixedCosts", label: "Custos Fixos" },
-  { id: "cashflow", label: "Fluxo de Caixa" },
-  { id: "accounts", label: "Contas" },
+  { id: "cash", label: "Caixa" },
   { id: "categories", label: "Categorias" },
 ];
 
@@ -3540,6 +3539,8 @@ export function FinancePage() {
   const [orders, setOrders] = useState<CompletedOrder[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierFormOpen, setSupplierFormOpen] = useState(false);
+  /** Conta aberta no extrato. Fica aqui porque a projeção some enquanto há uma. */
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [fixedCosts, setFixedCosts] = useState<FixedCost[]>(() => {
     if (typeof window === "undefined") return [];
     const stored = readStoredFixedCosts().map((cost) =>
@@ -5567,7 +5568,8 @@ export function FinancePage() {
     requestDeleteTransaction(entry);
   }
 
-  async function handleCreateAccount(input: {
+  async function handleSaveAccount(input: {
+    id?: string;
     name: string;
     type: FinancialAccount["type"];
     initialBalance: string;
@@ -5578,11 +5580,17 @@ export function FinancePage() {
     if (!Number.isFinite(initialBalance)) {
       throw new Error("Informe um saldo inicial válido.");
     }
+    // Editando: ativa/inativa e conta padrão não são deste formulário, então
+    // o que está salvo manda — senão salvar o nome reativaria a conta.
+    const existing = input.id
+      ? accounts.find((account) => account.id === input.id)
+      : undefined;
     const saved = await saveFinancialAccount(supabase, workshopId, {
+      id: input.id,
       name: input.name,
       type: input.type,
       initial_balance: initialBalance,
-      active: true,
+      active: existing?.active ?? true,
     });
     setAccounts((prev) =>
       [...prev.filter((account) => account.id !== saved.id), saved].sort((a, b) =>
@@ -6353,20 +6361,6 @@ export function FinancePage() {
             </div>
           )}
 
-          {activeTab === "cashflow" && (
-            <CashflowProjectionPanel
-              currentBalance={currentCashBalance}
-              entries={transactionEntries}
-              accounts={accounts}
-              transfers={transfers}
-              today={dateKey(today)}
-              onMarkPaid={(item) => {
-                const entry = transactionEntries.find((row) => row.id === item.id);
-                if (entry) handleChangePaymentStatus(entry, "pago");
-              }}
-            />
-          )}
-
           {activeTab === "fixedCosts" && (
             <div className="space-y-5">
               <div>
@@ -6694,19 +6688,38 @@ export function FinancePage() {
             </div>
           )}
 
-          {activeTab === "accounts" && (
-            <AccountsPanel
-              accounts={accounts}
-              balances={accountBalances}
-              statementLines={statementLinesForAccount}
-              onCreateAccount={handleCreateAccount}
-              onSetDefault={handleSetDefaultAccount}
-              onToggleActive={handleToggleAccount}
-              onOpenTransfer={() => {
-                setTransferError(null);
-                setShowTransfer(true);
-              }}
-            />
+          {activeTab === "cash" && (
+            <div className="space-y-8">
+              <AccountsPanel
+                accounts={accounts}
+                balances={accountBalances}
+                statementLines={statementLinesForAccount}
+                selectedId={selectedAccountId}
+                onSelectAccount={setSelectedAccountId}
+                onSaveAccount={handleSaveAccount}
+                onSetDefault={handleSetDefaultAccount}
+                onToggleActive={handleToggleAccount}
+                onOpenTransfer={() => {
+                  setTransferError(null);
+                  setShowTransfer(true);
+                }}
+              />
+              {/* No extrato de uma conta a projeção sai: ali a conversa é
+                  sobre aquela conta, não sobre o caixa inteiro. */}
+              {!selectedAccountId && (
+                <CashflowProjectionPanel
+                  currentBalance={currentCashBalance}
+                  entries={transactionEntries}
+                  accounts={accounts}
+                  transfers={transfers}
+                  today={dateKey(today)}
+                  onMarkPaid={(item) => {
+                    const entry = transactionEntries.find((row) => row.id === item.id);
+                    if (entry) handleChangePaymentStatus(entry, "pago");
+                  }}
+                />
+              )}
+            </div>
           )}
 
           {activeTab === "categories" && (

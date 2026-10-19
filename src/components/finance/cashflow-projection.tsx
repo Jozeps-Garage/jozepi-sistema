@@ -245,31 +245,50 @@ export function CashflowProjectionPanel({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="section-title">Fluxo de Caixa</h2>
+        <h3 className="section-title">Projeção</h3>
         <p className="mt-1 text-sm text-muted">
-          Projeção a partir do saldo atual das contas ativas, somando pendências por vencimento.
+          Parte do saldo acima e soma as pendências por vencimento.
         </p>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {kpis.map((kpi) => (
-          <article
-            key={kpi.days}
-            className="rounded-lg border border-dashed border-premium/40 bg-card p-5 shadow-card"
-          >
-            <p className="label-caps text-premium">Projetado · {kpi.days} dias</p>
-            <p
-              className={`mt-2 currency-display ${
-                kpi.value >= 0 ? "text-foreground" : "text-danger"
-              }`}
+        {kpis.map((kpi) => {
+          // O saldo atual já está logo acima, no card de saldo total: aqui
+          // vale mais quanto ele muda do que repetir o mesmo número três vezes.
+          const delta = kpi.value - currentBalance;
+          return (
+            <article
+              key={kpi.days}
+              className="rounded-lg border border-dashed border-premium/40 bg-card p-5 shadow-card"
             >
-              {formatCurrency(kpi.value)}
-            </p>
-            <p className="mt-1 text-xs text-muted">
-              Saldo atual {formatCurrency(currentBalance)}
-            </p>
-          </article>
-        ))}
+              <p className="label-caps text-premium">Projetado · {kpi.days} dias</p>
+              <p
+                className={`mt-2 currency-display ${
+                  kpi.value >= 0 ? "text-foreground" : "text-danger"
+                }`}
+              >
+                {formatCurrency(kpi.value)}
+              </p>
+              <p className="mt-1 text-xs text-muted">
+                {delta === 0 ? (
+                  "Sem pendências no período"
+                ) : (
+                  <>
+                    <span
+                      className={`font-semibold ${
+                        delta > 0 ? "text-success" : "text-danger"
+                      }`}
+                    >
+                      {delta > 0 ? "+" : ""}
+                      {formatCurrency(delta)}
+                    </span>{" "}
+                    no período
+                  </>
+                )}
+              </p>
+            </article>
+          );
+        })}
       </div>
 
       {hasPartial && (
@@ -285,7 +304,7 @@ export function CashflowProjectionPanel({
               <ChartLineUp size={20} weight="light" aria-hidden />
             </span>
             <div>
-              <h3 className="section-title">Evolução do saldo</h3>
+              <h4 className="section-title">Evolução do saldo</h4>
               <p className="text-sm text-muted">Realizado até hoje, projetado dali em diante</p>
             </div>
           </div>
@@ -326,7 +345,7 @@ export function CashflowProjectionPanel({
       </section>
 
       <section className="rounded-lg border border-border bg-card p-5 shadow-card">
-        <h3 className="section-title">Movimentações futuras</h3>
+        <h4 className="section-title">Movimentações futuras</h4>
         <p className="mt-1 text-sm text-muted">
           Receitas e despesas em aberto com vencimento a partir de hoje, incluindo parcelas.
         </p>
