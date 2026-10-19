@@ -21,6 +21,8 @@ interface DropdownProps {
   className?: string;
   actionLabel?: string;
   onAction?: () => void;
+  /** "top" põe a ação como primeira linha, destacada — o atalho de cadastrar. */
+  actionPlacement?: "top" | "bottom";
   createPlaceholder?: string;
   onCreateOption?: (label: string) => string | void;
   onDeleteOption?: (value: string) => void;
@@ -47,6 +49,7 @@ export function Dropdown({
   className,
   actionLabel,
   onAction,
+  actionPlacement = "bottom",
   createPlaceholder = "Digite o nome",
   onCreateOption,
   onDeleteOption,
@@ -215,6 +218,19 @@ export function Dropdown({
               />
             </div>
           )}
+          {actionPlacement === "top" && actionLabel && onAction && (
+            <button
+              type="button"
+              onClick={() => {
+                onAction();
+                closeDropdown();
+              }}
+              className="mb-2 flex min-h-11 w-full shrink-0 items-center gap-2 rounded-md border border-dashed border-success/50 bg-success/5 px-3 py-3 text-left text-sm font-semibold text-success transition-colors duration-200 hover:border-success hover:bg-success/10 sm:min-h-0 sm:py-2.5"
+            >
+              <Plus size={16} weight={DROPDOWN_ICON_WEIGHT} aria-hidden />
+              {actionLabel}
+            </button>
+          )}
           <div role="listbox" aria-labelledby={inputId} className="min-h-0 flex-1 space-y-1 overflow-y-auto">
             {canSearch && visibleOptions.length === 0 && (
               <p className="px-3 py-2 text-sm text-muted">Nenhum resultado encontrado.</p>
@@ -302,7 +318,7 @@ export function Dropdown({
                 </p>
               )}
             </div>
-          ) : actionLabel && (onAction || onCreateOption) && (
+          ) : actionPlacement === "bottom" && actionLabel && (onAction || onCreateOption) && (
             <button
               type="button"
               onClick={() => {

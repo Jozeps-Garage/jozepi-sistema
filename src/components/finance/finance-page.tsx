@@ -55,6 +55,7 @@ import {
   RevenueExpenseChart,
   type ChartMode,
 } from "@/components/finance/revenue-expense-chart";
+import { SupplierQuickForm } from "@/components/suppliers/supplier-quick-form";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -152,6 +153,8 @@ interface FinancialTransaction {
 interface Supplier {
   id: string;
   name: string;
+  /** Nome de fachada; é ele que aparece nas listas quando existe. */
+  trade_name?: string | null;
 }
 
 type FixedCostKind = "real" | "estimated";
@@ -197,9 +200,13 @@ function readStoredSuppliers() {
     const stored = window.localStorage.getItem(SUPPLIERS_STORAGE_KEY);
     if (!stored) return [];
 
-    return (JSON.parse(stored) as { id: string; name: string }[])
+    return (JSON.parse(stored) as Supplier[])
       .filter((supplier) => supplier.id && supplier.name)
-      .map((supplier) => ({ id: supplier.id, name: supplier.name }));
+      .map((supplier) => ({
+        id: supplier.id,
+        name: supplier.name,
+        trade_name: supplier.trade_name ?? null,
+      }));
   } catch {
     return [];
   }
@@ -3166,6 +3173,7 @@ function TransactionFormCard({
   categories,
   accountOptions,
   supplierOptions,
+  onCreateSupplier,
   loading,
   error,
   buttonLabel,
@@ -3183,6 +3191,8 @@ function TransactionFormCard({
   categories: { value: string; label: string }[];
   accountOptions: { value: string; label: string }[];
   supplierOptions?: { value: string; label: string }[];
+  /** Abre o cadastro rápido a partir do próprio dropdown. */
+  onCreateSupplier?: () => void;
   loading: boolean;
   error: string | null;
   buttonLabel: string;
@@ -3252,6 +3262,9 @@ function TransactionFormCard({
             value={form.supplierId}
             options={supplierOptions}
             onChange={(supplierId) => onChange({ supplierId })}
+            actionLabel={onCreateSupplier ? "Novo fornecedor" : undefined}
+            actionPlacement="top"
+            onAction={onCreateSupplier}
           />
         )}
         {showItems && (
@@ -3526,6 +3539,7 @@ export function FinancePage() {
   const [transfers, setTransfers] = useState<FinancialTransfer[]>([]);
   const [orders, setOrders] = useState<CompletedOrder[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [supplierFormOpen, setSupplierFormOpen] = useState(false);
   const [fixedCosts, setFixedCosts] = useState<FixedCost[]>(() => {
     if (typeof window === "undefined") return [];
     const stored = readStoredFixedCosts().map((cost) =>
@@ -4105,19 +4119,18 @@ export function FinancePage() {
     expenseFilters.customEnd,
     today
   );
+  // O mesmo nome que aparece na lista de lançamentos: fantasia quando tem.
+  const supplierChoices = suppliers.map((supplier) => ({
+    value: supplier.id,
+    label: supplierDisplayName(supplier),
+  }));
   const expenseSupplierFilterOptions = [
     { value: categoryFilterAll, label: "Todos" },
-    ...suppliers.map((supplier) => ({
-      value: supplier.id,
-      label: supplier.name,
-    })),
+    ...supplierChoices,
   ];
   const expenseSupplierOptions = [
     { value: categoryFilterAll, label: "Sem fornecedor" },
-    ...suppliers.map((supplier) => ({
-      value: supplier.id,
-      label: supplier.name,
-    })),
+    ...supplierChoices,
   ];
   const activeAccountOptions = accounts
     .filter((account) => account.active)
@@ -6246,6 +6259,7 @@ export function FinancePage() {
                   categories={expenseCategorySelectOptions}
                   accountOptions={activeAccountOptions}
                   supplierOptions={expenseSupplierOptions}
+                  onCreateSupplier={() => setSupplierFormOpen(true)}
                   loading={savingExpense}
                   error={expenseError}
                   buttonLabel="Salvar despesa"
@@ -6276,6 +6290,7 @@ export function FinancePage() {
                       categories={expenseCategorySelectOptions}
                       accountOptions={activeAccountOptions}
                       supplierOptions={expenseSupplierOptions}
+                      onCreateSupplier={() => setSupplierFormOpen(true)}
                       loading={savingExpense}
                       error={expenseError}
                       buttonLabel={
@@ -6885,6 +6900,17 @@ export function FinancePage() {
         }}
         onSubmit={(input) => {
           void handleSubmitTransfer(input);
+        }}
+      />
+
+      <SupplierQuickForm
+        open={supplierFormOpen}
+        supabase={supabase}
+        workshopId={workshopId}
+        onClose={() => setSupplierFormOpen(false)}
+        onCreated={(supplier) => {
+          setSuppliers((prev) => mergeSuppliers(prev, [supplier]));
+          setExpenseForm((prev) => ({ ...prev, supplierId: supplier.id }));
         }}
       />
     </div>

@@ -27,6 +27,12 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dropdown } from "@/components/ui/dropdown";
 import { Input } from "@/components/ui/input";
+import {
+  SUPPLIER_SELECT_FIELDS,
+  SUPPLIER_SELECT_LEGACY,
+  isMissingSupplierColumn,
+  saveSupplierRow,
+} from "@/lib/suppliers/save";
 import { createClient } from "@/lib/supabase/client";
 import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { formatCurrency, formatPhone, normalizeOptionalPhone } from "@/lib/utils/format";
@@ -329,21 +335,6 @@ function mergeSuppliers(current: Supplier[], incoming: Supplier[]) {
     byId.set(supplier.id, existing ? { ...existing, ...supplier } : supplier);
   });
   return sortSuppliers(Array.from(byId.values()));
-}
-
-const SUPPLIER_SELECT_FIELDS =
-  "id, workshop_id, name, trade_name, contact_name, phone, email, document, city_state, address, zip_code, category, notes, created_at, updated_at";
-/** Sem a migration 043 as colunas novas não existem; a consulta cai para esta. */
-const SUPPLIER_SELECT_LEGACY =
-  "id, workshop_id, name, contact_name, phone, email, document, city_state, category, notes, created_at, updated_at";
-
-function isMissingSupplierColumn(error: { message?: string } | null) {
-  const message = error?.message?.toLowerCase() ?? "";
-  return (
-    message.includes("trade_name") ||
-    message.includes("address") ||
-    message.includes("zip_code")
-  );
 }
 
 function mapSupplierRow(row: Record<string, unknown>): Supplier {
@@ -1169,32 +1160,12 @@ export function ProductsPage() {
       updated_at: now,
     };
 
-    const saveSupplier = async (data: Record<string, unknown>, fields: string) =>
+    const result = await saveSupplierRow(
+      supabase,
+      workshopId,
+      payload,
       editingSupplierId
-        ? await supabase
-            .from("suppliers")
-            .update(data)
-            .eq("id", editingSupplierId)
-            .eq("workshop_id", workshopId)
-            .select(fields)
-            .single()
-        : await supabase
-            .from("suppliers")
-            .insert(data)
-            .select(fields)
-            .single();
-
-    let result = await saveSupplier(payload, SUPPLIER_SELECT_FIELDS);
-    if (isMissingSupplierColumn(result.error)) {
-      // Sem a 043: grava o que a tabela aceita e perde fantasia e endereço.
-      const {
-        trade_name: _tradeName,
-        address: _address,
-        zip_code: _zipCode,
-        ...legacy
-      } = payload;
-      result = await saveSupplier(legacy, SUPPLIER_SELECT_LEGACY);
-    }
+    );
 
     setSavingSupplier(false);
 
