@@ -767,6 +767,15 @@ function fixedCostExpenseSource(costId: string, yearMonth: string) {
   return `fixed_cost:${costId}:${yearMonth}`;
 }
 
+/** Violação de índice único no Postgres. */
+function isDuplicateRowError(error: { code?: string; message?: string } | null) {
+  if (!error) return false;
+  return (
+    error.code === "23505" ||
+    (error.message ?? "").toLowerCase().includes("duplicate key")
+  );
+}
+
 function isFixedCostSource(source: string | null | undefined) {
   return Boolean(source?.startsWith("fixed_cost:"));
 }
@@ -1390,6 +1399,11 @@ async function syncFixedCostExpenses(
         .single();
 
       if (error) {
+        // 23505: o índice único barrou — outra carga já lançou este mês.
+        // Repetir pelo caminho antigo só criaria a duplicata que o índice
+        // acabou de impedir.
+        if (isDuplicateRowError(error)) continue;
+
         const legacyInsert = await supabase
           .from("financial_transactions")
           .insert({
@@ -3478,6 +3492,14 @@ export function FinancePage() {
   });
   const fixedCostsRef = useRef(fixedCosts);
   const initialFinanceLoadRef = useRef(true);
+  /**
+   * A sincronização de custos fixos insere lançamentos, e cada inserção volta
+   * pelo realtime como um pedido de recarga. Sem trava, duas cargas rodam
+   * sobrepostas, cada uma com sua foto dos lançamentos, e as duas concluem que
+   * o custo daquele mês ainda não existe — daí o lançamento duplicado.
+   */
+  const financeLoadInFlightRef = useRef(false);
+  const financeLoadQueuedRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<FinanceDeleteConfirm>(null);
@@ -3524,7 +3546,7 @@ export function FinancePage() {
   const [paidConfirm, setPaidConfirm] = useState<FinanceEntry | null>(null);
   const [savingPaid, setSavingPaid] = useState(false);
 
-  const loadFinanceData = useCallback(async () => {
+  const runFinanceLoad = useCallback(async () => {
     if (initialFinanceLoadRef.current) {
       setLoading(true);
     }
@@ -3696,6 +3718,25 @@ export function FinancePage() {
     initialFinanceLoadRef.current = false;
     setLoading(false);
   }, [supabase]);
+
+  const loadFinanceData = useCallback(async () => {
+    // Já tem carga rodando: anota o pedido e sai. Quem está rodando recomeça no
+    // fim — uma vez só, por mais pedidos que tenham chegado no meio.
+    if (financeLoadInFlightRef.current) {
+      financeLoadQueuedRef.current = true;
+      return;
+    }
+
+    financeLoadInFlightRef.current = true;
+    try {
+      do {
+        financeLoadQueuedRef.current = false;
+        await runFinanceLoad();
+      } while (financeLoadQueuedRef.current);
+    } finally {
+      financeLoadInFlightRef.current = false;
+    }
+  }, [runFinanceLoad]);
 
   useEffect(() => {
     fixedCostsRef.current = fixedCosts;
@@ -5224,6 +5265,17 @@ export function FinancePage() {
 
     let saved: unknown = data;
     let saveError = error;
+
+    if (isDuplicateRowError(saveError)) {
+      // Alguém já lançou este mês — clique repetido ou outra aba aberta.
+      setLaunchingCostId(null);
+      setLaunchErrors((prev) => ({
+        ...prev,
+        [cost.id]: "Este mês já foi lançado.",
+      }));
+      void loadFinanceData();
+      return;
+    }
 
     if (saveError) {
       const legacyInsert = await supabase
