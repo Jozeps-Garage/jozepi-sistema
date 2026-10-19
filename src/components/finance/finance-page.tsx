@@ -48,7 +48,7 @@ import {
 } from "lucide-react";
 import { ConfirmPaidDialog, TransferDialog } from "@/components/finance/cashflow-dialogs";
 import { AccountsPanel, type AccountStatementLine } from "@/components/finance/accounts-panel";
-import { CategoriesPanel } from "@/components/finance/categories-panel";
+import { CategoryManagerDialog } from "@/components/finance/category-manager";
 import { UpcomingDuesSection } from "@/components/finance/upcoming-dues";
 import { CashflowProjectionPanel } from "@/components/finance/cashflow-projection";
 import {
@@ -93,7 +93,7 @@ import {
   type FinancialTransfer,
 } from "@/lib/finance/types";
 
-type FinanceTab = "overview" | "revenues" | "expenses" | "fixedCosts" | "cash" | "categories";
+type FinanceTab = "overview" | "revenues" | "expenses" | "fixedCosts" | "cash";
 /** Sobrou para os intervalos fixos da visão geral; o filtro usa DateGranularity. */
 type PeriodFilter = "all" | "today" | "week" | "month" | "custom";
 type ChartInterval = "7d" | "1m" | "3m" | "6m" | "1a";
@@ -445,7 +445,6 @@ const tabs: { id: FinanceTab; label: string }[] = [
   { id: "expenses", label: "Despesas" },
   { id: "fixedCosts", label: "Custos Fixos" },
   { id: "cash", label: "Caixa" },
-  { id: "categories", label: "Categorias" },
 ];
 
 const categoryFilterAll = "all";
@@ -3173,6 +3172,7 @@ function TransactionFormCard({
   accountOptions,
   supplierOptions,
   onCreateCategory,
+  onManageCategories,
   onCreateSupplier,
   loading,
   error,
@@ -3192,6 +3192,8 @@ function TransactionFormCard({
   accountOptions: { value: string; label: string }[];
   /** Cadastra a categoria pelo próprio dropdown. Devolve mensagem se não deu. */
   onCreateCategory?: (name: string) => Promise<string | void>;
+  /** Renomear e desativar, pelo rodapé do mesmo dropdown. */
+  onManageCategories?: () => void;
   supplierOptions?: { value: string; label: string }[];
   /** Abre o cadastro rápido a partir do próprio dropdown. */
   onCreateSupplier?: () => void;
@@ -3309,6 +3311,8 @@ function TransactionFormCard({
           actionPlacement="top"
           onCreateOption={onCreateCategory}
           createPlaceholder="Nome da categoria"
+          footerLabel={onManageCategories ? "Gerenciar categorias" : undefined}
+          onFooterAction={onManageCategories}
         />
         {!sharedFieldsOnly && (
         <Dropdown
@@ -3548,6 +3552,9 @@ export function FinancePage() {
   const [supplierFormOpen, setSupplierFormOpen] = useState(false);
   /** Conta aberta no extrato. Fica aqui porque a projeção some enquanto há uma. */
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  /** Tipo cujas categorias estão abertas para renomear/desativar. */
+  const [managingCategories, setManagingCategories] =
+    useState<TransactionType | null>(null);
   const [fixedCosts, setFixedCosts] = useState<FixedCost[]>(() => {
     if (typeof window === "undefined") return [];
     const stored = readStoredFixedCosts().map((cost) =>
@@ -6221,6 +6228,7 @@ export function FinancePage() {
                   form={revenueForm}
                   categories={revenueCategorySelectOptions}
                   onCreateCategory={(name) => handleCreateCategory(name, "receita")}
+                  onManageCategories={() => setManagingCategories("receita")}
                   accountOptions={activeAccountOptions}
                   loading={savingRevenue}
                   error={revenueError}
@@ -6245,6 +6253,7 @@ export function FinancePage() {
                       form={revenueForm}
                       categories={revenueCategorySelectOptions}
                       onCreateCategory={(name) => handleCreateCategory(name, "receita")}
+                      onManageCategories={() => setManagingCategories("receita")}
                       accountOptions={activeAccountOptions}
                       loading={savingRevenue}
                       error={revenueError}
@@ -6329,6 +6338,7 @@ export function FinancePage() {
                   form={expenseForm}
                   categories={expenseCategorySelectOptions}
                   onCreateCategory={(name) => handleCreateCategory(name, "despesa")}
+                  onManageCategories={() => setManagingCategories("despesa")}
                   accountOptions={activeAccountOptions}
                   supplierOptions={expenseSupplierOptions}
                   onCreateSupplier={() => setSupplierFormOpen(true)}
@@ -6361,6 +6371,7 @@ export function FinancePage() {
                       form={expenseForm}
                       categories={expenseCategorySelectOptions}
                       onCreateCategory={(name) => handleCreateCategory(name, "despesa")}
+                      onManageCategories={() => setManagingCategories("despesa")}
                       accountOptions={activeAccountOptions}
                       supplierOptions={expenseSupplierOptions}
                       onCreateSupplier={() => setSupplierFormOpen(true)}
@@ -6787,9 +6798,6 @@ export function FinancePage() {
             </div>
           )}
 
-          {activeTab === "categories" && (
-            <CategoriesPanel categories={categories} onSave={handleSaveCategory} />
-          )}
         </>
       )}
       <style>{`
@@ -6979,6 +6987,14 @@ export function FinancePage() {
         onSubmit={(input) => {
           void handleSubmitTransfer(input);
         }}
+      />
+
+      <CategoryManagerDialog
+        open={managingCategories !== null}
+        type={managingCategories ?? "despesa"}
+        categories={categories}
+        onSave={handleSaveCategory}
+        onClose={() => setManagingCategories(null)}
       />
 
       <SupplierQuickForm

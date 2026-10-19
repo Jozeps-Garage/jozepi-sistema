@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CaretDown, Check, MagnifyingGlass, Plus, Trash } from "@phosphor-icons/react";
+import { CaretDown, Check, GearSix, MagnifyingGlass, Plus, Trash } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils/cn";
 
 export interface DropdownOption {
@@ -23,6 +23,9 @@ interface DropdownProps {
   onAction?: () => void;
   /** "top" põe a ação como primeira linha, destacada — o atalho de cadastrar. */
   actionPlacement?: "top" | "bottom";
+  /** Link discreto no rodapé do menu, para mexer na própria lista. */
+  footerLabel?: string;
+  onFooterAction?: () => void;
   createPlaceholder?: string;
   /** Devolve uma mensagem para barrar a criação; nada (ou promessa) se deu certo. */
   onCreateOption?: (label: string) => string | void | Promise<string | void>;
@@ -51,6 +54,8 @@ export function Dropdown({
   actionLabel,
   onAction,
   actionPlacement = "bottom",
+  footerLabel,
+  onFooterAction,
   createPlaceholder = "Digite o nome",
   onCreateOption,
   onDeleteOption,
@@ -353,6 +358,19 @@ export function Dropdown({
             })}
           </div>
           {actionPlacement === "bottom" && actionNode}
+          {footerLabel && onFooterAction && !creating && (
+            <button
+              type="button"
+              onClick={() => {
+                onFooterAction();
+                closeDropdown();
+              }}
+              className="mt-1 flex w-full shrink-0 items-center gap-2 rounded-md border-t border-border px-3 pb-2 pt-2.5 text-left text-xs font-semibold text-muted transition-colors duration-200 hover:text-foreground"
+            >
+              <GearSix size={14} weight={DROPDOWN_ICON_WEIGHT} aria-hidden />
+              {footerLabel}
+            </button>
+          )}
         </div>
       )}
       <style>{`
