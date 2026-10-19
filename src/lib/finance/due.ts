@@ -74,6 +74,55 @@ export function inDueAlertWindow(
   return transaction.due_date <= addDaysToDateKey(today, horizonDays);
 }
 
+/** De quanto em quanto tempo vence a próxima parcela. */
+export type InstallmentPeriod =
+  | "semanal"
+  | "quinzenal"
+  | "mensal"
+  | "bimestral"
+  | "trimestral"
+  | "semestral"
+  | "anual";
+
+export const INSTALLMENT_PERIODS: { value: InstallmentPeriod; label: string }[] = [
+  { value: "semanal", label: "Semanal" },
+  { value: "quinzenal", label: "Quinzenal" },
+  { value: "mensal", label: "Mensal" },
+  { value: "bimestral", label: "Bimestral" },
+  { value: "trimestral", label: "Trimestral" },
+  { value: "semestral", label: "Semestral" },
+  { value: "anual", label: "Anual" },
+];
+
+/**
+ * Soma `times` períodos à data. Semanal e quinzenal andam em dias; o resto
+ * anda em meses, para o vencimento cair sempre no mesmo dia — e cair no
+ * último dia quando o mês for curto, que é o que addMonthsToDateKey faz.
+ */
+export function addPeriodToDateKey(
+  dateKey: string,
+  period: InstallmentPeriod,
+  times: number
+) {
+  if (times === 0) return dateKey;
+  switch (period) {
+    case "semanal":
+      return addDaysToDateKey(dateKey, 7 * times);
+    case "quinzenal":
+      return addDaysToDateKey(dateKey, 15 * times);
+    case "bimestral":
+      return addMonthsToDateKey(dateKey, 2 * times);
+    case "trimestral":
+      return addMonthsToDateKey(dateKey, 3 * times);
+    case "semestral":
+      return addMonthsToDateKey(dateKey, 6 * times);
+    case "anual":
+      return addMonthsToDateKey(dateKey, 12 * times);
+    default:
+      return addMonthsToDateKey(dateKey, times);
+  }
+}
+
 export function splitInstallmentAmounts(total: number, count: number) {
   const safeCount = Math.max(1, Math.round(count));
   const cents = Math.round(total * 100);

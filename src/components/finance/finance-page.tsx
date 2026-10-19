@@ -72,9 +72,11 @@ import {
 } from "@/lib/finance/accounts";
 import { accountBalance, cashDate as cashflowDate, isPaidCashStatus, sumPaidRevenueInRange } from "@/lib/finance/cash";
 import {
-  addMonthsToDateKey,
   inDueAlertWindow,
+  INSTALLMENT_PERIODS,
+  addPeriodToDateKey,
   installmentBaseDescription,
+  type InstallmentPeriod,
   isOverdue,
   splitInstallmentAmounts,
   todayDateKey,
@@ -432,6 +434,42 @@ interface TransactionForm {
   supplierId: string;
   installmentsEnabled: boolean;
   installmentCount: string;
+  installmentPeriod: InstallmentPeriod;
+  /** As parcelas como ficam na tela: dá para mexer em cada uma antes de salvar. */
+  installments: InstallmentDraft[];
+}
+
+interface InstallmentDraft {
+  uiKey: string;
+  dueDate: string;
+  amount: string;
+  notes: string;
+  paid: boolean;
+}
+
+/**
+ * Monta a tabela de parcelas a partir do total, da quantidade, do intervalo e
+ * do primeiro vencimento. O que sobra de centavo vai na última, como em
+ * 166,67 + 166,67 + 166,66.
+ */
+function buildInstallments(
+  total: number,
+  count: number,
+  period: InstallmentPeriod,
+  firstDue: string
+): InstallmentDraft[] {
+  const safeCount = Math.min(Math.max(Math.round(count) || 0, 1), 60);
+  return splitInstallmentAmounts(total, safeCount).map((value, index) => ({
+    uiKey: `parcela-${index + 1}`,
+    dueDate: addPeriodToDateKey(firstDue, period, index),
+    amount: formatMoneyInput(value),
+    notes: "",
+    paid: false,
+  }));
+}
+
+function sumInstallments(rows: InstallmentDraft[]) {
+  return rows.reduce((total, row) => total + (parseFilterAmount(row.amount) ?? 0), 0);
 }
 
 interface DateRange {
@@ -701,6 +739,8 @@ const initialRevenueForm: TransactionForm = {
   supplierId: categoryFilterAll,
   installmentsEnabled: false,
   installmentCount: "3",
+  installmentPeriod: "mensal",
+  installments: [],
   invoiceNumber: "",
   items: [],
   notes: "",
@@ -718,6 +758,8 @@ const initialExpenseForm: TransactionForm = {
   supplierId: categoryFilterAll,
   installmentsEnabled: false,
   installmentCount: "3",
+  installmentPeriod: "mensal",
+  installments: [],
   invoiceNumber: "",
   items: [],
   notes: "",
@@ -3164,6 +3206,33 @@ function transactionItemsToRow(items: TransactionItem[]) {
     }));
 }
 
+/**
+ * Um bloco do formulário: título e campos, separados por um fio. Sem caixa
+ * dentro de caixa — o lançamento já é um card, e cada seção virar outro
+ * deixava a tela pesada.
+ */
+function FormSection({
+  title,
+  aside,
+  first = false,
+  children,
+}: {
+  title: string;
+  aside?: React.ReactNode;
+  first?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className={first ? "" : "mt-6 border-t border-border pt-5"}>
+      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold tracking-wide text-foreground">{title}</h3>
+        {aside}
+      </div>
+      {children}
+    </section>
+  );
+}
+
 function TransactionFormCard({
   title,
   description,
@@ -3212,6 +3281,16 @@ function TransactionFormCard({
 }) {
   const showItems = allowItems && !sharedFieldsOnly;
   const itemsTotal = sumTransactionItems(form.items);
+  const showPayment = !sharedFieldsOnly;
+  const installmentsTotal = sumInstallments(form.installments);
+  const amountValue = parseFilterAmount(form.amount) ?? 0;
+  // Centavo de diferença não é erro: o usuário mexeu numa parcela e as contas
+  // pararam de fechar com o valor total.
+  const installmentsMismatch =
+    form.installmentsEnabled &&
+    form.installments.length > 0 &&
+    Math.abs(installmentsTotal - amountValue) >= 0.01;
+  const netTotal = form.installmentsEnabled ? installmentsTotal : amountValue;
 
   function updateItem(uiKey: string, patch: Partial<TransactionItem>) {
     const items = form.items.map((item) =>
@@ -3219,16 +3298,50 @@ function TransactionFormCard({
     );
     // O valor do lançamento segue a soma da nota. Continua editável depois,
     // para quem precisa somar frete ou abater desconto.
-    onChange({ items, amount: formatMoneyInput(sumTransactionItems(items)) });
+    const amount = formatMoneyInput(sumTransactionItems(items));
+    onChange({ items, amount, ...regenerate({ amount }) });
   }
 
   function removeItem(uiKey: string) {
     const items = form.items.filter((item) => item.uiKey !== uiKey);
+    if (items.length === 0) {
+      onChange({ items });
+      return;
+    }
+    const amount = formatMoneyInput(sumTransactionItems(items));
+    onChange({ items, amount, ...regenerate({ amount }) });
+  }
+
+  /**
+   * Mexeu no total, na quantidade, no intervalo ou no primeiro vencimento: a
+   * tabela de parcelas é refeita. Edição de uma parcela sozinha fica de pé
+   * até um desses quatro mudar.
+   */
+  function regenerate(patch: {
+    amount?: string;
+    installmentCount?: string;
+    installmentPeriod?: InstallmentPeriod;
+    dueDate?: string;
+  }): Partial<TransactionForm> {
+    if (!form.installmentsEnabled) return {};
+    const total = parseFilterAmount(patch.amount ?? form.amount) ?? 0;
+    const count = Number(patch.installmentCount ?? form.installmentCount) || 0;
+    if (count < 1) return {};
+    return {
+      installments: buildInstallments(
+        total,
+        count,
+        patch.installmentPeriod ?? form.installmentPeriod,
+        patch.dueDate ?? form.dueDate ?? form.date
+      ),
+    };
+  }
+
+  function updateInstallment(uiKey: string, patch: Partial<InstallmentDraft>) {
     onChange({
-      items,
-      ...(items.length > 0
-        ? { amount: formatMoneyInput(sumTransactionItems(items)) }
-        : {}),
+      installments: form.installments.map((row) =>
+        row.uiKey === uiKey ? { ...row, ...patch } : row
+      ),
     });
   }
 
@@ -3242,139 +3355,84 @@ function TransactionFormCard({
           : "finance-manual-form-enter rounded-lg border border-border bg-card p-4 shadow-card sm:p-5"
       }
     >
-      <div className="mb-4">
+      <div className="mb-5">
         <h2 className="section-title">{title}</h2>
         <p className="mt-1 text-sm text-muted">{description}</p>
       </div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Input
-          label="Descrição"
-          value={form.description}
-          onChange={(event) => onChange({ description: event.target.value })}
-        />
-        {!sharedFieldsOnly && (
+
+      <FormSection title="Informações gerais" first>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Input
-            label="Valor"
-            prefix="R$"
-            value={form.amount}
-            onChange={(event) => onChange({ amount: event.target.value })}
+            label="Data do lançamento"
+            type="date"
+            value={form.date}
+            onChange={(event) =>
+              onChange({
+                date: event.target.value,
+                effectiveDate:
+                  form.paymentStatus === "pago" && !form.effectiveDate
+                    ? event.target.value
+                    : form.effectiveDate,
+                dueDate: form.dueDate || event.target.value,
+              })
+            }
           />
-        )}
-        {supplierOptions && (
+          {supplierOptions && (
+            <Dropdown
+              label="Fornecedor (opcional)"
+              value={form.supplierId}
+              options={supplierOptions}
+              onChange={(supplierId) => onChange({ supplierId })}
+              actionLabel={onCreateSupplier ? "Novo fornecedor" : undefined}
+              actionPlacement="top"
+              onAction={onCreateSupplier}
+            />
+          )}
+          {showItems && (
+            <Input
+              label="Nota fiscal (opcional)"
+              value={form.invoiceNumber}
+              onChange={(event) => onChange({ invoiceNumber: event.target.value })}
+              placeholder="1259"
+              maxLength={50}
+            />
+          )}
           <Dropdown
-            label="Fornecedor (opcional)"
-            value={form.supplierId}
-            options={supplierOptions}
-            onChange={(supplierId) => onChange({ supplierId })}
-            actionLabel={onCreateSupplier ? "Novo fornecedor" : undefined}
+            label="Categoria"
+            value={form.categoryId}
+            options={categories}
+            onChange={(categoryId) => onChange({ categoryId })}
+            placeholder="Selecione a categoria"
+            actionLabel={onCreateCategory ? "Nova categoria" : undefined}
             actionPlacement="top"
-            onAction={onCreateSupplier}
+            onCreateOption={onCreateCategory}
+            createPlaceholder="Nome da categoria"
+            footerLabel={onManageCategories ? "Gerenciar categorias" : undefined}
+            onFooterAction={onManageCategories}
           />
-        )}
-        {showItems && (
-          <Input
-            label="Nota fiscal (opcional)"
-            value={form.invoiceNumber}
-            onChange={(event) => onChange({ invoiceNumber: event.target.value })}
-            placeholder="1259"
-          />
-        )}
-        <Input
-          label="Data do lançamento"
-          type="date"
-          value={form.date}
-          onChange={(event) =>
-            onChange({
-              date: event.target.value,
-              effectiveDate:
-                form.paymentStatus === "pago" && !form.effectiveDate
-                  ? event.target.value
-                  : form.effectiveDate,
-              dueDate: form.dueDate || event.target.value,
-            })
-          }
-        />
-        <Dropdown
-          label="Conta"
-          value={form.accountId}
-          options={accountOptions}
-          onChange={(accountId) => onChange({ accountId })}
-          placeholder="Selecione a conta"
-        />
-        <Dropdown
-          label="Categoria"
-          value={form.categoryId}
-          options={categories}
-          onChange={(categoryId) => onChange({ categoryId })}
-          placeholder="Selecione a categoria"
-          actionLabel={onCreateCategory ? "Nova categoria" : undefined}
-          actionPlacement="top"
-          onCreateOption={onCreateCategory}
-          createPlaceholder="Nome da categoria"
-          footerLabel={onManageCategories ? "Gerenciar categorias" : undefined}
-          onFooterAction={onManageCategories}
-        />
-        {!sharedFieldsOnly && (
-        <Dropdown
-          label="Status"
-          value={form.installmentsEnabled ? "pendente" : form.paymentStatus}
-          options={[
-            { value: "pago", label: "Pago" },
-            { value: "pendente", label: "Pendente" },
-            { value: "parcial", label: "Parcial" },
-          ]}
-          onChange={(paymentStatus) =>
-            onChange({
-              paymentStatus: paymentStatus as PaymentStatus,
-              effectiveDate:
-                paymentStatus === "pago"
-                  ? form.effectiveDate || form.date
-                  : "",
-              dueDate: form.dueDate || form.date,
-              installmentsEnabled:
-                paymentStatus === "pago" ? false : form.installmentsEnabled,
-            })
-          }
-        />
-        )}
-        {!sharedFieldsOnly && form.paymentStatus === "pago" && !form.installmentsEnabled && (
-          <Input
-            label="Data de pagamento"
-            type="date"
-            value={form.effectiveDate}
-            onChange={(event) => onChange({ effectiveDate: event.target.value })}
-          />
-        )}
-        {!sharedFieldsOnly &&
-          (form.paymentStatus === "pendente" ||
-            form.paymentStatus === "parcial" ||
-            form.installmentsEnabled) && (
-          <Input
-            label="Vencimento"
-            type="date"
-            value={form.dueDate || form.date}
-            onChange={(event) => onChange({ dueDate: event.target.value })}
-          />
-        )}
-      </div>
+          <div className="md:col-span-2">
+            <Input
+              label="Descrição"
+              value={form.description}
+              onChange={(event) => onChange({ description: event.target.value })}
+            />
+          </div>
+        </div>
+      </FormSection>
+
       {showItems && (
-        <div className="mt-4 rounded-lg border border-border bg-background p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <span className="text-sm font-semibold text-foreground">Itens da nota</span>
-              <span className="mt-0.5 block text-xs text-muted">
-                Opcional. O valor do lançamento acompanha a soma.
-              </span>
-            </div>
-            {form.items.length > 0 && (
+        <FormSection
+          title="Produtos e serviços"
+          aside={
+            form.items.length > 0 ? (
               <span className="text-sm font-bold text-foreground">
                 {formatCurrency(itemsTotal)}
               </span>
-            )}
-          </div>
-
+            ) : null
+          }
+        >
           {form.items.length > 0 && (
-            <div className="mt-3 space-y-2">
+            <div className="space-y-2">
               {form.items.map((item) => {
                 const quantity = parseFilterAmount(item.quantity) ?? 1;
                 const unit = parseFilterAmount(item.unitAmount) ?? 0;
@@ -3390,6 +3448,7 @@ function TransactionFormCard({
                         updateItem(item.uiKey, { description: event.target.value })
                       }
                       placeholder="Fast Grafeno 500ml"
+                      compact
                     />
                     <Input
                       label="Qtd"
@@ -3398,6 +3457,7 @@ function TransactionFormCard({
                       onChange={(event) =>
                         updateItem(item.uiKey, { quantity: event.target.value })
                       }
+                      compact
                     />
                     <Input
                       label="Unitário"
@@ -3407,6 +3467,8 @@ function TransactionFormCard({
                       onChange={(event) =>
                         updateItem(item.uiKey, { unitAmount: event.target.value })
                       }
+                      compact
+                      className="pl-9"
                     />
                     <button
                       type="button"
@@ -3427,98 +3489,288 @@ function TransactionFormCard({
               })}
             </div>
           )}
-
           <button
             type="button"
             onClick={() =>
               onChange({ items: [...form.items, createTransactionItem()] })
             }
-            className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-success/50 bg-success/5 px-3 py-2 text-xs font-semibold text-success transition-colors hover:border-success hover:bg-success/10"
+            className={`inline-flex items-center gap-1.5 rounded-lg border border-dashed border-success/50 bg-success/5 px-3 py-2 text-xs font-semibold text-success transition-colors hover:border-success hover:bg-success/10 ${
+              form.items.length > 0 ? "mt-3" : ""
+            }`}
           >
             <Plus size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
-            Adicionar item
+            Incluir produto ou serviço
           </button>
-        </div>
+        </FormSection>
       )}
-      {allowInstallments && (
-        <div className="mt-4 rounded-lg border border-border bg-background p-4">
-          <button
-            type="button"
-            onClick={() =>
-              onChange({
-                installmentsEnabled: !form.installmentsEnabled,
-                paymentStatus: !form.installmentsEnabled ? "pendente" : form.paymentStatus,
-                dueDate: form.dueDate || form.date,
-              })
-            }
-            className="flex w-full items-center justify-between text-left"
-          >
-            <span>
-              <span className="text-sm font-semibold text-foreground">Parcelar esta despesa</span>
-              <span className="mt-0.5 block text-xs text-muted">
-                Gera várias despesas pendentes com o mesmo grupo, vencendo mês a mês.
-              </span>
-            </span>
-            <span
-              className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
-                form.installmentsEnabled
-                  ? "bg-primary text-white"
-                  : "bg-card text-muted"
-              }`}
-            >
-              {form.installmentsEnabled ? "Sim" : "Não"}
-            </span>
-          </button>
-          {form.installmentsEnabled && (
-            <div className="mt-3 max-w-xs">
-              <Input
-                label="Número de parcelas"
-                type="number"
-                min={2}
-                max={24}
-                value={form.installmentCount}
-                onChange={(event) => onChange({ installmentCount: event.target.value })}
+
+      {!sharedFieldsOnly && (
+        <FormSection title="Valores">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Input
+              label="Valor total"
+              prefix="R$"
+              value={form.amount}
+              onChange={(event) => {
+                const amount = event.target.value;
+                onChange({ amount, ...regenerate({ amount }) });
+              }}
+            />
+          </div>
+        </FormSection>
+      )}
+
+      {showPayment && (
+        <FormSection title="Pagamento">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Dropdown
+              label="Conta"
+              value={form.accountId}
+              options={accountOptions}
+              onChange={(accountId) => onChange({ accountId })}
+              placeholder="Selecione a conta"
+            />
+            {allowInstallments ? (
+              <Dropdown
+                label="Forma de pagamento"
+                value={form.installmentsEnabled ? "aprazo" : "avista"}
+                options={[
+                  { value: "avista", label: "À vista" },
+                  { value: "aprazo", label: "A prazo (parcelado)" },
+                ]}
+                onChange={(value) => {
+                  const enabled = value === "aprazo";
+                  const current = form.dueDate || form.date;
+                  // Compra a prazo não vence no dia da compra: se o vencimento
+                  // ainda é o padrão, joga para o fim do primeiro período.
+                  const dueDate =
+                    enabled && current === form.date
+                      ? addPeriodToDateKey(form.date, form.installmentPeriod, 1)
+                      : current;
+                  onChange({
+                    installmentsEnabled: enabled,
+                    paymentStatus: enabled ? "pendente" : form.paymentStatus,
+                    dueDate,
+                    installments: enabled
+                      ? buildInstallments(
+                          parseFilterAmount(form.amount) ?? 0,
+                          Number(form.installmentCount) || 3,
+                          form.installmentPeriod,
+                          dueDate
+                        )
+                      : [],
+                  });
+                }}
               />
+            ) : null}
+            {!form.installmentsEnabled && (
+              <Dropdown
+                label="Status"
+                value={form.paymentStatus}
+                options={[
+                  { value: "pago", label: "Pago" },
+                  { value: "pendente", label: "Pendente" },
+                  { value: "parcial", label: "Parcial" },
+                ]}
+                onChange={(paymentStatus) =>
+                  onChange({
+                    paymentStatus: paymentStatus as PaymentStatus,
+                    effectiveDate:
+                      paymentStatus === "pago" ? form.effectiveDate || form.date : "",
+                    dueDate: form.dueDate || form.date,
+                  })
+                }
+              />
+            )}
+            {!form.installmentsEnabled && form.paymentStatus === "pago" && (
+              <Input
+                label="Data de pagamento"
+                type="date"
+                value={form.effectiveDate}
+                onChange={(event) => onChange({ effectiveDate: event.target.value })}
+              />
+            )}
+            {!form.installmentsEnabled && form.paymentStatus !== "pago" && (
+              <Input
+                label="Vencimento"
+                type="date"
+                value={form.dueDate || form.date}
+                onChange={(event) => onChange({ dueDate: event.target.value })}
+              />
+            )}
+            {form.installmentsEnabled && (
+              <>
+                <Input
+                  label="Quantidade de parcelas"
+                  type="number"
+                  min={2}
+                  max={60}
+                  value={form.installmentCount}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    onChange({
+                      installmentCount: next,
+                      ...regenerate({ installmentCount: next }),
+                    });
+                  }}
+                />
+                <Dropdown
+                  label="Periodicidade"
+                  value={form.installmentPeriod}
+                  options={INSTALLMENT_PERIODS}
+                  onChange={(value) => {
+                    const installmentPeriod = value as InstallmentPeriod;
+                    onChange({
+                      installmentPeriod,
+                      ...regenerate({ installmentPeriod }),
+                    });
+                  }}
+                />
+                <Input
+                  label="Primeiro vencimento"
+                  type="date"
+                  value={form.dueDate || form.date}
+                  onChange={(event) => {
+                    const dueDate = event.target.value;
+                    onChange({ dueDate, ...regenerate({ dueDate }) });
+                  }}
+                />
+              </>
+            )}
+          </div>
+
+          {form.installmentsEnabled && form.installments.length > 0 && (
+            <div className="mt-5">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="label-caps">Valores a pagar</span>
+                <span
+                  className={`text-xs font-semibold ${
+                    installmentsMismatch ? "text-warning" : "text-muted"
+                  }`}
+                >
+                  {formatCurrency(installmentsTotal)}
+                  {installmentsMismatch
+                    ? ` · difere do total em ${formatCurrency(
+                        Math.abs(installmentsTotal - amountValue)
+                      )}`
+                    : ""}
+                </span>
+              </div>
+              <div className="mt-2">
+                {form.installments.map((row, index) => (
+                  <div
+                    key={row.uiKey}
+                    className="flex flex-col gap-2 border-t border-border py-3 sm:flex-row sm:items-end sm:gap-3"
+                  >
+                    <span className="shrink-0 text-xs font-bold tabular-nums text-muted sm:w-10 sm:pb-2.5">
+                      {index + 1}/{form.installments.length}
+                    </span>
+                    <div className="sm:w-40">
+                      <Input
+                        id={`parcela-${row.uiKey}-vencimento`}
+                        label="Vencimento"
+                        type="date"
+                        value={row.dueDate}
+                        onChange={(event) =>
+                          updateInstallment(row.uiKey, { dueDate: event.target.value })
+                        }
+                        compact
+                      />
+                    </div>
+                    <div className="sm:w-32">
+                      <Input
+                        id={`parcela-${row.uiKey}-valor`}
+                        label="Valor"
+                        prefix="R$"
+                        inputMode="decimal"
+                        value={row.amount}
+                        onChange={(event) =>
+                          updateInstallment(row.uiKey, { amount: event.target.value })
+                        }
+                        compact
+                        className="pl-9"
+                      />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <Input
+                        id={`parcela-${row.uiKey}-obs`}
+                        label="Observações"
+                        value={row.notes}
+                        onChange={(event) =>
+                          updateInstallment(row.uiKey, { notes: event.target.value })
+                        }
+                        placeholder="Opcional"
+                        maxLength={100}
+                        compact
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateInstallment(row.uiKey, { paid: !row.paid })
+                      }
+                      aria-pressed={row.paid}
+                      className={`shrink-0 rounded-md border px-3 py-2 text-xs font-bold transition-colors sm:mb-0 ${
+                        row.paid
+                          ? "border-success bg-success/10 text-success"
+                          : "border-border bg-card text-muted hover:text-foreground"
+                      }`}
+                    >
+                      {row.paid ? "Pago" : "Pagar"}
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
-        </div>
+        </FormSection>
       )}
+
       {!sharedFieldsOnly && (
-        <div className="mt-4">
-          <label
-            htmlFor="transaction-notes"
-            className="label-caps mb-1.5 block"
-          >
-            Observações
-          </label>
+        <FormSection title="Observações">
           <textarea
             id="transaction-notes"
             rows={3}
             value={form.notes}
             onChange={(event) => onChange({ notes: event.target.value })}
-            placeholder="Condição de pagamento, número da nota, o que mais precisar lembrar."
+            placeholder="Condição de pagamento, o que mais precisar lembrar."
+            maxLength={5000}
             className="w-full resize-none rounded-lg border border-border bg-input px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted/60 focus:border-accent focus:ring-2 focus:ring-accent/20"
           />
-        </div>
+        </FormSection>
       )}
+
       {error && (
-        <p className="mt-3 rounded-lg border border-danger/20 bg-danger/5 px-4 py-3 text-sm text-danger">
+        <p className="mt-4 rounded-lg border border-danger/20 bg-danger/5 px-4 py-3 text-sm text-danger">
           {error}
         </p>
       )}
-      <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={onCancel}
-          className="w-full sm:w-auto"
-        >
-          Cancelar
-        </Button>
-        <Button type="submit" variant="success" loading={loading} className="w-full sm:w-auto">
-          <LucidePlus className="h-4 w-4" />
-          {buttonLabel}
-        </Button>
+
+      <div className="mt-5 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+        {!sharedFieldsOnly ? (
+          <div>
+            <span className="label-caps">Valor líquido</span>
+            <p className="text-lg font-bold tabular-nums text-foreground">
+              {formatCurrency(netTotal)}
+            </p>
+          </div>
+        ) : (
+          <span />
+        )}
+        <div className="flex flex-col-reverse gap-2 sm:flex-row">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={onCancel}
+            className="w-full sm:w-auto"
+          >
+            Cancelar
+          </Button>
+          <Button type="submit" variant="success" loading={loading} className="w-full sm:w-auto">
+            <LucidePlus className="h-4 w-4" />
+            {buttonLabel}
+          </Button>
+        </div>
       </div>
     </form>
   );
@@ -4705,27 +4957,43 @@ export function FinancePage() {
 
     if (type === "despesa" && form.installmentsEnabled) {
       const count = Number(form.installmentCount);
-      if (!Number.isInteger(count) || count < 2 || count > 24) {
+      if (!Number.isInteger(count) || count < 2 || count > 60) {
         setSaving(false);
-        setFormError("Informe entre 2 e 24 parcelas.");
+        setFormError("Informe entre 2 e 60 parcelas.");
         return;
       }
 
-      const amounts = splitInstallmentAmounts(amount, count);
-      const groupId = crypto.randomUUID();
+      // A tabela da tela é a verdade: vencimento, valor e observação de cada
+      // parcela podem ter sido mexidos à mão antes de salvar.
       const firstDue = dueDate || form.date;
-      const rows = amounts.map((parcelAmount, index) => ({
+      const drafts =
+        form.installments.length === count
+          ? form.installments
+          : buildInstallments(amount, count, form.installmentPeriod, firstDue);
+
+      const parcelAmounts = drafts.map((row) => parseFilterAmount(row.amount) ?? 0);
+      if (parcelAmounts.some((value) => value <= 0)) {
+        setSaving(false);
+        setFormError("Cada parcela precisa de um valor maior que zero.");
+        return;
+      }
+
+      const groupId = crypto.randomUUID();
+      const rows = drafts.map((row, index) => ({
         workshop_id: workshopId,
         type: "despesa" as const,
         description: `${form.description.trim()} (${index + 1}/${count})`,
-        amount: parcelAmount,
+        amount: parcelAmounts[index],
         category: categoryName,
         category_id: form.categoryId,
         account_id: form.accountId,
         supplier_id: supplierId,
-        payment_status: "pendente" as const,
-        effective_date: null,
-        due_date: addMonthsToDateKey(firstDue, index),
+        payment_status: (row.paid ? "pago" : "pendente") as PaymentStatus,
+        // Marcada como paga aqui, a data do pagamento é o próprio vencimento;
+        // dá para corrigir depois no card do lançamento.
+        effective_date: row.paid ? row.dueDate : null,
+        due_date: row.dueDate,
+        notes: row.notes.trim() || null,
         transaction_date: form.date,
         installment_group_id: groupId,
         installment_number: index + 1,
@@ -4845,6 +5113,8 @@ export function FinancePage() {
       supplierId: categoryFilterAll,
       installmentsEnabled: false,
       installmentCount: "3",
+      installmentPeriod: "mensal",
+      installments: [],
       invoiceNumber: entry.invoiceNumber ?? "",
       items: entry.items ?? [],
       notes: entry.notes ?? "",
@@ -5052,6 +5322,8 @@ export function FinancePage() {
       supplierId: entry.supplierId ?? categoryFilterAll,
       installmentsEnabled: false,
       installmentCount: "3",
+      installmentPeriod: "mensal",
+      installments: [],
       invoiceNumber: entry.invoiceNumber ?? "",
       items: entry.items ?? [],
       notes: entry.notes ?? "",
