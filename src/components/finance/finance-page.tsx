@@ -2667,10 +2667,16 @@ function TransactionList({
             { payment_status: entry.paymentStatus, due_date: entry.dueDate },
             todayKeyValue
           );
+          // A parcela já se identifica pela etiqueta "Parcela" e pela coluna
+          // "1/3": repetir o "(1/3)" no nome era a mesma informação três vezes.
+          const cleanDescription =
+            entry.installmentNumber && entry.installmentTotal
+              ? installmentBaseDescription(entry.description)
+              : entry.description;
           const displayTitle =
             entry.kind === "automatic" && entry.clientName
               ? entry.clientName
-              : entry.description;
+              : cleanDescription;
           const displaySubtitle =
             entry.kind === "automatic" && entry.serviceName
               ? entry.serviceName
@@ -2707,7 +2713,7 @@ function TransactionList({
                 ? "Custo fixo"
                 : "Manual";
           const details: { label: string; value: string }[] = [
-            { label: "Descrição", value: entry.description },
+            { label: "Descrição", value: cleanDescription },
             ...(entry.serviceName
               ? [{ label: "Serviço", value: entry.serviceName }]
               : []),
@@ -3037,7 +3043,13 @@ function TransactionList({
                       {title} ({total}x)
                     </p>
                     <p className="mt-0.5 text-xs text-muted">
+                      {/* O filtro pode esconder parcelas do grupo. Contar as
+                          visíveis como se fossem todas dizia "1/1 pagas" ao
+                          lado de um "(3x)". */}
                       {paidCount}/{row.groupEntries.length} pagas
+                      {row.groupEntries.length < total
+                        ? ` · ${total - row.groupEntries.length} fora do filtro`
+                        : ""}
                       {hasOverdue ? " · parcela vencida" : ""}
                     </p>
                   </div>
@@ -4858,23 +4870,13 @@ export function FinancePage() {
           (item) => item.installmentGroupId === editingGroupId
         );
 
-        // Uma por uma: cada parcela mantém o "(n/total)" na descrição.
-        let groupError: { message: string } | null = null;
-        for (const item of groupEntries) {
-          const suffix =
-            item.installmentNumber && item.installmentTotal
-              ? ` (${item.installmentNumber}/${item.installmentTotal})`
-              : "";
-          const { error } = await supabase
-            .from("financial_transactions")
-            .update({ ...shared, description: `${base}${suffix}` })
-            .eq("id", item.id)
-            .eq("workshop_id", workshopId);
-          if (error) {
-            groupError = error;
-            break;
-          }
-        }
+        // Todas de uma vez: o "(n/total)" saiu da descrição, então as parcelas
+        // do grupo passam a ter exatamente o mesmo nome.
+        const { error: groupError } = await supabase
+          .from("financial_transactions")
+          .update({ ...shared, description: base })
+          .in("id", groupEntries.map((item) => item.id))
+          .eq("workshop_id", workshopId);
 
         setSaving(false);
         if (groupError) {
@@ -4982,7 +4984,7 @@ export function FinancePage() {
       const rows = drafts.map((row, index) => ({
         workshop_id: workshopId,
         type: "despesa" as const,
-        description: `${form.description.trim()} (${index + 1}/${count})`,
+        description: form.description.trim(),
         amount: parcelAmounts[index],
         category: categoryName,
         category_id: form.categoryId,
