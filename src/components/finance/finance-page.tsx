@@ -446,6 +446,7 @@ const categoryFilterAll = "all";
 const unassignedAccountFilter = "__sem_conta__";
 
 type TransactionSortKey = "description" | "label" | "date" | "amount" | "status";
+type SummaryBucket = "overdue" | "settled" | "upcoming";
 type TransactionSort = { key: TransactionSortKey; direction: "asc" | "desc" };
 
 const PAYMENT_STATUS_ORDER: Record<string, number> = {
@@ -2310,6 +2311,8 @@ function TransactionList({
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   // Uma linha aberta por vez: a página já é longa.
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  /** Card escolhido como filtro; null mostra tudo. */
+  const [activeBucket, setActiveBucket] = useState<SummaryBucket | null>(null);
   const editRowRef = useRef<HTMLDivElement>(null);
   const todayKeyValue = todayDateKey();
 
@@ -2326,9 +2329,18 @@ function TransactionList({
     );
   }
 
+  const bucketEntries = useMemo(
+    () =>
+      activeBucket
+        ? entries.filter((entry) => entryBucket(entry) === activeBucket)
+        : entries,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [entries, activeBucket, todayKeyValue]
+  );
+
   const sortedEntries = useMemo(
-    () => (sort ? [...entries].sort(compareEntries(sort)) : entries),
-    [entries, sort]
+    () => (sort ? [...bucketEntries].sort(compareEntries(sort)) : bucketEntries),
+    [bucketEntries, sort]
   );
 
   const listItems = useMemo(() => {
@@ -2389,6 +2401,18 @@ function TransactionList({
   const isExpense = accent === "expense";
 
   // Resumo do que está na tela: muda junto com o filtro, de propósito.
+  /** Em qual card o lançamento é contado. Cancelado não entra em nenhum. */
+  function entryBucket(entry: FinanceEntry): SummaryBucket | null {
+    if (entry.paymentStatus === "cancelado") return null;
+    if (entry.paymentStatus === "pago") return "settled";
+    return isOverdue(
+      { payment_status: entry.paymentStatus, due_date: entry.dueDate },
+      todayKeyValue
+    )
+      ? "overdue"
+      : "upcoming";
+  }
+
   const summary = useMemo(() => {
     const buckets = {
       overdue: { count: 0, total: 0 },
@@ -2401,19 +2425,10 @@ function TransactionList({
       buckets.all.count += 1;
       buckets.all.total += entry.amount;
 
-      if (entry.paymentStatus === "cancelado") continue;
-      if (entry.paymentStatus === "pago") {
-        buckets.settled.count += 1;
-        buckets.settled.total += entry.amount;
-        continue;
-      }
-      const late = isOverdue(
-        { payment_status: entry.paymentStatus, due_date: entry.dueDate },
-        todayKeyValue
-      );
-      const bucket = late ? buckets.overdue : buckets.upcoming;
-      bucket.count += 1;
-      bucket.total += entry.amount;
+      const bucket = entryBucket(entry);
+      if (!bucket) continue;
+      buckets[bucket].count += 1;
+      buckets[bucket].total += entry.amount;
     }
 
     return buckets;
@@ -2460,40 +2475,66 @@ function TransactionList({
               key: "overdue",
               label: "Em atraso",
               bucket: summary.overdue,
-              tone: "border-danger/30 bg-danger/5 text-danger",
+              text: "text-danger",
+              idle: "border-danger/30 bg-danger/5",
+              active: "border-danger bg-danger/10 ring-2 ring-danger/30",
             },
             {
               key: "settled",
               label: isExpense ? "Pago" : "Recebido",
               bucket: summary.settled,
-              tone: "border-border bg-card text-success",
+              text: "text-success",
+              idle: "border-border bg-card",
+              active: "border-success bg-success/10 ring-2 ring-success/30",
             },
             {
               key: "upcoming",
               label: isExpense ? "A pagar" : "A receber",
               bucket: summary.upcoming,
-              tone: "border-border bg-card text-warning",
+              text: "text-warning",
+              idle: "border-border bg-card",
+              active: "border-warning bg-warning/10 ring-2 ring-warning/30",
             },
             {
               key: "all",
               label: "Total",
               bucket: summary.all,
-              tone: "border-border bg-card text-foreground",
+              text: "text-foreground",
+              idle: "border-border bg-card",
+              active: "border-primary bg-primary/5 ring-2 ring-primary/25",
             },
           ] as const
-        ).map((card) => (
-          <div
-            key={card.key}
-            className={`rounded-lg border px-3 py-2.5 ${card.tone}`}
-          >
-            <p className="label-caps text-muted">
-              {card.label} ({card.bucket.count})
-            </p>
-            <p className="mt-0.5 text-base font-bold">
-              {formatCurrency(card.bucket.total)}
-            </p>
-          </div>
-        ))}
+        ).map((card) => {
+          // "Total" não é um balde: é o estado sem filtro.
+          const selected =
+            card.key === "all" ? activeBucket === null : activeBucket === card.key;
+
+          return (
+            <button
+              key={card.key}
+              type="button"
+              aria-pressed={selected}
+              // Card vazio não filtra nada: clicar levaria a uma lista em branco.
+              disabled={card.bucket.count === 0 && !selected}
+              onClick={() =>
+                setActiveBucket((current) => {
+                  if (card.key === "all") return null;
+                  return current === card.key ? null : card.key;
+                })
+              }
+              className={`rounded-lg border px-3 py-2.5 text-left transition-all disabled:cursor-default ${
+                card.text
+              } ${selected ? card.active : `${card.idle} hover:border-foreground/20`}`}
+            >
+              <p className="label-caps text-muted">
+                {card.label} ({card.bucket.count})
+              </p>
+              <p className="mt-0.5 text-base font-bold">
+                {formatCurrency(card.bucket.total)}
+              </p>
+            </button>
+          );
+        })}
       </div>
       <div className="overflow-x-auto">
         <div className={isExpense ? "min-w-[1120px]" : "min-w-[960px]"}>
@@ -3016,6 +3057,11 @@ function TransactionList({
             return renderEntry(row.entry, row.nested);
           });
         })()}
+        {pagedItems.length === 0 && (
+          <p className="px-3 py-10 text-center text-sm text-muted">
+            Nenhum lançamento neste filtro.
+          </p>
+        )}
         </div>
       </div>
       {totalPages > 1 && (
