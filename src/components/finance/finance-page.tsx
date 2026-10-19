@@ -2476,7 +2476,9 @@ function TransactionList({
               label: "Em atraso",
               bucket: summary.overdue,
               text: "text-danger",
-              idle: "border-danger/30 bg-danger/5",
+              // Em repouso é igual aos outros: o vermelho fica para o valor e
+              // para quando o card está escolhido.
+              idle: "border-border bg-card",
               active: "border-danger bg-danger/10 ring-2 ring-danger/30",
             },
             {
