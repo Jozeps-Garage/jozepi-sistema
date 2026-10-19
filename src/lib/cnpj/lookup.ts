@@ -23,6 +23,7 @@ export type CnpjLookupResult = {
   email: string;
   cidadeUf: string;
   endereco: string;
+  cep: string;
   situacao: string;
   /** Baixada, suspensa ou inapta: vale avisar antes de cadastrar. */
   ativa: boolean;
@@ -57,6 +58,11 @@ export function isValidCnpj(value: string) {
   };
 
   return check(12) === Number(d[12]) && check(13) === Number(d[13]);
+}
+
+function formatCep(raw: string) {
+  const digits = raw.replace(/\D/g, "");
+  return digits.length === 8 ? `${digits.slice(0, 5)}-${digits.slice(5)}` : raw;
 }
 
 function phoneFrom(raw: unknown) {
@@ -102,8 +108,13 @@ export async function lookupCnpj(value: string): Promise<CnpjLookupResult> {
   const data = (await response.json()) as Record<string, unknown>;
   const municipio = text(data.municipio);
   const uf = text(data.uf);
-  const logradouro = text(data.logradouro);
+  // "AVENIDA", "RUA", "RODOVIA": vem separado do nome da via.
+  const tipoLogradouro = text(data.descricao_tipo_de_logradouro);
+  const logradouro = [tipoLogradouro, text(data.logradouro)]
+    .filter(Boolean)
+    .join(" ");
   const numero = text(data.numero);
+  const complemento = text(data.complemento);
   const bairro = text(data.bairro);
   const situacao = text(data.descricao_situacao_cadastral);
 
@@ -121,7 +132,8 @@ export async function lookupCnpj(value: string): Promise<CnpjLookupResult> {
     telefone: phoneFrom(data.ddd_telefone_1),
     email: text(data.email).toLowerCase(),
     cidadeUf: municipio && uf ? `${municipio}/${uf}` : municipio || uf,
-    endereco: [rua, bairro].filter(Boolean).join(" - "),
+    endereco: [rua, complemento, bairro].filter(Boolean).join(" - "),
+    cep: formatCep(text(data.cep)),
     situacao,
     ativa: situacao.toUpperCase() === "ATIVA",
   };

@@ -94,6 +94,7 @@ interface Supplier {
   name: string;
   tradeName?: string | null;
   address?: string | null;
+  zipCode?: string | null;
   contactName?: string | null;
   phone: string | null;
   email?: string | null;
@@ -114,6 +115,7 @@ interface SupplierForm {
   document: string;
   cityState: string;
   address: string;
+  zipCode: string;
   notes: string;
 }
 
@@ -307,6 +309,7 @@ const emptySupplierForm: SupplierForm = {
   name: "",
   tradeName: "",
   address: "",
+  zipCode: "",
   contactName: "",
   phone: "",
   email: "",
@@ -329,14 +332,18 @@ function mergeSuppliers(current: Supplier[], incoming: Supplier[]) {
 }
 
 const SUPPLIER_SELECT_FIELDS =
-  "id, workshop_id, name, trade_name, contact_name, phone, email, document, city_state, address, category, notes, created_at, updated_at";
+  "id, workshop_id, name, trade_name, contact_name, phone, email, document, city_state, address, zip_code, category, notes, created_at, updated_at";
 /** Sem a migration 043 as colunas novas não existem; a consulta cai para esta. */
 const SUPPLIER_SELECT_LEGACY =
   "id, workshop_id, name, contact_name, phone, email, document, city_state, category, notes, created_at, updated_at";
 
 function isMissingSupplierColumn(error: { message?: string } | null) {
   const message = error?.message?.toLowerCase() ?? "";
-  return message.includes("trade_name") || message.includes("address");
+  return (
+    message.includes("trade_name") ||
+    message.includes("address") ||
+    message.includes("zip_code")
+  );
 }
 
 function mapSupplierRow(row: Record<string, unknown>): Supplier {
@@ -346,6 +353,7 @@ function mapSupplierRow(row: Record<string, unknown>): Supplier {
     name: String(row.name),
     tradeName: typeof row.trade_name === "string" ? row.trade_name : null,
     address: typeof row.address === "string" ? row.address : null,
+    zipCode: typeof row.zip_code === "string" ? row.zip_code : null,
     contactName: typeof row.contact_name === "string" ? row.contact_name : null,
     phone: typeof row.phone === "string" ? row.phone : null,
     email: typeof row.email === "string" ? row.email : null,
@@ -1054,6 +1062,7 @@ export function ProductsPage() {
         email: prev.email.trim() || data.email,
         cityState: prev.cityState.trim() || data.cidadeUf,
         address: prev.address.trim() || data.endereco,
+        zipCode: prev.zipCode.trim() || data.cep,
       }));
       setCnpjMessage(
         data.ativa
@@ -1095,6 +1104,7 @@ export function ProductsPage() {
       name: supplier.name,
       tradeName: getSupplierExtra(supplier, "tradeName"),
       address: getSupplierExtra(supplier, "address"),
+      zipCode: getSupplierExtra(supplier, "zipCode"),
       contactName: getSupplierExtra(supplier, "contactName"),
       phone: supplier.phone ? formatPhone(supplier.phone) : "",
       email: getSupplierExtra(supplier, "email"),
@@ -1148,6 +1158,7 @@ export function ProductsPage() {
       name: supplierForm.name.trim(),
       trade_name: supplierForm.tradeName.trim() || null,
       address: supplierForm.address.trim() || null,
+      zip_code: supplierForm.zipCode.trim() || null,
       contact_name: supplierForm.contactName.trim() || null,
       phone: normalizedPhone,
       email: supplierForm.email.trim() || null,
@@ -1176,7 +1187,12 @@ export function ProductsPage() {
     let result = await saveSupplier(payload, SUPPLIER_SELECT_FIELDS);
     if (isMissingSupplierColumn(result.error)) {
       // Sem a 043: grava o que a tabela aceita e perde fantasia e endereço.
-      const { trade_name: _tradeName, address: _address, ...legacy } = payload;
+      const {
+        trade_name: _tradeName,
+        address: _address,
+        zip_code: _zipCode,
+        ...legacy
+      } = payload;
       result = await saveSupplier(legacy, SUPPLIER_SELECT_LEGACY);
     }
 
@@ -2528,6 +2544,12 @@ export function ProductsPage() {
                 onChange={(event) => updateSupplierForm({ address: event.target.value })}
                 placeholder="Rua das Oficinas, 120 - Centro"
               />
+              <Input
+                label="CEP (opcional)"
+                value={supplierForm.zipCode}
+                onChange={(event) => updateSupplierForm({ zipCode: event.target.value })}
+                placeholder="95010-000"
+              />
               <div className="space-y-1.5">
                 <label className="block text-sm font-semibold text-foreground">
                   Observações
@@ -2681,8 +2703,11 @@ export function ProductsPage() {
                           />
                         }
                       />
+                      <SupplierDetail label="Razão social" value={selectedSupplier.name} />
                       <SupplierDetail label="CNPJ" value={getSupplierExtra(selectedSupplier, "document")} />
+                      <SupplierDetail label="Endereço" value={getSupplierExtra(selectedSupplier, "address")} />
                       <SupplierDetail label="Cidade/UF" value={getSupplierExtra(selectedSupplier, "cityState")} />
+                      <SupplierDetail label="CEP" value={getSupplierExtra(selectedSupplier, "zipCode")} />
                       <SupplierDetail label="Observações" value={selectedSupplier.notes ?? ""} />
                     </div>
                   </div>
