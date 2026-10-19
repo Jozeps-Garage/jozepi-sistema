@@ -24,7 +24,8 @@ interface DropdownProps {
   /** "top" põe a ação como primeira linha, destacada — o atalho de cadastrar. */
   actionPlacement?: "top" | "bottom";
   createPlaceholder?: string;
-  onCreateOption?: (label: string) => string | void;
+  /** Devolve uma mensagem para barrar a criação; nada (ou promessa) se deu certo. */
+  onCreateOption?: (label: string) => string | void | Promise<string | void>;
   onDeleteOption?: (value: string) => void;
   /** Omitido, liga sozinho em lista longa. Passe true/false para forçar. */
   searchable?: boolean;
@@ -62,6 +63,7 @@ export function Dropdown({
   const [creating, setCreating] = useState(false);
   const [createValue, setCreateValue] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
+  const [creatingBusy, setCreatingBusy] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const closeTimeoutRef = useRef<number | null>(null);
   const inputId = id ?? label?.toLowerCase().replace(/\s/g, "-") ?? "dropdown";
@@ -127,10 +129,11 @@ export function Dropdown({
     setCreating(false);
     setCreateError(null);
     setCreateValue("");
+    setCreatingBusy(false);
   }
 
-  function submitCreatedOption() {
-    if (!onCreateOption) return;
+  async function submitCreatedOption() {
+    if (!onCreateOption || creatingBusy) return;
 
     const label = createValue.trim();
     if (!label) {
@@ -138,13 +141,19 @@ export function Dropdown({
       return;
     }
 
-    const error = onCreateOption(label);
-    if (error) {
-      setCreateError(error);
-      return;
+    setCreatingBusy(true);
+    try {
+      const error = await onCreateOption(label);
+      if (error) {
+        setCreateError(error);
+        return;
+      }
+      cancelCreating();
+      // Criou: a escolha já foi feita, não faz sentido continuar na lista.
+      closeDropdown();
+    } finally {
+      setCreatingBusy(false);
     }
-
-    cancelCreating();
   }
 
   useEffect(() => {
@@ -154,6 +163,84 @@ export function Dropdown({
       }
     };
   }, []);
+
+  const atTop = actionPlacement === "top";
+  const hasAction = Boolean(actionLabel && (onAction || onCreateOption));
+
+  /**
+   * O atalho de cadastrar. No topo vai destacado, com recorte pontilhado, como
+   * primeira linha da lista; embaixo fica discreto, no rodapé do menu. Quando
+   * é criação no próprio dropdown, vira o campo de nome no mesmo lugar.
+   */
+  const actionNode =
+    creating && onCreateOption ? (
+      <div className={cn("shrink-0", atTop ? "mb-2" : "mt-1")}>
+        <div className="flex items-center gap-1 rounded-md border border-border bg-input pr-1">
+          <input
+            value={createValue}
+            onChange={(event) => {
+              setCreateValue(event.target.value);
+              setCreateError(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                event.stopPropagation();
+                void submitCreatedOption();
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                cancelCreating();
+              }
+            }}
+            autoFocus
+            disabled={creatingBusy}
+            placeholder={createPlaceholder}
+            className="min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-foreground placeholder:text-muted/60 focus:outline-none disabled:opacity-60"
+          />
+          <button
+            type="button"
+            onClick={() => void submitCreatedOption()}
+            disabled={creatingBusy}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-emerald-600 transition-colors hover:bg-emerald-600/10 disabled:opacity-60"
+            aria-label="Salvar"
+            title="Salvar"
+          >
+            {creatingBusy ? (
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            ) : (
+              <Check size={14} weight={DROPDOWN_ICON_WEIGHT} aria-hidden />
+            )}
+          </button>
+        </div>
+        {createError && (
+          <p className="mt-1.5 px-1 text-xs font-medium text-danger">{createError}</p>
+        )}
+      </div>
+    ) : hasAction ? (
+      <button
+        type="button"
+        onClick={() => {
+          if (onCreateOption) {
+            startCreating();
+            return;
+          }
+
+          onAction?.();
+          closeDropdown();
+        }}
+        className={cn(
+          "flex w-full shrink-0 items-center gap-2 rounded-md text-left text-sm font-semibold transition-colors duration-200",
+          atTop
+            ? "mb-2 min-h-11 border border-dashed border-success/50 bg-success/5 px-3 py-3 text-success hover:border-success hover:bg-success/10 sm:min-h-0 sm:py-2.5"
+            : "mt-1 px-3 py-2 text-muted hover:bg-background hover:text-foreground"
+        )}
+      >
+        <Plus size={atTop ? 16 : 14} weight={DROPDOWN_ICON_WEIGHT} aria-hidden />
+        {actionLabel}
+      </button>
+    ) : null;
 
   return (
     <div className={cn("relative", compact ? "space-y-1" : "space-y-1.5", className)}>
@@ -218,19 +305,7 @@ export function Dropdown({
               />
             </div>
           )}
-          {actionPlacement === "top" && actionLabel && onAction && (
-            <button
-              type="button"
-              onClick={() => {
-                onAction();
-                closeDropdown();
-              }}
-              className="mb-2 flex min-h-11 w-full shrink-0 items-center gap-2 rounded-md border border-dashed border-success/50 bg-success/5 px-3 py-3 text-left text-sm font-semibold text-success transition-colors duration-200 hover:border-success hover:bg-success/10 sm:min-h-0 sm:py-2.5"
-            >
-              <Plus size={16} weight={DROPDOWN_ICON_WEIGHT} aria-hidden />
-              {actionLabel}
-            </button>
-          )}
+          {actionPlacement === "top" && actionNode}
           <div role="listbox" aria-labelledby={inputId} className="min-h-0 flex-1 space-y-1 overflow-y-auto">
             {canSearch && visibleOptions.length === 0 && (
               <p className="px-3 py-2 text-sm text-muted">Nenhum resultado encontrado.</p>
@@ -277,65 +352,7 @@ export function Dropdown({
               );
             })}
           </div>
-          {creating && onCreateOption ? (
-            <div className="mt-1">
-              <div className="flex items-center gap-1 rounded-md border border-border bg-input pr-1">
-                <input
-                  value={createValue}
-                  onChange={(event) => {
-                    setCreateValue(event.target.value);
-                    setCreateError(null);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      submitCreatedOption();
-                    }
-                    if (event.key === "Escape") {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      cancelCreating();
-                    }
-                  }}
-                  autoFocus
-                  placeholder={createPlaceholder}
-                  className="min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-foreground placeholder:text-muted/60 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={submitCreatedOption}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-emerald-600 transition-colors hover:bg-emerald-600/10"
-                  aria-label="Salvar"
-                  title="Salvar"
-                >
-                  <Check size={14} weight={DROPDOWN_ICON_WEIGHT} aria-hidden />
-                </button>
-              </div>
-              {createError && (
-                <p className="mt-1.5 px-1 text-xs font-medium text-danger">
-                  {createError}
-                </p>
-              )}
-            </div>
-          ) : actionPlacement === "bottom" && actionLabel && (onAction || onCreateOption) && (
-            <button
-              type="button"
-              onClick={() => {
-                if (onCreateOption) {
-                  startCreating();
-                  return;
-                }
-
-                onAction?.();
-                closeDropdown();
-              }}
-              className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold text-muted transition-colors duration-200 hover:bg-background hover:text-foreground"
-            >
-              <Plus size={14} weight={DROPDOWN_ICON_WEIGHT} aria-hidden />
-              {actionLabel}
-            </button>
-          )}
+          {actionPlacement === "bottom" && actionNode}
         </div>
       )}
       <style>{`

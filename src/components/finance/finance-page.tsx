@@ -3172,6 +3172,7 @@ function TransactionFormCard({
   categories,
   accountOptions,
   supplierOptions,
+  onCreateCategory,
   onCreateSupplier,
   loading,
   error,
@@ -3189,6 +3190,8 @@ function TransactionFormCard({
   form: TransactionForm;
   categories: { value: string; label: string }[];
   accountOptions: { value: string; label: string }[];
+  /** Cadastra a categoria pelo próprio dropdown. Devolve mensagem se não deu. */
+  onCreateCategory?: (name: string) => Promise<string | void>;
   supplierOptions?: { value: string; label: string }[];
   /** Abre o cadastro rápido a partir do próprio dropdown. */
   onCreateSupplier?: () => void;
@@ -3302,6 +3305,10 @@ function TransactionFormCard({
           options={categories}
           onChange={(categoryId) => onChange({ categoryId })}
           placeholder="Selecione a categoria"
+          actionLabel={onCreateCategory ? "Nova categoria" : undefined}
+          actionPlacement="top"
+          onCreateOption={onCreateCategory}
+          createPlaceholder="Nome da categoria"
         />
         {!sharedFieldsOnly && (
         <Dropdown
@@ -5624,6 +5631,60 @@ export function FinancePage() {
     );
   }
 
+  /**
+   * Cadastro de categoria pelo dropdown do lançamento, que é onde a falta
+   * aparece. O tipo vem da página: em Receitas nasce receita, em Despesas
+   * despesa — não há o que escolher. Já sai selecionada.
+   */
+  async function handleCreateCategory(name: string, type: TransactionType) {
+    const trimmed = name.trim();
+    const repeated = categories.find(
+      (category) =>
+        category.type === type &&
+        category.name.trim().toLowerCase() === trimmed.toLowerCase()
+    );
+    if (repeated) {
+      // Já existe mas estava desativada: reativa em vez de duplicar.
+      if (!repeated.active) {
+        try {
+          await handleSaveCategory({
+            id: repeated.id,
+            name: repeated.name,
+            type: repeated.type,
+            active: true,
+          });
+        } catch (err) {
+          return err instanceof Error ? err.message : "Não foi possível criar.";
+        }
+      }
+      selectCategory(repeated.id, type);
+      return;
+    }
+
+    if (!workshopId) return "Oficina não encontrada.";
+
+    try {
+      const saved = await saveFinancialCategory(supabase, workshopId, {
+        name: trimmed,
+        type,
+        active: true,
+      });
+      setCategories((prev) =>
+        [...prev.filter((category) => category.id !== saved.id), saved].sort((a, b) =>
+          a.name.localeCompare(b.name, "pt-BR")
+        )
+      );
+      selectCategory(saved.id, type);
+    } catch (err) {
+      return err instanceof Error ? err.message : "Não foi possível criar.";
+    }
+  }
+
+  function selectCategory(categoryId: string, type: TransactionType) {
+    const setForm = type === "receita" ? setRevenueForm : setExpenseForm;
+    setForm((prev) => ({ ...prev, categoryId }));
+  }
+
   async function handleSaveCategory(input: {
     id?: string;
     name: string;
@@ -6159,6 +6220,7 @@ export function FinancePage() {
                   description="Use para gorjetas, receitas avulsas ou ajustes."
                   form={revenueForm}
                   categories={revenueCategorySelectOptions}
+                  onCreateCategory={(name) => handleCreateCategory(name, "receita")}
                   accountOptions={activeAccountOptions}
                   loading={savingRevenue}
                   error={revenueError}
@@ -6182,6 +6244,7 @@ export function FinancePage() {
                       description="Atualize os dados deste lançamento."
                       form={revenueForm}
                       categories={revenueCategorySelectOptions}
+                      onCreateCategory={(name) => handleCreateCategory(name, "receita")}
                       accountOptions={activeAccountOptions}
                       loading={savingRevenue}
                       error={revenueError}
@@ -6265,6 +6328,7 @@ export function FinancePage() {
                   description="Registre compras, custos fixos e investimentos."
                   form={expenseForm}
                   categories={expenseCategorySelectOptions}
+                  onCreateCategory={(name) => handleCreateCategory(name, "despesa")}
                   accountOptions={activeAccountOptions}
                   supplierOptions={expenseSupplierOptions}
                   onCreateSupplier={() => setSupplierFormOpen(true)}
@@ -6296,6 +6360,7 @@ export function FinancePage() {
                       allowItems
                       form={expenseForm}
                       categories={expenseCategorySelectOptions}
+                      onCreateCategory={(name) => handleCreateCategory(name, "despesa")}
                       accountOptions={activeAccountOptions}
                       supplierOptions={expenseSupplierOptions}
                       onCreateSupplier={() => setSupplierFormOpen(true)}

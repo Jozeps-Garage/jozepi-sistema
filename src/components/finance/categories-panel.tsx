@@ -1,9 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
-import { Dropdown } from "@/components/ui/dropdown";
 import { Input } from "@/components/ui/input";
 import type { FinancialCategory, TransactionType } from "@/lib/finance/types";
 
@@ -112,8 +110,6 @@ export function CategoriesPanel({
     active: boolean;
   }) => Promise<void>;
 }) {
-  const [name, setName] = useState("");
-  const [type, setType] = useState<TransactionType>("despesa");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -121,24 +117,6 @@ export function CategoriesPanel({
 
   const revenues = categories.filter((category) => category.type === "receita");
   const expenses = categories.filter((category) => category.type === "despesa");
-
-  async function handleCreate(event: React.FormEvent) {
-    event.preventDefault();
-    if (!name.trim()) {
-      setError("Informe o nome da categoria.");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      await onSave({ name, type, active: true });
-      setName("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Não foi possível criar.");
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function handleRename(category: FinancialCategory) {
     if (!editName.trim()) return;
@@ -181,37 +159,17 @@ export function CategoriesPanel({
       <div>
         <h2 className="section-title">Categorias</h2>
         <p className="mt-1 text-sm text-muted">
-          Usadas nos lançamentos de receita e despesa. Desativar esconde do seletor, sem apagar o histórico.
+          Para criar, use o &ldquo;Nova categoria&rdquo; no seletor da própria
+          receita ou despesa. Aqui você renomeia e desativa — desativar esconde
+          do seletor, sem apagar o histórico.
         </p>
       </div>
 
-      <form
-        onSubmit={(event) => void handleCreate(event)}
-        className="rounded-lg border border-border bg-card p-4 shadow-card sm:p-5"
-      >
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_12rem_auto] md:items-end">
-          <Input
-            label="Nova categoria"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="Ex.: Produtos químicos"
-          />
-          <Dropdown
-            label="Tipo"
-            value={type}
-            options={[
-              { value: "receita", label: "Receita" },
-              { value: "despesa", label: "Despesa" },
-            ]}
-            onChange={(value) => setType(value as TransactionType)}
-          />
-          <Button type="submit" variant="success" loading={saving} className="md:mb-0.5">
-            <Plus size={16} weight="light" aria-hidden />
-            Criar
-          </Button>
-        </div>
-        {error && <p className="mt-3 text-sm text-danger">{error}</p>}
-      </form>
+      {error && (
+        <p className="rounded-lg border border-danger/20 bg-danger/5 px-4 py-3 text-sm text-danger">
+          {error}
+        </p>
+      )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <CategoryGroup
