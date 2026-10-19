@@ -90,7 +90,10 @@ type ProductDeleteConfirm =
 interface Supplier {
   id: string;
   workshop_id: string;
+  /** Razão social. O que as telas mostram é `supplierLabel`. */
   name: string;
+  tradeName?: string | null;
+  address?: string | null;
   contactName?: string | null;
   phone: string | null;
   email?: string | null;
@@ -104,12 +107,19 @@ interface Supplier {
 
 interface SupplierForm {
   name: string;
+  tradeName: string;
   contactName: string;
   phone: string;
   email: string;
   document: string;
   cityState: string;
+  address: string;
   notes: string;
+}
+
+/** Nome de fachada quando existe; senão a razão social. */
+function supplierLabel(supplier: Pick<Supplier, "name" | "tradeName">) {
+  return supplier.tradeName?.trim() || supplier.name;
 }
 
 interface ReplenishForm {
@@ -295,6 +305,8 @@ const productPageTabs: { id: ProductPageTab; label: string }[] = [
 ];
 const emptySupplierForm: SupplierForm = {
   name: "",
+  tradeName: "",
+  address: "",
   contactName: "",
   phone: "",
   email: "",
@@ -317,13 +329,23 @@ function mergeSuppliers(current: Supplier[], incoming: Supplier[]) {
 }
 
 const SUPPLIER_SELECT_FIELDS =
+  "id, workshop_id, name, trade_name, contact_name, phone, email, document, city_state, address, category, notes, created_at, updated_at";
+/** Sem a migration 043 as colunas novas não existem; a consulta cai para esta. */
+const SUPPLIER_SELECT_LEGACY =
   "id, workshop_id, name, contact_name, phone, email, document, city_state, category, notes, created_at, updated_at";
+
+function isMissingSupplierColumn(error: { message?: string } | null) {
+  const message = error?.message?.toLowerCase() ?? "";
+  return message.includes("trade_name") || message.includes("address");
+}
 
 function mapSupplierRow(row: Record<string, unknown>): Supplier {
   return {
     id: String(row.id),
     workshop_id: String(row.workshop_id),
     name: String(row.name),
+    tradeName: typeof row.trade_name === "string" ? row.trade_name : null,
+    address: typeof row.address === "string" ? row.address : null,
     contactName: typeof row.contact_name === "string" ? row.contact_name : null,
     phone: typeof row.phone === "string" ? row.phone : null,
     email: typeof row.email === "string" ? row.email : null,
@@ -810,12 +832,22 @@ export function ProductsPage() {
           clearLocalCatalogStorage();
         }
 
-        const [suppliersResult, catalog] = await Promise.all([
-          supabase
+        const loadSuppliers = async () => {
+          const full = await supabase
             .from("suppliers")
             .select(SUPPLIER_SELECT_FIELDS)
             .eq("workshop_id", resolvedWorkshopId)
-            .order("name", { ascending: true }),
+            .order("name", { ascending: true });
+          if (!isMissingSupplierColumn(full.error)) return full;
+          return supabase
+            .from("suppliers")
+            .select(SUPPLIER_SELECT_LEGACY)
+            .eq("workshop_id", resolvedWorkshopId)
+            .order("name", { ascending: true });
+        };
+
+        const [suppliersResult, catalog] = await Promise.all([
+          loadSuppliers(),
           loadSupabaseCatalog(supabase, resolvedWorkshopId),
         ]);
 
@@ -990,13 +1022,14 @@ export function ProductsPage() {
     { value: "", label: "Sem fornecedor" },
     ...persistedSuppliers.map((supplier) => ({
       value: supplier.id,
-      label: supplier.name,
+      label: supplierLabel(supplier),
     })),
   ];
 
   function getSupplierName(supplierId?: string) {
     if (!supplierId) return "Sem fornecedor";
-    return suppliers.find((supplier) => supplier.id === supplierId)?.name ?? "Fornecedor removido";
+    const supplier = suppliers.find((item) => item.id === supplierId);
+    return supplier ? supplierLabel(supplier) : "Fornecedor removido";
   }
 
   function updateSupplierForm(patch: Partial<SupplierForm>) {
@@ -1015,10 +1048,12 @@ export function ProductsPage() {
         document: data.cnpj,
         // O que já foi digitado manda: a consulta preenche o que está vazio,
         // não reescreve o que você corrigiu à mão.
-        name: prev.name.trim() || data.nomeFantasia || data.razaoSocial,
+        name: prev.name.trim() || data.razaoSocial,
+        tradeName: prev.tradeName.trim() || data.nomeFantasia,
         phone: prev.phone.trim() || data.telefone,
         email: prev.email.trim() || data.email,
         cityState: prev.cityState.trim() || data.cidadeUf,
+        address: prev.address.trim() || data.endereco,
       }));
       setCnpjMessage(
         data.ativa
@@ -1058,6 +1093,8 @@ export function ProductsPage() {
     setEditingSupplierId(supplier.id);
     setSupplierForm({
       name: supplier.name,
+      tradeName: getSupplierExtra(supplier, "tradeName"),
+      address: getSupplierExtra(supplier, "address"),
       contactName: getSupplierExtra(supplier, "contactName"),
       phone: supplier.phone ? formatPhone(supplier.phone) : "",
       email: getSupplierExtra(supplier, "email"),
@@ -1109,6 +1146,8 @@ export function ProductsPage() {
     const payload = {
       workshop_id: workshopId,
       name: supplierForm.name.trim(),
+      trade_name: supplierForm.tradeName.trim() || null,
+      address: supplierForm.address.trim() || null,
       contact_name: supplierForm.contactName.trim() || null,
       phone: normalizedPhone,
       email: supplierForm.email.trim() || null,
@@ -1119,19 +1158,27 @@ export function ProductsPage() {
       updated_at: now,
     };
 
-    const result = editingSupplierId
-      ? await supabase
-          .from("suppliers")
-          .update(payload)
-          .eq("id", editingSupplierId)
-          .eq("workshop_id", workshopId)
-          .select(SUPPLIER_SELECT_FIELDS)
-          .single()
-      : await supabase
-          .from("suppliers")
-          .insert(payload)
-          .select(SUPPLIER_SELECT_FIELDS)
-          .single();
+    const saveSupplier = async (data: Record<string, unknown>, fields: string) =>
+      editingSupplierId
+        ? await supabase
+            .from("suppliers")
+            .update(data)
+            .eq("id", editingSupplierId)
+            .eq("workshop_id", workshopId)
+            .select(fields)
+            .single()
+        : await supabase
+            .from("suppliers")
+            .insert(data)
+            .select(fields)
+            .single();
+
+    let result = await saveSupplier(payload, SUPPLIER_SELECT_FIELDS);
+    if (isMissingSupplierColumn(result.error)) {
+      // Sem a 043: grava o que a tabela aceita e perde fantasia e endereço.
+      const { trade_name: _tradeName, address: _address, ...legacy } = payload;
+      result = await saveSupplier(legacy, SUPPLIER_SELECT_LEGACY);
+    }
 
     setSavingSupplier(false);
 
@@ -1142,7 +1189,9 @@ export function ProductsPage() {
       return;
     }
 
-    const supplier = mapSupplierRow(result.data as Record<string, unknown>);
+    const supplier = mapSupplierRow(
+      result.data as unknown as Record<string, unknown>
+    );
 
     setSuppliers((prev) =>
       editingSupplierId
@@ -2378,10 +2427,16 @@ export function ProductsPage() {
             </h3>
             <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
               <Input
-                label="Nome da empresa"
+                label="Razão social"
                 value={supplierForm.name}
                 onChange={(event) => updateSupplierForm({ name: event.target.value })}
-                placeholder="Distribuidora Auto Clean"
+                placeholder="Distribuidora Auto Clean LTDA"
+              />
+              <Input
+                label="Nome fantasia (opcional)"
+                value={supplierForm.tradeName}
+                onChange={(event) => updateSupplierForm({ tradeName: event.target.value })}
+                placeholder="Auto Clean"
               />
               <Input
                 label="Nome do contato"
@@ -2467,6 +2522,12 @@ export function ProductsPage() {
                 onChange={(event) => updateSupplierForm({ cityState: event.target.value })}
                 placeholder="Caxias do Sul/RS"
               />
+              <Input
+                label="Endereço (opcional)"
+                value={supplierForm.address}
+                onChange={(event) => updateSupplierForm({ address: event.target.value })}
+                placeholder="Rua das Oficinas, 120 - Centro"
+              />
               <div className="space-y-1.5">
                 <label className="block text-sm font-semibold text-foreground">
                   Observações
@@ -2530,7 +2591,7 @@ export function ProductsPage() {
                       >
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold text-foreground">
-                            {supplier.name}
+                            {supplierLabel(supplier)}
                           </p>
                           {getSupplierExtra(supplier, "contactName") && (
                             <p className="mt-1 truncate text-xs text-muted">
@@ -2549,7 +2610,7 @@ export function ProductsPage() {
                               startEditingSupplier(supplier);
                             }}
                             className="flex h-8 w-8 items-center justify-center rounded-lg text-success transition-colors hover:bg-success/10"
-                            aria-label={`Editar ${supplier.name}`}
+                            aria-label={`Editar ${supplierLabel(supplier)}`}
                             title="Editar fornecedor"
                           >
                             <PencilSimple size={16} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
@@ -2561,7 +2622,7 @@ export function ProductsPage() {
                               void requestDeleteSupplier(supplier);
                             }}
                             className="flex h-8 w-8 items-center justify-center rounded-lg text-danger transition-colors hover:bg-danger/10"
-                            aria-label={`Excluir ${supplier.name}`}
+                            aria-label={`Excluir ${supplierLabel(supplier)}`}
                             title="Excluir fornecedor"
                           >
                             <Trash size={16} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
@@ -2804,7 +2865,7 @@ export function ProductsPage() {
         title="Excluir fornecedor"
         description={
           deleteConfirm?.type === "supplier"
-            ? `Deseja excluir ${deleteConfirm.supplier.name}?`
+            ? `Deseja excluir ${supplierLabel(deleteConfirm.supplier)}?`
             : ""
         }
         confirmLabel="Excluir fornecedor"

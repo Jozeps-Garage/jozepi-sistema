@@ -487,6 +487,14 @@ function compareEntries({ key, direction }: TransactionSort) {
   };
 }
 
+/** Fornecedor pelo nome de fachada; a razão social é o que sobra no cadastro. */
+function supplierDisplayName(
+  supplier: { name: string; trade_name?: string | null } | undefined
+) {
+  if (!supplier) return "Fornecedor removido";
+  return supplier.trade_name?.trim() || supplier.name;
+}
+
 function matchesAccountFilter(entry: FinanceEntry, filter: string) {
   if (filter === categoryFilterAll) return true;
   if (filter === unassignedAccountFilter) return !entry.accountId;
@@ -3561,7 +3569,7 @@ export function FinancePage() {
           .order("completed_at", { ascending: false }),
         supabase
           .from("suppliers")
-          .select("id, name")
+          .select("id, name, trade_name")
           .eq("workshop_id", profileWorkshopId)
           .order("name", { ascending: true }),
         supabase
@@ -3827,7 +3835,7 @@ export function FinancePage() {
         serviceName: serviceNames,
         supplierId: transaction.supplier_id ?? undefined,
         supplierName: transaction.supplier_id
-          ? suppliersById.get(transaction.supplier_id)?.name ?? "Fornecedor removido"
+          ? supplierDisplayName(suppliersById.get(transaction.supplier_id))
           : undefined,
         source: transaction.source ?? undefined,
         serviceOrderId: transaction.service_order_id ?? undefined,

@@ -120,7 +120,7 @@ export async function fetchReportsSourceData(
       .order("name", { ascending: true }),
     supabase
       .from("suppliers")
-      .select("id, name")
+      .select("id, name, trade_name")
       .eq("workshop_id", workshopId),
     supabase
       .from("service_orders")
@@ -157,11 +157,13 @@ export async function fetchReportsSourceData(
     address: client.address ?? null,
   }));
 
+  // Fachada quando existe; a razão social é o que fica guardado em `name`.
   const suppliersById = new Map(
-    ((suppliersData as { id: string; name: string }[] | null) ?? []).map((s) => [
-      s.id,
-      s.name,
-    ])
+    (
+      (suppliersData as
+        | { id: string; name: string; trade_name?: string | null }[]
+        | null) ?? []
+    ).map((s) => [s.id, s.trade_name?.trim() || s.name])
   );
 
   const orders = ((ordersData as unknown as RawOrder[] | null) ?? []);

@@ -107,6 +107,13 @@ export async function lookupCnpj(value: string): Promise<CnpjLookupResult> {
   const bairro = text(data.bairro);
   const situacao = text(data.descricao_situacao_cadastral);
 
+  // Alguns registros da Receita já trazem o número dentro do logradouro
+  // ("PAULISTA 37" com numero "37"), e repetir ficaria "PAULISTA 37, 37".
+  const rua =
+    numero && logradouro.endsWith(` ${numero}`)
+      ? logradouro
+      : [logradouro, numero].filter(Boolean).join(", ");
+
   return {
     cnpj: formatCnpj(digits),
     razaoSocial: text(data.razao_social),
@@ -114,9 +121,7 @@ export async function lookupCnpj(value: string): Promise<CnpjLookupResult> {
     telefone: phoneFrom(data.ddd_telefone_1),
     email: text(data.email).toLowerCase(),
     cidadeUf: municipio && uf ? `${municipio}/${uf}` : municipio || uf,
-    endereco: [logradouro && numero ? `${logradouro}, ${numero}` : logradouro, bairro]
-      .filter(Boolean)
-      .join(" - "),
+    endereco: [rua, bairro].filter(Boolean).join(" - "),
     situacao,
     ativa: situacao.toUpperCase() === "ATIVA",
   };
