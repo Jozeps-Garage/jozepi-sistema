@@ -86,6 +86,8 @@ export function ClientSheet({
       const client = await createClientWithVehicles(supabase, workshopId, {
         name,
         phone,
+        document: "",
+        email: "",
         notes,
         vehicles,
       });

@@ -21,6 +21,7 @@ import {
   emptyVehicle,
 } from "@/types/client";
 import { formatPhone, normalizeOptionalPhone } from "@/lib/utils/format";
+import { describeDocumentProblem, formatDocument } from "@/lib/utils/document";
 import { vehicleName } from "@/lib/vehicles/format";
 
 interface ClientFormModalProps {
@@ -215,6 +216,8 @@ export function ClientFormModal({
         ? {
             name: client.name,
             phone: formatPhone(client.phone),
+            document: client.document ?? "",
+            email: client.email ?? "",
             notes: client.notes ?? "",
             vehicles: client.vehicles?.map(mapVehicleFromClient) ?? [],
           }
@@ -241,7 +244,10 @@ export function ClientFormModal({
 
   if (!open) return null;
 
-  function updateField(field: "name" | "phone" | "notes", value: string) {
+  function updateField(
+    field: "name" | "phone" | "notes" | "document" | "email",
+    value: string
+  ) {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
@@ -309,6 +315,13 @@ export function ClientFormModal({
     setError(null);
     setLoading(true);
 
+    const documentProblem = describeDocumentProblem(form.document);
+    if (documentProblem) {
+      setError(documentProblem);
+      setLoading(false);
+      return;
+    }
+
     try {
       await onSave({
         ...form,
@@ -362,6 +375,24 @@ export function ClientFormModal({
             value={form.phone}
             onChange={(e) => updateField("phone", e.target.value)}
             placeholder="(11) 99999-9999"
+          />
+
+          {/* O documento não é opcional por capricho: sem ele a prefeitura
+              recusa a NFS-e, e aí a nota não sai na hora de faturar. */}
+          <Input
+            label="CPF ou CNPJ (para nota fiscal)"
+            value={form.document}
+            onChange={(e) => updateField("document", e.target.value)}
+            onBlur={(e) => updateField("document", formatDocument(e.target.value))}
+            placeholder="000.000.000-00"
+          />
+
+          <Input
+            label="E-mail (opcional)"
+            type="email"
+            value={form.email}
+            onChange={(e) => updateField("email", e.target.value)}
+            placeholder="cliente@email.com"
           />
 
           <div className="space-y-3">

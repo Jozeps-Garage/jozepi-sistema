@@ -8,6 +8,7 @@ import { syncVehicles } from "@/lib/clients/sync-vehicles";
 import { parsePositiveNumber } from "@/lib/products/catalog";
 import { getProductRemainingStock } from "@/lib/products/catalog";
 import { normalizeOptionalPhone } from "@/lib/utils/format";
+import { onlyDocumentDigits } from "@/lib/utils/document";
 import type {
   Appointment,
   AppointmentStatus,
@@ -407,6 +408,8 @@ export async function createClientWithVehicles(
     .insert({
       name: data.name.trim(),
       phone: normalizeOptionalPhone(data.phone) ?? "",
+      document: onlyDocumentDigits(data.document ?? "") || null,
+      email: data.email?.trim() || null,
       notes: data.notes.trim() || null,
       workshop_id: workshopId,
     })

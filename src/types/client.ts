@@ -48,6 +48,9 @@ export type VehicleFormItem = {
 export type ClientFormData = {
   name: string;
   phone: string;
+  /** CPF ou CNPJ. A NFS-e exige o documento do tomador. */
+  document: string;
+  email: string;
   notes: string;
   vehicles: VehicleFormItem[];
 };
@@ -70,6 +73,8 @@ export const emptyVehicle: VehicleFormItem = {
 export const emptyClientForm: ClientFormData = {
   name: "",
   phone: "",
+  document: "",
+  email: "",
   notes: "",
   vehicles: [],
 };

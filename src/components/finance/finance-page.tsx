@@ -25,6 +25,7 @@ import {
   ChartLineUp,
   Check,
   CheckCircle,
+  FileText,
   Package,
   CircleHalf,
   Funnel,
@@ -56,6 +57,7 @@ import {
   RevenueExpenseChart,
   type ChartMode,
 } from "@/components/finance/revenue-expense-chart";
+import { NfseDialog, type NfseInvoice } from "@/components/finance/nfse-dialog";
 import { SupplierQuickForm } from "@/components/suppliers/supplier-quick-form";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -2345,6 +2347,8 @@ function TransactionList({
   groupInstallments = false,
   editingId,
   editForm,
+  nfseByTransaction,
+  onEmitNfse,
   onEditTransaction,
   onDeleteTransaction,
   onChangePaymentStatus,
@@ -2366,6 +2370,9 @@ function TransactionList({
   onDeleteTransaction?: (entry: FinanceEntry) => void;
   onChangePaymentStatus?: (entry: FinanceEntry, status: PaymentStatus) => void;
   onUpdateNotes?: (entry: FinanceEntry, notes: string | null) => Promise<void>;
+  /** Nota fiscal já emitida deste lançamento, se houver. */
+  nfseByTransaction?: Map<string, NfseInvoice>;
+  onEmitNfse?: (entry: FinanceEntry) => void;
 }) {
   const [page, setPage] = useState(0);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
@@ -2686,6 +2693,10 @@ function TransactionList({
             entry.installmentNumber && entry.installmentTotal
               ? installmentBaseDescription(entry.description)
               : entry.description;
+          const nfse = nfseByTransaction?.get(entry.id) ?? null;
+          // Nota de serviço é de receita, e só faz sentido depois que o
+          // serviço foi prestado e o lançamento existe de fato no banco.
+          const canEmitNfse = Boolean(onEmitNfse) && entry.type === "receita";
           const displayTitle =
             entry.kind === "automatic" && entry.clientName
               ? entry.clientName
@@ -2978,20 +2989,73 @@ function TransactionList({
                         </div>
                       )
                     )}
-                    {onEditTransaction && (
-                      <div className="mt-4 flex justify-end">
-                        <button
-                          type="button"
-                          onClick={() => onEditTransaction(entry)}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/10"
-                        >
-                          <PencilSimple
-                            size={14}
-                            weight={FINANCE_ICON_WEIGHT}
-                            aria-hidden
-                          />
-                          Editar lançamento
-                        </button>
+                    {(onEditTransaction || nfse || canEmitNfse) && (
+                      <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+                        {nfse ? (
+                          // Nota já existe: o que serve agora é o documento,
+                          // não o botão de emitir de novo.
+                          <span className="mr-auto inline-flex flex-wrap items-center gap-2 text-xs font-semibold">
+                            <span
+                              className={
+                                nfse.status === "issued"
+                                  ? "text-success"
+                                  : nfse.status === "error"
+                                    ? "text-danger"
+                                    : "text-muted"
+                              }
+                            >
+                              {nfse.status === "issued"
+                                ? `NFS-e ${nfse.numero ?? "emitida"}`
+                                : nfse.status === "error"
+                                  ? "NFS-e recusada"
+                                  : "NFS-e em emissão"}
+                            </span>
+                            {nfse.pdfUrl && (
+                              <a
+                                href={nfse.pdfUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-primary hover:underline"
+                              >
+                                PDF
+                              </a>
+                            )}
+                            {nfse.status === "error" && onEmitNfse && (
+                              <button
+                                type="button"
+                                onClick={() => onEmitNfse(entry)}
+                                className="text-primary hover:underline"
+                              >
+                                tentar de novo
+                              </button>
+                            )}
+                          </span>
+                        ) : (
+                          canEmitNfse && (
+                            <button
+                              type="button"
+                              onClick={() => onEmitNfse?.(entry)}
+                              className="mr-auto inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/10"
+                            >
+                              <FileText size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                              Emitir NFS-e
+                            </button>
+                          )
+                        )}
+                        {onEditTransaction && (
+                          <button
+                            type="button"
+                            onClick={() => onEditTransaction(entry)}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/10"
+                          >
+                            <PencilSimple
+                              size={14}
+                              weight={FINANCE_ICON_WEIGHT}
+                              aria-hidden
+                            />
+                            Editar lançamento
+                          </button>
+                        )}
                       </div>
                     )}
                   </>
@@ -3979,6 +4043,14 @@ export function FinancePage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierFormOpen, setSupplierFormOpen] = useState(false);
   const [stockProducts, setStockProducts] = useState<StockProduct[]>([]);
+  /** Notas por lançamento, para a linha saber se já tem NFS-e. */
+  const [nfseByTransaction, setNfseByTransaction] = useState<Map<string, NfseInvoice>>(
+    new Map()
+  );
+  const [nfseEntry, setNfseEntry] = useState<FinanceEntry | null>(null);
+  const [nfseClients, setNfseClients] = useState<
+    { id: string; name: string; document: string | null }[]
+  >([]);
   /** Conta aberta no extrato. Fica aqui porque a projeção some enquanto há uma. */
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   /** Tipo cujas categorias estão abertas para renomear/desativar. */
@@ -4074,6 +4146,8 @@ export function FinancePage() {
       suppliersResult,
       fixedCostsResult,
       productsResult,
+      nfseResult,
+      clientsResult,
     ] =
       await Promise.all([
         supabase
@@ -4110,6 +4184,17 @@ export function FinancePage() {
         supabase
           .from("products")
           .select("id, name, volume_ml, total_cost, stock_remaining")
+          .eq("workshop_id", profileWorkshopId)
+          .order("name", { ascending: true }),
+        supabase
+          .from("nfse_invoices")
+          .select(
+            "transaction_id, invoice_id, status, numero_nfse, pdf_url, xml_url, error_message"
+          )
+          .eq("workshop_id", profileWorkshopId),
+        supabase
+          .from("clients")
+          .select("id, name, document")
           .eq("workshop_id", profileWorkshopId)
           .order("name", { ascending: true }),
       ]);
@@ -4193,6 +4278,39 @@ export function FinancePage() {
         )
       );
     }
+
+    // Sem a 046 a tabela não existe: a emissão fica indisponível e o resto da
+    // página segue igual.
+    if (nfseResult.error) {
+      setNfseByTransaction(new Map());
+    } else {
+      const byTransaction = new Map<string, NfseInvoice>();
+      ((nfseResult.data as Record<string, unknown>[] | null) ?? []).forEach((row) => {
+        const transactionId = row.transaction_id;
+        if (typeof transactionId !== "string") return;
+        byTransaction.set(transactionId, {
+          invoiceId: (row.invoice_id as string | null) ?? null,
+          status: row.status as NfseInvoice["status"],
+          numero: (row.numero_nfse as string | null) ?? null,
+          pdfUrl: (row.pdf_url as string | null) ?? null,
+          xmlUrl: (row.xml_url as string | null) ?? null,
+          errorMessage: (row.error_message as string | null) ?? null,
+        });
+      });
+      setNfseByTransaction(byTransaction);
+    }
+
+    setNfseClients(
+      clientsResult.error
+        ? []
+        : ((clientsResult.data as Record<string, unknown>[] | null) ?? []).map(
+            (row) => ({
+              id: String(row.id),
+              name: String(row.name ?? ""),
+              document: (row.document as string | null) ?? null,
+            })
+          )
+    );
 
     const storedFixedCosts = applyStoredPaymentDays(
       readStoredFixedCosts().map((cost) =>
@@ -6708,6 +6826,8 @@ export function FinancePage() {
               )}
               <TransactionList
                 entries={filteredRevenueEntries}
+                nfseByTransaction={nfseByTransaction}
+                onEmitNfse={setNfseEntry}
                 accountNames={accountNames}
                 emptyMessage="Nenhuma receita encontrada."
                 groupByMonth={revenueFilters.granularity !== "all"}
@@ -7456,6 +7576,32 @@ export function FinancePage() {
         }}
         onSubmit={(input) => {
           void handleSubmitTransfer(input);
+        }}
+      />
+
+      <NfseDialog
+        key={nfseEntry?.id ?? "nfse-fechado"}
+        open={nfseEntry !== null}
+        transactionId={nfseEntry?.id ?? ""}
+        description={
+          nfseEntry
+            ? [nfseEntry.serviceName, nfseEntry.description]
+                .filter(Boolean)
+                .join(" · ")
+            : ""
+        }
+        amount={nfseEntry?.amount ?? 0}
+        client={null}
+        clientOptions={nfseClients}
+        existing={nfseEntry ? nfseByTransaction.get(nfseEntry.id) ?? null : null}
+        onClose={() => setNfseEntry(null)}
+        onIssued={(invoice) => {
+          if (!nfseEntry) return;
+          setNfseByTransaction((prev) => {
+            const next = new Map(prev);
+            next.set(nfseEntry.id, invoice);
+            return next;
+          });
         }}
       />
 

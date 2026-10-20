@@ -22,6 +22,7 @@ import { PlateIcon } from "@/components/ui/plate-icon";
 import { ClientFormModal } from "@/components/clients/client-form-modal";
 import { VehicleFormModal } from "@/components/clients/vehicle-form-modal";
 import { formatDate, formatPhone, getWhatsAppUrl, normalizeOptionalPhone } from "@/lib/utils/format";
+import { onlyDocumentDigits } from "@/lib/utils/document";
 import { syncVehicles } from "@/lib/clients/sync-vehicles";
 import { vehicleLabel, vehicleName } from "@/lib/vehicles/format";
 import { deleteVehiclePhotoByUrl } from "@/lib/supabase/vehicle-photos";
@@ -410,6 +411,10 @@ export function ClientsPage() {
     const payload = {
       name: data.name.trim(),
       phone: normalizeOptionalPhone(data.phone) ?? "",
+      // Só dígitos no banco: a máscara é da tela, e comparar documento com
+      // ponto e traço nunca dá certo.
+      document: onlyDocumentDigits(data.document ?? "") || null,
+      email: data.email?.trim() || null,
       notes: data.notes.trim() || null,
       pre_cadastro: false,
     };
