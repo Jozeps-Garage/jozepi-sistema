@@ -1232,8 +1232,24 @@ function toCurrencyNumber(value: number | string | null | undefined) {
   return Number(value) || 0;
 }
 
+/**
+ * Traduz o erro do Postgres para algo acionável.
+ *
+ * O caso de RLS merece destaque: "new row violates row-level security policy"
+ * quase sempre quer dizer que a sessão expirou com a página aberta. O banco
+ * não enxerga mais quem está pedindo, então recusa a gravação — e a mensagem
+ * crua não dá a menor pista de que basta entrar de novo.
+ */
 function formatSupplierSaveError(message: string) {
   const normalized = message.toLowerCase();
+
+  if (
+    normalized.includes("row-level security") ||
+    normalized.includes("row level security")
+  ) {
+    return "Sua sessão expirou e o servidor não reconhece mais quem está salvando. Entre de novo e repita o lançamento — nada foi gravado.";
+  }
+
   if (normalized.includes("supplier_id") && normalized.includes("foreign key")) {
     return "Fornecedor inválido. Cadastre-o na aba Fornecedores em Produtos antes de vincular à despesa.";
   }
@@ -5793,7 +5809,7 @@ export function FinancePage() {
     setSavingFixedCost(false);
 
     if (result.error && !result.data) {
-      setFixedCostError(result.error.message);
+      setFixedCostError(formatSupplierSaveError(result.error.message));
       const reverted = existingCost
         ? sortFixedCosts([
             ...fixedCostsRef.current.filter((cost) => cost.id !== localCost.id),
@@ -5963,7 +5979,9 @@ export function FinancePage() {
     if (saveError || !saved) {
       setLaunchErrors((prev) => ({
         ...prev,
-        [cost.id]: saveError?.message ?? "Não foi possível lançar a despesa.",
+        [cost.id]: saveError
+          ? formatSupplierSaveError(saveError.message)
+          : "Não foi possível lançar a despesa.",
       }));
       return;
     }
