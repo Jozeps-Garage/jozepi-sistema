@@ -608,7 +608,9 @@ function createFinanceFilterState(
   dateField: FinanceFilterState["dateField"] = "date"
 ): FinanceFilterState {
   return {
-    granularity: "all",
+    // Mês corrente por padrão: a pergunta do dia a dia é "como está este mês",
+    // e "todo o período" misturava três anos de lançamento na mesma lista.
+    granularity: "month",
     anchor: customEnd,
     dateField,
     customStart,
