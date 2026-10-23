@@ -6025,7 +6025,20 @@ export function FinancePage() {
     setDeleteConfirm({ type: "fixedCost", cost });
   }
 
-  async function executeDeleteFixedCost(cost: FixedCost) {
+  /**
+   * Despesas que este custo fixo já lançou e ninguém pagou. As pagas ficam de
+   * fora de propósito: são histórico, e apagar dinheiro que saiu da conta
+   * desfaz o saldo.
+   */
+  function openEntriesFromFixedCost(cost: FixedCost) {
+    const prefix = `fixed_cost:${cost.id}:`;
+    return expenseEntries.filter(
+      (entry) =>
+        entry.source?.startsWith(prefix) && entry.paymentStatus !== "pago"
+    );
+  }
+
+  async function executeDeleteFixedCost(cost: FixedCost, alsoOpenEntries = false) {
     setDeletingFinanceItem(true);
 
     try {
@@ -6043,11 +6056,25 @@ export function FinancePage() {
         .eq("id", cost.id)
         .eq("workshop_id", cost.workshop_id);
 
+      // Apagar o custo só impede os próximos lançamentos. O que ele já lançou
+      // e segue em aberto continuaria cobrando sozinho, sem dono.
+      if (alsoOpenEntries) {
+        const ids = openEntriesFromFixedCost(cost).map((entry) => entry.id);
+        if (ids.length > 0) {
+          await supabase
+            .from("financial_transactions")
+            .delete()
+            .in("id", ids)
+            .eq("workshop_id", cost.workshop_id);
+        }
+      }
+
       if (editingFixedCostId === cost.id) {
         resetFixedCostForm();
       }
 
       setDeleteConfirm(null);
+      void loadFinanceData();
     } finally {
       setDeletingFinanceItem(false);
     }
@@ -7421,10 +7448,27 @@ export function FinancePage() {
         title="Excluir custo fixo"
         description={
           deleteConfirm?.type === "fixedCost"
-            ? `Deseja excluir ${deleteConfirm.cost.name}?`
+            ? (() => {
+                const abertas = openEntriesFromFixedCost(deleteConfirm.cost);
+                if (abertas.length === 0) {
+                  return `Deseja excluir ${deleteConfirm.cost.name}? Ele para de lançar a partir de agora.`;
+                }
+                const total = abertas.reduce((sum, item) => sum + item.amount, 0);
+                return `Deseja excluir ${deleteConfirm.cost.name}? Ele para de lançar a partir de agora, mas ${
+                  abertas.length === 1
+                    ? "1 despesa em aberto que ele já lançou continua cobrando"
+                    : `${abertas.length} despesas em aberto que ele já lançou continuam cobrando`
+                } (${formatCurrency(total)}). As já pagas ficam, porque são histórico.`;
+              })()
             : ""
         }
-        confirmLabel="Excluir custo"
+        confirmLabel="Excluir só o custo"
+        extraLabel={
+          deleteConfirm?.type === "fixedCost" &&
+          openEntriesFromFixedCost(deleteConfirm.cost).length > 0
+            ? "Excluir com as em aberto"
+            : undefined
+        }
         loading={deletingFinanceItem}
         onCancel={() => {
           if (!deletingFinanceItem) setDeleteConfirm(null);
@@ -7432,6 +7476,11 @@ export function FinancePage() {
         onConfirm={() => {
           if (deleteConfirm?.type === "fixedCost") {
             void executeDeleteFixedCost(deleteConfirm.cost);
+          }
+        }}
+        onExtra={() => {
+          if (deleteConfirm?.type === "fixedCost") {
+            void executeDeleteFixedCost(deleteConfirm.cost, true);
           }
         }}
       />
