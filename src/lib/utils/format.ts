@@ -39,12 +39,22 @@ export function normalizeOptionalPhone(phone: string): string | null {
   return normalizePhone(trimmed);
 }
 
+/** "2026-10-24" é dia civil, não instante: tem que virar meia-noite local. */
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+export function parseDateValue(date: string | Date): Date {
+  if (typeof date !== "string") return date;
+  // Sem isto o JS lê "2026-10-24" como meia-noite UTC, que no Brasil é 21h do
+  // dia 23 — e a tela mostra a véspera.
+  return new Date(DATE_ONLY.test(date) ? `${date}T00:00:00` : date);
+}
+
 export function formatDate(date: string | Date): string {
   return new Intl.DateTimeFormat("pt-BR", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
-  }).format(typeof date === "string" ? new Date(date) : date);
+  }).format(parseDateValue(date));
 }
 
 export function getWhatsAppUrl(phone: string): string {

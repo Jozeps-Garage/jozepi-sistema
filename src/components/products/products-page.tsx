@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  ArrowCounterClockwise,
   Camera,
   CaretDown,
   CaretUp,
@@ -45,6 +44,8 @@ import {
   type StockKind,
 } from "@/lib/products/stock";
 import { formatMoneyInput, parseCurrencyInput } from "@/lib/utils/money";
+import { StockReviewDialog } from "@/components/products/stock-review-dialog";
+import { StockMovementDialog } from "@/components/products/stock-movement-dialog";
 import { createClient } from "@/lib/supabase/client";
 import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { formatCurrency, formatPhone, normalizeOptionalPhone } from "@/lib/utils/format";
@@ -66,7 +67,6 @@ import {
   getProductInitialStock,
   getProductRemainingStock,
   getProductStockPercent,
-  getProductStockUnit,
   getProductTypeLabel,
   getUtensilAcquiredAt,
   getUtensilDepreciationMode,
@@ -142,12 +142,6 @@ function supplierLabel(supplier: Pick<Supplier, "name" | "tradeName">) {
   return supplier.tradeName?.trim() || supplier.name;
 }
 
-interface ReplenishForm {
-  supplierId: string;
-  amount: string;
-  paidAmount: string;
-  purchaseDate: string;
-}
 
 const PRODUCT_FILTER_EXIT_MS = 300;
 
@@ -561,163 +555,7 @@ function ProductStatChip({
   );
 }
 
-function ProductReplenishModal({
-  product,
-  amount,
-  error,
-  onAmountChange,
-  onCancel,
-  onConfirm,
-}: {
-  product: ProductItem;
-  amount: string;
-  error: string | null;
-  onAmountChange: (value: string) => void;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  if (typeof document === "undefined") return null;
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-foreground/25 px-4 backdrop-blur-sm"
-      onClick={onCancel}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="replenish-modal-title"
-        className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-card-hover"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-success/10 text-success">
-            <ArrowCounterClockwise size={20} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-          </span>
-          <div className="min-w-0">
-            <h2
-              id="replenish-modal-title"
-              className="text-sm font-semibold text-foreground"
-            >
-              Repor estoque
-            </h2>
-            <p className="truncate text-xs text-muted">{product.name}</p>
-          </div>
-        </div>
-
-        <p className="mb-3 text-xs text-muted">
-          Estoque será preenchido ao máximo. Informe o novo custo do produto (opcional).
-        </p>
-        <Input
-          label="Custo total (R$)"
-          type="number"
-          min="0"
-          step="0.01"
-          className="number-input-no-spinner"
-          value={amount}
-          onChange={(event) => onAmountChange(event.target.value)}
-          placeholder={product.totalCost || "0,00"}
-        />
-        {error && <p className="mt-2 text-xs font-medium text-danger">{error}</p>}
-
-        <div className="mt-5 flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={onCancel}>
-            Cancelar
-          </Button>
-          <Button type="button" variant="success" onClick={onConfirm}>
-            Repor
-          </Button>
-        </div>
-      </div>
-    </div>,
-    document.body
-  );
-}
-
-function ProductStockEditModal({
-  product,
-  value,
-  onValueChange,
-  onCancel,
-  onConfirm,
-}: {
-  product: ProductItem;
-  value: string;
-  onValueChange: (value: string) => void;
-  onCancel: () => void;
-  onConfirm: (value: string) => void;
-}) {
-  if (typeof document === "undefined") return null;
-
-  const initialStock = getProductInitialStock(product);
-  const stockUnit = getProductStockUnit(product);
-  const percent =
-    initialStock > 0
-      ? Math.max(0, Math.min(100, ((Number(value) || 0) / initialStock) * 100))
-      : 0;
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-foreground/25 px-4 backdrop-blur-sm"
-      onClick={onCancel}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="stock-edit-modal-title"
-        className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-card-hover"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-success/10 text-success">
-            <Faders size={20} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-          </span>
-          <div className="min-w-0">
-            <h2
-              id="stock-edit-modal-title"
-              className="text-sm font-semibold text-foreground"
-            >
-              Editar estoque
-            </h2>
-            <p className="truncate text-xs text-muted">{product.name}</p>
-          </div>
-        </div>
-
-        <p className="mb-3 text-sm font-bold text-foreground">
-          {formatStockAmount(Number(value) || 0)} {stockUnit} /{" "}
-          {formatStockAmount(initialStock)} {stockUnit}
-        </p>
-        <input
-          type="range"
-          min="0"
-          max={initialStock}
-          step={product.type === "liquid" ? "1" : "0.01"}
-          value={value}
-          onChange={(event) => onValueChange(event.target.value)}
-          className="stock-range-slider w-full"
-          style={{
-            background: `linear-gradient(to right, var(--primary) 0%, var(--primary) ${percent}%, #e2e8f0 ${percent}%, #e2e8f0 100%)`,
-          }}
-          aria-label={`Ajustar estoque atual de ${product.name}`}
-        />
-
-        <div className="mt-5 flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={onCancel}>
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            variant="success"
-            onClick={() => onConfirm(value)}
-          >
-            Salvar
-          </Button>
-        </div>
-      </div>
-    </div>,
-    document.body
-  );
-}
 
 function SupplierDetail({
   label,
@@ -791,6 +629,8 @@ export function ProductsPage() {
   const [sortColumn, setSortColumn] = useState<ProductSortColumn>("name");
   const [sortDirection, setSortDirection] = useState<ProductSortDirection>("asc");
   const [activeProductTab, setActiveProductTab] = useState<ProductPageTab>("products");
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [movementTarget, setMovementTarget] = useState<StockItem | null>(null);
   const [showProductFilter, setShowProductFilter] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [formClosing, setFormClosing] = useState(false);
@@ -802,20 +642,6 @@ export function ProductsPage() {
   const [error, setError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<ProductDeleteConfirm>(null);
   const [deletingItem, setDeletingItem] = useState(false);
-  const [replenishingProductId, setReplenishingProductId] = useState<string | null>(
-    null
-  );
-  const [replenishForm, setReplenishForm] = useState<ReplenishForm>({
-    supplierId: "",
-    amount: "",
-    paidAmount: "",
-    purchaseDate: dateKey(today),
-  });
-  const [replenishError, setReplenishError] = useState<string | null>(null);
-  const [editingStockProductId, setEditingStockProductId] = useState<string | null>(
-    null
-  );
-  const [stockEditValue, setStockEditValue] = useState("");
   const closeFormTimeoutRef = useRef<number | null>(null);
   const isCatalogLoading =
     !catalogSyncReady && !error && (!suppliersLoaded || Boolean(workshopId));
@@ -957,16 +783,6 @@ export function ProductsPage() {
     setForm(emptyProductForm);
     setError(null);
     setTypeError(null);
-    setReplenishingProductId(null);
-    setReplenishForm({
-      supplierId: "",
-      amount: "",
-      paidAmount: "",
-      purchaseDate: dateKey(today),
-    });
-    setReplenishError(null);
-    setEditingStockProductId(null);
-    setStockEditValue("");
     showForm();
   }
 
@@ -1001,16 +817,6 @@ export function ProductsPage() {
     });
     setError(null);
     setTypeError(null);
-    setReplenishingProductId(null);
-    setReplenishForm({
-      supplierId: product.supplierId ?? "",
-      amount: "",
-      paidAmount: "",
-      purchaseDate: dateKey(today),
-    });
-    setReplenishError(null);
-    setEditingStockProductId(null);
-    setStockEditValue("");
     showForm();
   }
 
@@ -1038,7 +844,6 @@ export function ProductsPage() {
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape" || formClosing) return;
-      if (replenishingProductId || editingStockProductId) return;
       event.preventDefault();
       closeForm();
     }
@@ -1047,7 +852,7 @@ export function ProductsPage() {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [editingStockProductId, formClosing, formOpen, replenishingProductId]);
+  }, [formClosing, formOpen]);
 
   function updateForm(patch: Partial<ProductForm>) {
     setForm((prev) => ({ ...prev, ...patch }));
@@ -1580,111 +1385,11 @@ export function ProductsPage() {
     }
   }
 
-  function openReplenish(productId: string) {
-    const product = products.find((item) => item.id === productId);
-    setReplenishingProductId(productId);
-    setReplenishForm({
-      supplierId: "",
-      amount: product?.totalCost ?? "",
-      paidAmount: "",
-      purchaseDate: dateKey(today),
-    });
-    setReplenishError(null);
-    setEditingStockProductId(null);
-    setStockEditValue("");
-  }
 
-  function closeReplenish() {
-    setReplenishingProductId(null);
-    setReplenishForm({
-      supplierId: "",
-      amount: "",
-      paidAmount: "",
-      purchaseDate: dateKey(today),
-    });
-    setReplenishError(null);
-  }
 
-  async function handleReplenishProduct(product: ProductItem) {
-    setReplenishError(null);
 
-    if (!workshopId) {
-      setReplenishError("Oficina não encontrada.");
-      return;
-    }
 
-    // Fill bar to 100%: set stockRemaining = initialStock (keep max unchanged)
-    const initialStock = getProductInitialStock(product);
-    const newPrice = replenishForm.amount.trim();
 
-    const updatedProduct: ProductItem = {
-      ...product,
-      stockRemaining: String(initialStock),
-      totalCost: newPrice || product.totalCost,
-      priceHistory: product.priceHistory ?? [],
-      usagePerWashMl:
-        getUtensilDepreciationMode(product) === "time"
-          ? encodeUtensilDepreciation("time", dateKey(new Date()))
-          : product.usagePerWashMl,
-    };
-
-    try {
-      await saveSupabaseProduct(supabase, workshopId, updatedProduct);
-    } catch (err) {
-      setReplenishError(
-        err instanceof Error ? err.message : "Erro ao salvar."
-      );
-      return;
-    }
-
-    setProducts((prev) =>
-      prev.map((item) => (item.id === product.id ? updatedProduct : item))
-    );
-    closeReplenish();
-  }
-
-  function openStockEdit(product: ProductItem) {
-    setEditingStockProductId(product.id);
-    setStockEditValue(String(getProductRemainingStock(product)));
-    setReplenishingProductId(null);
-    setReplenishForm({
-      supplierId: "",
-      amount: "",
-      paidAmount: "",
-      purchaseDate: dateKey(today),
-    });
-    setReplenishError(null);
-  }
-
-  function closeStockEdit() {
-    setEditingStockProductId(null);
-    setStockEditValue("");
-  }
-
-  function updateCurrentStock(product: ProductItem, value: string) {
-    const currentStock = Number(value);
-    const maxStock = getProductInitialStock(product);
-    const nextStock = Math.min(maxStock, Math.max(0, currentStock));
-    const nextProduct = { ...product, stockRemaining: String(nextStock) };
-
-    if (workshopId) {
-      void saveSupabaseProduct(supabase, workshopId, nextProduct).catch((err) => {
-        setError(
-          err instanceof Error
-            ? `Estoque ajustado na tela, mas não sincronizou: ${err.message}`
-            : "Estoque ajustado na tela, mas não sincronizou."
-        );
-      });
-    }
-
-    setProducts((prev) =>
-      prev.map((item) =>
-        item.id === product.id
-          ? nextProduct
-          : item
-      )
-    );
-  }
 
   function handleSort(column: ProductSortColumn) {
     if (sortColumn === column) {
@@ -1779,14 +1484,24 @@ export function ProductsPage() {
                 icon={<Package size={16} weight={PRODUCT_ICON_WEIGHT} aria-hidden />}
               />
             </div>
-            <Button
-              variant="success"
-              onClick={openCreateForm}
-              className="w-full sm:w-auto"
-            >
-              <Plus size={16} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-              Adicionar produto
-            </Button>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              <Button
+                variant="secondary"
+                onClick={() => setReviewOpen(true)}
+                className="w-full sm:w-auto"
+              >
+                <Faders size={16} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
+                Revisar estoque
+              </Button>
+              <Button
+                variant="success"
+                onClick={openCreateForm}
+                className="w-full sm:w-auto"
+              >
+                <Plus size={16} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
+                Adicionar produto
+              </Button>
+            </div>
           </div>
         )}
       </div>
@@ -1966,22 +1681,17 @@ export function ProductsPage() {
                           </div>
 
                           <div className="flex justify-end gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => openReplenish(product.id)}
-                              className="rounded-lg bg-success/10 p-1.5 text-success transition-colors hover:bg-success hover:text-white"
-                              title="Repor estoque"
-                            >
-                              <ArrowCounterClockwise size={15} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => openStockEdit(product)}
-                              className="rounded-lg bg-success/10 p-1.5 text-success transition-colors hover:bg-success hover:text-white"
-                              title="Editar estoque"
-                            >
-                              <Faders size={15} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-                            </button>
+                            {tracksStock(stock.kind) && (
+                              <button
+                                type="button"
+                                onClick={() => setMovementTarget(stock)}
+                                className="rounded-lg bg-success/10 p-1.5 text-success transition-colors hover:bg-success hover:text-white"
+                                title="Baixa e histórico"
+                                aria-label={`Baixa e histórico de ${product.name}`}
+                              >
+                                <Faders size={15} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => openEditForm(product)}
@@ -2053,22 +1763,17 @@ export function ProductsPage() {
                         </div>
 
                         <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => openReplenish(product.id)}
-                            className="rounded-lg bg-success/10 p-2 text-success transition-colors hover:bg-success hover:text-white"
-                            title="Repor estoque"
-                          >
-                            <ArrowCounterClockwise size={16} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => openStockEdit(product)}
-                            className="rounded-lg bg-success/10 p-2 text-success transition-colors hover:bg-success hover:text-white"
-                            title="Editar estoque"
-                          >
-                            <Faders size={16} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-                          </button>
+                          {tracksStock(stock.kind) && (
+                            <button
+                              type="button"
+                              onClick={() => setMovementTarget(stock)}
+                              className="rounded-lg bg-success/10 p-2 text-success transition-colors hover:bg-success hover:text-white"
+                              title="Baixa e histórico"
+                              aria-label={`Baixa e histórico de ${product.name}`}
+                            >
+                              <Faders size={16} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => openEditForm(product)}
@@ -2961,6 +2666,26 @@ export function ProductsPage() {
         }
       `}</style>
 
+      <StockReviewDialog
+        open={reviewOpen}
+        supabase={supabase}
+        workshopId={workshopId}
+        today={dateKey(today)}
+        onClose={() => setReviewOpen(false)}
+        onDone={() => window.location.reload()}
+      />
+
+      <StockMovementDialog
+        key={movementTarget?.id ?? "movimento-fechado"}
+        open={movementTarget !== null}
+        supabase={supabase}
+        workshopId={workshopId}
+        item={movementTarget}
+        today={dateKey(today)}
+        onClose={() => setMovementTarget(null)}
+        onDone={() => window.location.reload()}
+      />
+
       <ConfirmDialog
         open={deleteConfirm?.type === "product"}
         title="Excluir produto"
@@ -3007,44 +2732,6 @@ export function ProductsPage() {
         }}
       />
 
-      {replenishingProductId &&
-        (() => {
-          const product = products.find((item) => item.id === replenishingProductId);
-          if (!product) return null;
-
-          return (
-            <ProductReplenishModal
-              product={product}
-              amount={replenishForm.amount}
-              error={replenishError}
-              onAmountChange={(value) => {
-                setReplenishForm((prev) => ({ ...prev, amount: value }));
-                setReplenishError(null);
-              }}
-              onCancel={closeReplenish}
-              onConfirm={() => handleReplenishProduct(product)}
-            />
-          );
-        })()}
-
-      {editingStockProductId &&
-        (() => {
-          const product = products.find((item) => item.id === editingStockProductId);
-          if (!product) return null;
-
-          return (
-            <ProductStockEditModal
-              product={product}
-              value={stockEditValue}
-              onValueChange={setStockEditValue}
-              onCancel={closeStockEdit}
-              onConfirm={(value) => {
-                updateCurrentStock(product, value);
-                closeStockEdit();
-              }}
-            />
-          );
-        })()}
     </>
   );
 }
