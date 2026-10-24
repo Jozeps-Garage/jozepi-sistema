@@ -59,10 +59,8 @@ import {
   createProductId,
   createProductPriceHistoryId,
   createProductTypeId,
-  DEPRECIATION_MODE_OPTIONS,
   emptyProductForm,
   encodeUtensilDepreciation,
-  formatStockAmount,
   getProductInitialStock,
   getProductRemainingStock,
   getProductStockPercent,
@@ -72,7 +70,6 @@ import {
   parseMoney,
   parsePositiveNumber,
   productTypeOptions,
-  type DepreciationMode,
   type ProductForm,
   type ProductItem,
   type ProductPriceHistoryReason,
@@ -80,7 +77,6 @@ import {
   type ProductType,
   type ProductTypeOption,
 } from "@/lib/products/catalog";
-import { getDepreciatedValue, isUtensilProduct } from "@/lib/products/depreciation";
 import {
   clearLocalCatalogStorage,
   deleteSupabaseProduct,
@@ -462,7 +458,6 @@ function ProductCostDisplay({
 }) {
   const unitCost = parseMoney(product.totalCost || "0");
   const stock = stockItemOf(product);
-  const currentValue = getDepreciatedValue(product);
   // O custo é de UMA embalagem; sozinho, ao lado de "3 frascos", parecia
   // dizer que o estoque inteiro vale isso.
   const stockValue = tracksStock(stock.kind) ? unitCost * stock.onHand : null;
@@ -481,11 +476,6 @@ function ProductCostDisplay({
       {stockValue !== null && stock.onHand !== 1 && (
         <p className="mt-0.5 text-[11px] font-medium text-muted">
           {formatCurrency(stockValue)} em estoque
-        </p>
-      )}
-      {currentValue !== null && (
-        <p className="mt-0.5 text-[11px] font-medium text-muted">
-          Valor atual: {formatCurrency(currentValue)}
         </p>
       )}
     </div>
@@ -646,7 +636,6 @@ export function ProductsPage() {
   const [mounted, setMounted] = useState(false);
   const [editingProduct, setEditingProduct] = useState<ProductItem | null>(null);
   const [form, setForm] = useState<ProductForm>(emptyProductForm);
-  const [incrementingUse, setIncrementingUse] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<ProductDeleteConfirm>(null);
   const [deletingItem, setDeletingItem] = useState(false);
@@ -1307,37 +1296,6 @@ export function ProductsPage() {
     closeForm();
   }
 
-  async function handleIncrementUse() {
-    if (!workshopId || !editingProduct || incrementingUse) return;
-    if (!isUtensilProduct(editingProduct)) return;
-    if (getUtensilDepreciationMode(editingProduct) !== "usage") return;
-
-    const nextRemaining = Math.max(0, getProductRemainingStock(editingProduct) - 1);
-    const updatedProduct: ProductItem = {
-      ...editingProduct,
-      stockRemaining: String(nextRemaining),
-    };
-
-    setIncrementingUse(true);
-    setError(null);
-    try {
-      await saveSupabaseProduct(supabase, workshopId, updatedProduct);
-      setProducts((prev) =>
-        prev.map((product) =>
-          product.id === updatedProduct.id ? updatedProduct : product
-        )
-      );
-      setEditingProduct(updatedProduct);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? `Não foi possível registrar o uso: ${err.message}`
-          : "Não foi possível registrar o uso."
-      );
-    } finally {
-      setIncrementingUse(false);
-    }
-  }
 
   function requestDeleteProduct(product: ProductItem) {
     const linkedServiceCount = Object.values(serviceProductUsages).filter(
@@ -2044,18 +2002,6 @@ export function ProductsPage() {
                         onChange={(event) => updateForm({ onHand: event.target.value })}
                         placeholder="3"
                       />
-                      <Input
-                        label="Avisar quando chegar em (opcional)"
-                        type="number"
-                        min="0"
-                        step="1"
-                        className="number-input-no-spinner"
-                        value={form.minOnHand}
-                        onChange={(event) =>
-                          updateForm({ minOnHand: event.target.value })
-                        }
-                        placeholder="1"
-                      />
                     </>
                   )}
 
@@ -2096,102 +2042,6 @@ export function ProductsPage() {
                     placeholder="80,00"
                   />
 
-                  {form.type === "utensil" && (
-                    <>
-                      <div className="sm:col-span-2">
-                        <Dropdown
-                          label="Depreciação"
-                          value={form.depreciationMode}
-                          options={DEPRECIATION_MODE_OPTIONS}
-                          onChange={(mode) => {
-                            const depreciationMode = mode as DepreciationMode;
-                            updateForm({
-                              depreciationMode,
-                              acquiredAt:
-                                depreciationMode === "time" && !form.acquiredAt
-                                  ? dateKey(today)
-                                  : form.acquiredAt,
-                            });
-                          }}
-                        />
-                      </div>
-
-                      {form.depreciationMode === "time" && (
-                        <>
-                          <Input
-                            label="Data de aquisição"
-                            type="date"
-                            value={form.acquiredAt}
-                            onChange={(event) =>
-                              updateForm({ acquiredAt: event.target.value })
-                            }
-                          />
-                          <Input
-                            label="Vida útil estimada (meses)"
-                            type="number"
-                            min="1"
-                            step="1"
-                            className="number-input-no-spinner"
-                            value={form.durabilityWashes}
-                            onChange={(event) =>
-                              updateForm({ durabilityWashes: event.target.value })
-                            }
-                            placeholder="24"
-                          />
-                        </>
-                      )}
-
-                      {form.depreciationMode === "usage" && editingProduct && (
-                        <div className="flex items-end justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2.5 sm:col-span-2">
-                          <div>
-                            <p className="label-caps text-muted">Estoque restante</p>
-                            <p className="mt-1 text-sm font-semibold tabular-nums text-foreground">
-                              {formatStockAmount(getProductRemainingStock(editingProduct))}{" "}
-                              de {formatStockAmount(getProductInitialStock(editingProduct))}{" "}
-                              usos
-                            </p>
-                          </div>
-                          {getUtensilDepreciationMode(editingProduct) === "usage" && (
-                            <button
-                              type="button"
-                              onClick={() => void handleIncrementUse()}
-                              disabled={incrementingUse}
-                              className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary transition-colors duration-200 hover:bg-primary hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              <Plus size={12} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-                              +1 uso
-                            </button>
-                          )}
-                        </div>
-                      )}
-
-                      {form.depreciationMode !== "none" && (
-                        <p className="text-xs text-muted sm:col-span-2">
-                          Valor atual:{" "}
-                          {(() => {
-                            const preview = getDepreciatedValue({
-                              id: editingProduct?.id ?? "draft",
-                              name: form.name,
-                              type: "utensil",
-                              volumeMl: "",
-                              usagePerWashMl: encodeUtensilDepreciation(
-                                form.depreciationMode,
-                                form.acquiredAt
-                              ),
-                              quantity: form.quantity,
-                              durabilityWashes: form.durabilityWashes,
-                              totalCost: form.totalCost,
-                              stockRemaining: editingProduct?.stockRemaining,
-                              createdAt: editingProduct?.createdAt,
-                            });
-                            return preview === null
-                              ? "preencha os campos para calcular"
-                              : formatCurrency(preview);
-                          })()}
-                        </p>
-                      )}
-                    </>
-                  )}
                 </div>
               </div>
 
