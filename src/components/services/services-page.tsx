@@ -24,18 +24,7 @@ import { cn } from "@/lib/utils/cn";
 import { formatCurrency } from "@/lib/utils/format";
 import {
   calculateProductUsageCost,
-  createProductId,
-  createProductTypeId,
-  createUsageId,
-  emptyProductForm,
-  getProductAmountLabel,
-  getProductTypeLabel,
-  parsePositiveNumber,
-  productTypeOptions,
-  type ProductForm,
   type ProductItem,
-  type ProductType,
-  type ProductTypeOption,
   type ServiceProductUsage,
 } from "@/lib/products/catalog";
 import {
@@ -43,8 +32,6 @@ import {
   importLocalCatalogToSupabase,
   loadSupabaseCatalog,
   readLocalCatalogFromStorage,
-  saveSupabaseProduct,
-  saveSupabaseProductTypes,
   replaceSupabaseServiceUsages,
 } from "@/lib/products/supabase-catalog";
 
@@ -348,8 +335,6 @@ export function ServicesPage() {
 
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [products, setProducts] = useState<ProductItem[]>([]);
-  const [typeOptions, setTypeOptions] =
-    useState<ProductTypeOption[]>(productTypeOptions);
   const [serviceProductUsages, setServiceProductUsages] = useState<
     Record<string, ServiceProductUsage[]>
   >({});
@@ -367,13 +352,7 @@ export function ServicesPage() {
   const [formAnimationKey, setFormAnimationKey] = useState(0);
   const [editingService, setEditingService] = useState<ServiceItem | null>(null);
   const [form, setForm] = useState<ServiceForm>(emptyForm);
-  const [productFormOpen, setProductFormOpen] = useState(false);
-  const [productForm, setProductForm] =
-    useState<ProductForm>(emptyProductForm);
-  const [addingProduct, setAddingProduct] = useState(false);
-  const [productTypeError, setProductTypeError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [productError, setProductError] = useState<string | null>(null);
   const [serviceToDelete, setServiceToDelete] = useState<ServiceItem | null>(null);
   const [deletingService, setDeletingService] = useState(false);
   const [deleteServiceError, setDeleteServiceError] = useState<string | null>(null);
@@ -474,14 +453,9 @@ export function ServicesPage() {
 
         const catalog = await loadSupabaseCatalog(supabase, workshopId);
         setProducts(catalog.products);
-        setTypeOptions(catalog.typeOptions);
         setServiceProductUsages(catalog.serviceProductUsages);
-      } catch (err) {
-        setProductError(
-          err instanceof Error
-            ? `Produtos no Supabase indisponíveis: ${err.message}`
-            : "Produtos no Supabase indisponíveis."
-        );
+      } catch {
+        // Catálogo é conveniência aqui: sem ele a tela de serviços segue.
       }
     });
   }, [supabase, workshopId]);
@@ -536,8 +510,6 @@ export function ServicesPage() {
     const kind = typeFilter === "all" ? "servico" : typeFilter;
     setForm({ ...emptyForm, category: categoryFromKind(kind) });
     setError(null);
-    setAddingProduct(false);
-    setProductFormOpen(false);
     showForm();
   }
 
@@ -554,8 +526,6 @@ export function ServicesPage() {
       productUsages: serviceProductUsages[service.id] ?? [],
     });
     setError(null);
-    setAddingProduct(false);
-    setProductFormOpen(false);
   }
 
   function closeForm() {
@@ -564,8 +534,6 @@ export function ServicesPage() {
       setEditingService(null);
       setForm(emptyForm);
       setError(null);
-      setAddingProduct(false);
-      setProductFormOpen(false);
       return;
     }
 
@@ -576,8 +544,6 @@ export function ServicesPage() {
       setEditingService(null);
       setForm(emptyForm);
       setError(null);
-      setAddingProduct(false);
-      setProductFormOpen(false);
       setFormOpen(false);
       setFormClosing(false);
       closeFormTimeoutRef.current = null;
@@ -749,183 +715,15 @@ export function ServicesPage() {
     }
   }
 
-  function closeProductForm() {
-    setProductForm(emptyProductForm);
-    setProductError(null);
-    setProductTypeError(null);
-    setProductFormOpen(false);
-  }
 
-  function updateProductForm(patch: Partial<ProductForm>) {
-    setProductForm((prev) => ({ ...prev, ...patch }));
-  }
 
-  function getTypeLabel(type: ProductType) {
-    return (
-      typeOptions.find((option) => option.value === type)?.label ??
-      getProductTypeLabel(type)
-    );
-  }
 
-  function handleAddProductType(label: string) {
-    const alreadyExists = typeOptions.some(
-      (option) => option.label.toLowerCase() === label.toLowerCase()
-    );
 
-    if (alreadyExists) {
-      return "Esse tipo já existe.";
-    }
 
-    const nextType: ProductTypeOption = {
-      value: createProductTypeId(label),
-      label,
-      custom: true,
-    };
 
-    setTypeOptions((prev) => [...prev, nextType]);
-    updateProductForm({ type: nextType.value });
-    setProductTypeError(null);
-  }
 
-  function handleDeleteProductType(type: string) {
-    const option = typeOptions.find((item) => item.value === type);
-    if (!option?.custom) return;
 
-    const typeInUse = products.some((product) => product.type === type);
-    if (typeInUse) {
-      setProductTypeError(
-        "Não é possível apagar um tipo usado em produtos cadastrados."
-      );
-      return;
-    }
 
-    setTypeOptions((prev) => prev.filter((item) => item.value !== type));
-    if (productForm.type === type) {
-      updateProductForm({ type: "liquid" });
-    }
-    setProductTypeError(null);
-  }
-
-  async function handleSaveProduct() {
-    setProductError(null);
-
-    if (!workshopId) {
-      setProductError("Oficina não encontrada.");
-      return;
-    }
-
-    if (!productForm.name.trim()) {
-      setProductError("Informe o nome do produto.");
-      return;
-    }
-
-    try {
-      parsePrice(productForm.totalCost || "0");
-
-      if (productForm.type === "liquid") {
-        parsePositiveNumber(productForm.volumeMl);
-      } else {
-        parsePositiveNumber(productForm.quantity);
-      }
-    } catch (err) {
-      setProductError(
-        err instanceof Error ? err.message : "Informe os dados do produto."
-      );
-      return;
-    }
-
-    const nextProduct: ProductItem = {
-      id: createProductId(),
-      name: productForm.name.trim(),
-      type: productForm.type,
-      volumeMl: productForm.type === "liquid" ? productForm.volumeMl : "",
-      usagePerWashMl: "",
-      quantity: productForm.type === "utensil" ? productForm.quantity : "",
-      durabilityWashes: "",
-      totalCost: productForm.totalCost,
-    };
-
-    try {
-      await saveSupabaseProduct(supabase, workshopId, nextProduct);
-      await saveSupabaseProductTypes(supabase, workshopId, typeOptions);
-    } catch (err) {
-      setProductError(
-        err instanceof Error
-          ? `Não foi possível salvar o produto no Supabase: ${err.message}`
-          : "Não foi possível salvar o produto no Supabase."
-      );
-      return;
-    }
-
-    setProducts((prev) => [nextProduct, ...prev]);
-    setForm((prev) => ({
-      ...prev,
-      productUsages: [
-        ...prev.productUsages,
-        {
-          id: createUsageId(),
-          productId: nextProduct.id,
-          amount: nextProduct.type === "liquid" ? "" : "1",
-        },
-      ],
-    }));
-    setAddingProduct(false);
-
-    closeProductForm();
-  }
-
-  function addProductToService(productId: string) {
-    const product = products.find((item) => item.id === productId);
-    if (!product) return;
-
-    setForm((prev) => {
-      if (prev.productUsages.some((usage) => usage.productId === productId)) {
-        return prev;
-      }
-
-      return {
-        ...prev,
-        productUsages: [
-          ...prev.productUsages,
-          {
-            id: createUsageId(),
-            productId,
-            amount: product.type === "liquid" ? "" : "1",
-          },
-        ],
-      };
-    });
-    setAddingProduct(false);
-  }
-
-  function updateProductUsageAmount(usageId: string, amount: string) {
-    setForm((prev) => ({
-      ...prev,
-      productUsages: prev.productUsages.map((usage) =>
-        usage.id === usageId ? { ...usage, amount } : usage
-      ),
-    }));
-  }
-
-  function removeProductUsage(usageId: string) {
-    setForm((prev) => ({
-      ...prev,
-      productUsages: prev.productUsages.filter((usage) => usage.id !== usageId),
-    }));
-  }
-
-  const availableProducts = products.filter(
-    (product) =>
-      !form.productUsages.some((usage) => usage.productId === product.id)
-  );
-  const productOptions = availableProducts.map((product) => ({
-    value: product.id,
-    label: product.name,
-  }));
-  const serviceProductsTotal = form.productUsages.reduce((total, usage) => {
-    const product = products.find((item) => item.id === usage.productId);
-    return product ? total + calculateProductUsageCost(product, usage.amount) : total;
-  }, 0);
 
   const normalizedSearchTerm = searchTerm.trim().toLowerCase();
   // Todo o catálogo vem do banco. Antes os pacotes de stage e coating eram
@@ -1129,253 +927,6 @@ export function ServicesPage() {
             />
           </div>
 
-          <div className="mt-5 rounded-lg border border-border bg-background shadow-card p-4 sm:p-5">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h3 className="text-sm font-semibold text-foreground">
-                  Produtos utilizados neste serviço
-                </h3>
-                <p className="mt-1 text-xs text-muted">
-                  Escolha produtos do catálogo e informe quanto será usado.
-                </p>
-              </div>
-
-              <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
-                <button
-                  type="button"
-                  onClick={() => setAddingProduct(true)}
-                  disabled={availableProducts.length === 0}
-                  className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full bg-success/10 px-3 py-2 text-sm font-semibold text-success transition-all hover:bg-success hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0 sm:justify-center sm:py-1.5 sm:text-xs"
-                >
-                  <Plus size={14} weight={SERVICE_ICON_WEIGHT} aria-hidden />
-                  Adicionar produto
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setProductForm(emptyProductForm);
-                    setProductError(null);
-                    setProductTypeError(null);
-                    setProductFormOpen(true);
-                  }}
-                  className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full bg-success/10 px-3 py-2 text-sm font-semibold text-success transition-all hover:bg-success hover:text-white sm:min-h-0 sm:justify-center sm:py-1.5 sm:text-xs"
-                >
-                  <Plus size={14} weight={SERVICE_ICON_WEIGHT} aria-hidden />
-                  Cadastrar novo produto
-                </button>
-              </div>
-            </div>
-
-            {addingProduct && (
-              <div className="mt-4">
-                <Dropdown
-                  label="Selecionar produto"
-                  value=""
-                  placeholder={
-                    availableProducts.length === 0
-                      ? "Todos os produtos já foram adicionados"
-                      : "Selecione um produto"
-                  }
-                  options={productOptions}
-                  onChange={addProductToService}
-                  disabled={availableProducts.length === 0}
-                />
-              </div>
-            )}
-
-            {products.length === 0 && (
-              <p className="mt-4 rounded-lg border border-dashed border-border bg-card px-4 py-3 text-center text-xs text-muted">
-                Nenhum produto cadastrado no catálogo.
-              </p>
-            )}
-
-            {productError && (
-              <div className="mt-4 rounded-lg border border-danger/20 bg-danger/5 px-4 py-3 text-sm text-danger">
-                {productError}
-              </div>
-            )}
-
-            {productFormOpen && (
-              <div className="mt-4 rounded-lg border border-border bg-card shadow-card p-4 shadow-card">
-                <div className="mb-4 flex items-center justify-between">
-                  <h4 className="text-sm font-semibold text-foreground">
-                    Produto rápido
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={closeProductForm}
-                    className="rounded-lg p-1.5 text-muted transition-colors hover:bg-background hover:text-foreground"
-                    aria-label="Fechar produto rápido"
-                  >
-                    <X size={16} weight={SERVICE_ICON_WEIGHT} aria-hidden />
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <Input
-                    label="Nome do produto"
-                    value={productForm.name}
-                    autoComplete="off"
-                    onChange={(event) =>
-                      updateProductForm({ name: event.target.value })
-                    }
-                    placeholder="Shampoo automotivo"
-                  />
-                  <Dropdown
-                    label="Tipo"
-                    value={productForm.type}
-                    options={typeOptions}
-                    onChange={(type) => {
-                      updateProductForm({ type: type as ProductType });
-                      setProductTypeError(null);
-                    }}
-                    actionLabel="Adicionar"
-                    createPlaceholder="Ex: Cera, Equipamento, Químico"
-                    onCreateOption={handleAddProductType}
-                    onDeleteOption={handleDeleteProductType}
-                  />
-
-                  {productTypeError && (
-                    <p className="text-xs font-medium text-danger">
-                      {productTypeError}
-                    </p>
-                  )}
-
-                  {productForm.type === "liquid" ? (
-                    <Input
-                      label="Volume total (ml)"
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={productForm.volumeMl}
-                      onChange={(event) =>
-                        updateProductForm({ volumeMl: event.target.value })
-                      }
-                      placeholder="5000"
-                    />
-                  ) : (
-                    <Input
-                      label="Quantidade"
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={productForm.quantity}
-                      onChange={(event) =>
-                        updateProductForm({ quantity: event.target.value })
-                      }
-                      placeholder="3"
-                    />
-                  )}
-
-                  <Input
-                    label="Custo total do produto"
-                    value={productForm.totalCost}
-                    autoComplete="off"
-                    onChange={(event) =>
-                      updateProductForm({ totalCost: event.target.value })
-                    }
-                    placeholder="80,00"
-                  />
-                </div>
-
-                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:justify-end">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={closeProductForm}
-                    className="w-full sm:w-auto"
-                  >
-                    Cancelar
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="success"
-                    onClick={handleSaveProduct}
-                    className="w-full sm:w-auto"
-                  >
-                    Salvar e adicionar
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {form.productUsages.length > 0 && (
-              <div className="mt-4 space-y-3">
-                {form.productUsages.map((usage) => {
-                  const product = products.find(
-                    (item) => item.id === usage.productId
-                  );
-                  if (!product) return null;
-
-                  const usageCost = calculateProductUsageCost(
-                    product,
-                    usage.amount
-                  );
-
-                  return (
-                    <div
-                      key={usage.id}
-                      className="rounded-lg border border-border bg-card shadow-card p-4 shadow-card"
-                    >
-                  <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-foreground">
-                            {product.name}
-                          </p>
-                          <p className="text-xs text-muted">
-                            {getTypeLabel(product.type)}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => removeProductUsage(usage.id)}
-                          className="flex min-h-11 min-w-11 items-center justify-center rounded-lg bg-danger/10 p-2 text-danger transition-colors hover:bg-danger hover:text-white sm:min-h-0 sm:min-w-0"
-                          aria-label={`Remover ${product.name}`}
-                        >
-                          <X size={16} weight={SERVICE_ICON_WEIGHT} aria-hidden />
-                        </button>
-                      </div>
-
-                      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-                        <Input
-                          label={getProductAmountLabel(product.type)}
-                          type="number"
-                          min="0"
-                          step={product.type === "liquid" ? "1" : "0.01"}
-                          value={usage.amount}
-                          onChange={(event) =>
-                            updateProductUsageAmount(
-                              usage.id,
-                              event.target.value
-                            )
-                          }
-                          placeholder={product.type === "liquid" ? "50" : "1"}
-                        />
-                        <div className="rounded-lg border border-success/20 bg-success/10 px-4 py-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-widest text-success">
-                            Custo
-                          </p>
-                          <p className="text-base font-bold text-success">
-                            {formatCurrency(usageCost)}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-
-                <div className="flex flex-col gap-1 rounded-lg border border-border bg-card shadow-card px-4 py-3 shadow-card sm:flex-row sm:items-center sm:justify-between">
-                  <span className="text-sm font-medium text-muted">
-                    Custo total de produtos
-                  </span>
-                  <span className="text-base font-bold text-foreground">
-                    {formatCurrency(serviceProductsTotal)}
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
 
           <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-end">
             <Button
@@ -1464,121 +1015,6 @@ export function ServicesPage() {
                               onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
                               placeholder="Detalhes do serviço"
                             />
-                          </div>
-
-                          {/* Products section */}
-                          <div className="mt-5 rounded-lg border border-border bg-card p-4 sm:p-5">
-                            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                              <div>
-                                <h4 className="text-sm font-semibold text-foreground">
-                                  Produtos utilizados neste serviço
-                                </h4>
-                                <p className="mt-1 text-xs text-muted">
-                                  Escolha produtos do catálogo e informe quanto será usado.
-                                </p>
-                              </div>
-                              <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
-                                <button
-                                  type="button"
-                                  onClick={() => setAddingProduct(true)}
-                                  disabled={availableProducts.length === 0}
-                                  className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full bg-success/10 px-3 py-2 text-sm font-semibold text-success transition-all hover:bg-success hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0 sm:py-1.5 sm:text-xs"
-                                >
-                                  <Plus size={14} weight={SERVICE_ICON_WEIGHT} aria-hidden />
-                                  Adicionar produto
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => { setProductForm(emptyProductForm); setProductError(null); setProductTypeError(null); setProductFormOpen(true); }}
-                                  className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full bg-success/10 px-3 py-2 text-sm font-semibold text-success transition-all hover:bg-success hover:text-white sm:min-h-0 sm:py-1.5 sm:text-xs"
-                                >
-                                  <Plus size={14} weight={SERVICE_ICON_WEIGHT} aria-hidden />
-                                  Cadastrar novo produto
-                                </button>
-                              </div>
-                            </div>
-
-                            {addingProduct && (
-                              <div className="mt-4">
-                                <Dropdown
-                                  label="Selecionar produto"
-                                  value=""
-                                  placeholder={availableProducts.length === 0 ? "Todos os produtos já foram adicionados" : "Selecione um produto"}
-                                  options={productOptions}
-                                  onChange={addProductToService}
-                                  disabled={availableProducts.length === 0}
-                                />
-                              </div>
-                            )}
-
-                            {products.length === 0 && (
-                              <p className="mt-4 rounded-lg border border-dashed border-border bg-background px-4 py-3 text-center text-xs text-muted">
-                                Nenhum produto cadastrado no catálogo.
-                              </p>
-                            )}
-
-                            {productError && (
-                              <div className="mt-4 rounded-lg border border-danger/20 bg-danger/5 px-4 py-3 text-sm text-danger">
-                                {productError}
-                              </div>
-                            )}
-
-                            {productFormOpen && (
-                              <div className="mt-4 rounded-lg border border-border bg-background p-4">
-                                <div className="mb-4 flex items-center justify-between">
-                                  <h4 className="text-sm font-semibold text-foreground">Produto rápido</h4>
-                                  <button type="button" onClick={closeProductForm} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-card hover:text-foreground" aria-label="Fechar produto rápido">
-                                    <X size={16} weight={SERVICE_ICON_WEIGHT} aria-hidden />
-                                  </button>
-                                </div>
-                                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                                  <Input label="Nome do produto" value={productForm.name} autoComplete="off" onChange={(e) => updateProductForm({ name: e.target.value })} placeholder="Shampoo automotivo" />
-                                  <Dropdown label="Tipo" value={productForm.type} options={typeOptions} onChange={(type) => { updateProductForm({ type: type as ProductType }); setProductTypeError(null); }} actionLabel="Adicionar" createPlaceholder="Ex: Cera, Equipamento, Químico" onCreateOption={handleAddProductType} onDeleteOption={handleDeleteProductType} />
-                                  {productTypeError && <p className="text-xs font-medium text-danger">{productTypeError}</p>}
-                                  {productForm.type === "liquid" ? (
-                                    <Input label="Volume total (ml)" type="number" min="0" step="1" value={productForm.volumeMl} onChange={(e) => updateProductForm({ volumeMl: e.target.value })} placeholder="5000" />
-                                  ) : (
-                                    <Input label="Quantidade" type="number" min="0" step="1" value={productForm.quantity} onChange={(e) => updateProductForm({ quantity: e.target.value })} placeholder="3" />
-                                  )}
-                                  <Input label="Custo total do produto" value={productForm.totalCost} autoComplete="off" onChange={(e) => updateProductForm({ totalCost: e.target.value })} placeholder="80,00" />
-                                </div>
-                                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:justify-end">
-                                  <Button type="button" variant="secondary" onClick={closeProductForm} className="w-full sm:w-auto">Cancelar</Button>
-                                  <Button type="button" variant="success" onClick={handleSaveProduct} className="w-full sm:w-auto">Salvar e adicionar</Button>
-                                </div>
-                              </div>
-                            )}
-
-                            {form.productUsages.length > 0 && (
-                              <div className="mt-4 space-y-3">
-                                {form.productUsages.map((usage) => {
-                                  const product = products.find((item) => item.id === usage.productId);
-                                  if (!product) return null;
-                                  const usageCost = calculateProductUsageCost(product, usage.amount);
-                                  return (
-                                    <div key={usage.id} className="rounded-lg border border-border bg-background p-4">
-                                      <div className="flex items-start justify-between gap-3">
-                                        <div>
-                                          <p className="text-sm font-semibold text-foreground">{product.name}</p>
-                                          <p className="text-xs text-muted">{getTypeLabel(product.type)}</p>
-                                        </div>
-                                        <button type="button" onClick={() => removeProductUsage(usage.id)} className="flex min-h-11 min-w-11 items-center justify-center rounded-lg bg-danger/10 p-2 text-danger transition-colors hover:bg-danger hover:text-white sm:min-h-0 sm:min-w-0" aria-label={`Remover ${product.name}`}>
-                                          <X size={16} weight={SERVICE_ICON_WEIGHT} aria-hidden />
-                                        </button>
-                                      </div>
-                                      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-                                        <Input label={getProductAmountLabel(product.type)} type="number" min="0" step={product.type === "liquid" ? "1" : "0.01"} value={usage.amount} onChange={(e) => updateProductUsageAmount(usage.id, e.target.value)} placeholder="0" />
-                                        {usageCost !== null && (
-                                          <p className="pb-2 text-sm font-semibold text-foreground sm:text-right">
-                                            Custo: {formatCurrency(usageCost)}
-                                          </p>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
                           </div>
 
                           {error && (
