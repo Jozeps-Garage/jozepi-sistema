@@ -59,6 +59,8 @@ export interface StockMovement {
   occurredOn: string;
   notes: string | null;
   transactionId: string | null;
+  /** Quanto custou cada unidade nesta entrada. Nulo em baixa e revisão. */
+  unitCost: number | null;
   createdAt: string;
 }
 

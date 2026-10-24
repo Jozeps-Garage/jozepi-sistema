@@ -13,11 +13,8 @@ import {
   loadSupabaseProducts,
   saveSupabaseProduct,
 } from "@/lib/products/supabase-catalog";
-import {
-  applyStockEntry,
-  productFromInvoiceLine,
-  purchasedStockAmount,
-} from "@/lib/products/stock-entry";
+import { productFromInvoiceLine } from "@/lib/products/stock-entry";
+import { recordMovement } from "@/lib/products/stock-repo";
 
 /** A linha da nota, do jeito que o formulário de despesa guarda. */
 export interface StockEntryItem {
@@ -53,6 +50,7 @@ export function StockEntryDialog({
   items,
   purchaseDate,
   supplierId,
+  transactionId,
   onClose,
   onApplied,
 }: {
@@ -62,6 +60,8 @@ export function StockEntryDialog({
   items: StockEntryItem[];
   purchaseDate: string;
   supplierId?: string;
+  /** Despesa que originou a compra, para o histórico apontar de volta. */
+  transactionId?: string;
   onClose: () => void;
   onApplied: (appliedKeys: string[]) => Promise<void>;
 }) {
@@ -163,6 +163,11 @@ export function StockEntryDialog({
           date: purchaseDate,
         };
 
+        // A compra entra como movimento: é ele que move o saldo e que o
+        // histórico lê depois para dizer o que foi comprado e por quanto.
+        let productId = pick;
+        let saldoAtual = 0;
+
         if (pick === CREATE) {
           const created = productFromInvoiceLine({
             name: item.description,
@@ -171,16 +176,24 @@ export function StockEntryDialog({
             unitAmount: entry.unitAmount,
             supplierId,
           });
-          await saveSupabaseProduct(supabase, workshopId, created as ProductItem);
+          await saveSupabaseProduct(supabase, workshopId, created);
+          productId = created.id;
         } else {
           const product = products.find((candidate) => candidate.id === pick);
           if (!product) continue;
-          await saveSupabaseProduct(
-            supabase,
-            workshopId,
-            applyStockEntry(product, entry)
-          );
+          saldoAtual = product.onHand ?? 0;
         }
+
+        await recordMovement(supabase, workshopId, saldoAtual, {
+          productId,
+          kind: "entrada",
+          quantity: entry.quantity,
+          occurredOn: entry.date,
+          unitCost: entry.unitAmount > 0 ? entry.unitAmount : null,
+          transactionId: transactionId ?? null,
+          notes: "Compra lançada na despesa",
+        });
+
         appliedKeys.push(item.uiKey);
       }
 
@@ -251,14 +264,6 @@ export function StockEntryDialog({
               const volume = toNumber(item.volumeMl);
               const pick = choice[item.uiKey];
               const product = products.find((candidate) => candidate.id === pick);
-              const entrada = product
-                ? purchasedStockAmount(product, {
-                    quantity,
-                    volumeMl: volume,
-                    unitAmount: toNumber(item.unitAmount),
-                    date: purchaseDate,
-                  })
-                : 0;
 
               return (
                 <div key={item.uiKey} className="border-t border-border pt-4 first:border-0 first:pt-0">
@@ -283,17 +288,17 @@ export function StockEntryDialog({
                       compact
                     />
                   </div>
-                  {product && entrada > 0 && (
+                  {product && quantity > 0 && (
                     <p className="mt-1.5 text-xs font-medium text-success">
-                      Entram {formatStockAmount(entrada)}
-                      {product.type === "liquid" ? " ml" : " un."} em{" "}
-                      {product.name}.
+                      Entram {quantity}{" "}
+                      {quantity === 1 ? "unidade" : "unidades"} em {product.name}
+                      , que fica com {(product.onHand ?? 0) + quantity}.
                     </p>
                   )}
                   {pick === CREATE && (
                     <p className="mt-1.5 text-xs font-medium text-premium">
-                      Cria &ldquo;{item.description}&rdquo; no cadastro, já
-                      cheio e com este custo.
+                      Cria &ldquo;{item.description}&rdquo; no cadastro com{" "}
+                      {quantity} {quantity === 1 ? "unidade" : "unidades"}.
                     </p>
                   )}
                 </div>

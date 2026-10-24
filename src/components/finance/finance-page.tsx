@@ -7728,6 +7728,7 @@ export function FinancePage() {
         items={stockEntryTarget?.items ?? []}
         purchaseDate={stockEntryTarget?.date ?? dateKey(today)}
         supplierId={stockEntryTarget?.supplierId}
+        transactionId={stockEntryTarget?.id}
         onClose={() => setStockEntryTarget(null)}
         onApplied={async (keys) => {
           if (stockEntryTarget) await markStockApplied(stockEntryTarget, keys);

@@ -40,6 +40,7 @@ import {
   type StockKind,
 } from "@/lib/products/stock";
 import { formatMoneyInput, parseCurrencyInput } from "@/lib/utils/money";
+import { StockHistoryTab } from "@/components/products/stock-history-tab";
 import { StockMovementDialog } from "@/components/products/stock-movement-dialog";
 import { recordMovement } from "@/lib/products/stock-repo";
 import { createClient } from "@/lib/supabase/client";
@@ -84,7 +85,7 @@ const PRODUCT_FORM_EXIT_MS = 180;
 const PRODUCT_ICON_WEIGHT = "light" as const;
 
 type ProductTypeFilter = string;
-type ProductPageTab = "products" | "suppliers";
+type ProductPageTab = "products" | "history" | "suppliers";
 type ProductSortColumn = "name" | "value" | "stock";
 type ProductSortDirection = "asc" | "desc";
 
@@ -290,6 +291,7 @@ function ProductInlineFilterButton({
 
 const productPageTabs: { id: ProductPageTab; label: string }[] = [
   { id: "products", label: "Produtos" },
+  { id: "history", label: "Histórico" },
   { id: "suppliers", label: "Fornecedores" },
 ];
 const emptySupplierForm: SupplierForm = {
@@ -2117,6 +2119,14 @@ export function ProductsPage() {
           document.body
         )}
         </div>
+      )}
+
+      {activeProductTab === "history" && (
+        <StockHistoryTab
+          key="history-tab"
+          supabase={supabase}
+          workshopId={workshopId}
+        />
       )}
 
       {activeProductTab === "suppliers" && (

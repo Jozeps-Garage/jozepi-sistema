@@ -11,7 +11,7 @@ const STOCK_SELECT =
   "id, name, kind, on_hand, min_on_hand, unit_label, package_volume_ml, resale_value, acquired_on, total_cost, supplier_id, photo_url, type, volume_ml, quantity";
 
 const MOVEMENT_SELECT =
-  "id, product_id, kind, quantity, balance_after, occurred_on, notes, transaction_id, created_at";
+  "id, product_id, kind, quantity, balance_after, occurred_on, notes, transaction_id, unit_cost, created_at";
 
 /** Sem a 047 as colunas não existem; a tela avisa em vez de quebrar. */
 export function isMissingStockColumn(error: { message?: string } | null) {
@@ -95,6 +95,7 @@ export function movementFromRow(row: Record<string, unknown>): StockMovement {
     occurredOn: text(row.occurred_on),
     notes: text(row.notes) || null,
     transactionId: text(row.transaction_id) || null,
+    unitCost: numberOrNull(row.unit_cost),
     createdAt: text(row.created_at),
   };
 }
@@ -117,6 +118,37 @@ export async function loadMovements(
   return ((data as Record<string, unknown>[] | null) ?? []).map(movementFromRow);
 }
 
+/** Movimento com o nome do produto junto, para a aba de histórico. */
+export interface MovementWithProduct extends StockMovement {
+  productName: string;
+}
+
+export async function loadAllMovements(
+  supabase: SupabaseClient,
+  workshopId: string
+): Promise<MovementWithProduct[]> {
+  const { data, error } = await supabase
+    .from("stock_movements")
+    .select(`${MOVEMENT_SELECT}, products(name)`)
+    .eq("workshop_id", workshopId)
+    .order("occurred_on", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+
+  return ((data as Record<string, unknown>[] | null) ?? []).map((row) => {
+    const joined = row.products;
+    const product = (Array.isArray(joined) ? joined[0] : joined) as
+      | { name?: string }
+      | null
+      | undefined;
+    return {
+      ...movementFromRow(row),
+      productName: product?.name ?? "Produto removido",
+    };
+  });
+}
+
 export interface MovementInput {
   productId: string;
   kind: MovementKind;
@@ -125,6 +157,8 @@ export interface MovementInput {
   occurredOn: string;
   notes?: string | null;
   transactionId?: string | null;
+  /** Quanto custou cada unidade. Só faz sentido em entrada. */
+  unitCost?: number | null;
 }
 
 /**
@@ -151,6 +185,7 @@ export async function recordMovement(
     occurred_on: input.occurredOn,
     notes: input.notes?.trim() || null,
     transaction_id: input.transactionId ?? null,
+    unit_cost: input.unitCost ?? null,
   });
 
   if (movementError) throw new Error(movementError.message);
