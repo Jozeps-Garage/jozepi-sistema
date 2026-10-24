@@ -612,10 +612,6 @@ export function ProductsPage() {
   const [reviewing, setReviewing] = useState(false);
   const [counted, setCounted] = useState<Record<string, string>>({});
   const [savingReview, setSavingReview] = useState(false);
-  /** Seleção em massa, para mexer em vários produtos de uma vez. */
-  const [selecting, setSelecting] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [movingKind, setMovingKind] = useState(false);
   const [movementTarget, setMovementTarget] = useState<StockItem | null>(null);
   const [showProductFilter, setShowProductFilter] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -1354,55 +1350,7 @@ export function ProductsPage() {
    * estoque, então o saldo vai a zero ao virar patrimônio — do mesmo jeito
    * que o cadastro faz quando você muda um só.
    */
-  function toggleSelected(productId: string) {
-    setSelectedIds((prev) =>
-      prev.includes(productId)
-        ? prev.filter((id) => id !== productId)
-        : [...prev, productId]
-    );
-  }
 
-  async function handleMoveKind(kind: StockKind) {
-    if (movingKind || !workshopId || selectedIds.length === 0) return;
-    setMovingKind(true);
-    setError(null);
-
-    const alvo = products.filter((product) => selectedIds.includes(product.id));
-    try {
-      for (const product of alvo) {
-        const next: ProductItem = {
-          ...product,
-          kind,
-          type: kind === "liquido" ? "liquid" : "utensil",
-          onHand: kind === "patrimonio" ? 0 : product.onHand ?? 0,
-          packageVolumeMl:
-            kind === "liquido" ? product.packageVolumeMl ?? null : null,
-          resaleValue: kind === "patrimonio" ? product.resaleValue ?? null : null,
-        };
-        await saveSupabaseProduct(supabase, workshopId, next);
-      }
-      setProducts((prev) =>
-        prev.map((product) =>
-          selectedIds.includes(product.id)
-            ? {
-                ...product,
-                kind,
-                type: kind === "liquido" ? "liquid" : "utensil",
-                onHand: kind === "patrimonio" ? 0 : product.onHand ?? 0,
-              }
-            : product
-        )
-      );
-      setSelectedIds([]);
-      setSelecting(false);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Não foi possível mover os produtos."
-      );
-    } finally {
-      setMovingKind(false);
-    }
-  }
 
   async function handleSaveReview() {
     if (savingReview || !workshopId || countedChanges.length === 0) return;
@@ -1551,46 +1499,8 @@ export function ProductsPage() {
                       : "Salvar contagem"}
                   </Button>
                 </>
-              ) : selecting ? (
-                <>
-                  <span className="self-center text-xs font-semibold text-muted">
-                    {selectedIds.length === 0
-                      ? "Marque os produtos"
-                      : `Mover ${selectedIds.length} para:`}
-                  </span>
-                  {STOCK_KIND_OPTIONS.map((option) => (
-                    <Button
-                      key={option.value}
-                      variant="secondary"
-                      onClick={() => void handleMoveKind(option.value)}
-                      disabled={selectedIds.length === 0 || movingKind}
-                      className="w-full sm:w-auto"
-                    >
-                      {option.label}
-                    </Button>
-                  ))}
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      setSelecting(false);
-                      setSelectedIds([]);
-                    }}
-                    disabled={movingKind}
-                    className="w-full sm:w-auto"
-                  >
-                    Cancelar
-                  </Button>
-                </>
               ) : (
                 <>
-                  <Button
-                    variant="secondary"
-                    onClick={() => setSelecting(true)}
-                    className="w-full sm:w-auto"
-                  >
-                    <Stack size={16} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-                    Selecionar
-                  </Button>
                   <Button
                     variant="secondary"
                     onClick={() => setReviewing(true)}
@@ -1704,15 +1614,6 @@ export function ProductsPage() {
                           style={{ gridTemplateColumns: PRODUCTS_TABLE_GRID_TEMPLATE }}
                         >
                           <div className="flex min-w-0 items-center gap-3">
-                            {selecting && (
-                              <input
-                                type="checkbox"
-                                checked={selectedIds.includes(product.id)}
-                                onChange={() => toggleSelected(product.id)}
-                                aria-label={`Selecionar ${product.name}`}
-                                className="h-4 w-4 shrink-0 accent-success"
-                              />
-                            )}
                             {product.photoUrl ? (
                               <span className="product-photo-preview group/photo relative h-9 w-9 shrink-0 cursor-zoom-in overflow-visible rounded-lg border border-border bg-card shadow-card transition-all duration-300 hover:border-success/40 hover:shadow-card-hover hover:ring-2 hover:ring-success/15">
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1853,15 +1754,6 @@ export function ProductsPage() {
                     >
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex items-center gap-3">
-                          {selecting && (
-                            <input
-                              type="checkbox"
-                              checked={selectedIds.includes(product.id)}
-                              onChange={() => toggleSelected(product.id)}
-                              aria-label={`Selecionar ${product.name}`}
-                              className="h-4 w-4 shrink-0 accent-success"
-                            />
-                          )}
                           {product.photoUrl ? (
                             <span className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-border bg-card">
                               {/* eslint-disable-next-line @next/next/no-img-element */}
