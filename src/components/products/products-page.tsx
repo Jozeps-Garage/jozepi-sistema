@@ -3,23 +3,22 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  Camera,
   CaretDown,
   CaretUp,
   CaretUpDown,
   CurrencyDollar,
+  Broom,
   Drop,
   EnvelopeSimple,
   Faders,
   Funnel,
   MagnifyingGlass,
-  MagnifyingGlassPlus,
   Package,
   Stack,
   PencilSimple,
   Plus,
   Trash,
-  Wrench,
+  Toolbox,
   X,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
@@ -338,6 +337,32 @@ function mapSupplierRow(row: Record<string, unknown>): Supplier {
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
   };
+}
+
+/** Um ícone por categoria: a lista separa os três de relance. */
+const STOCK_KIND_ICON: Record<StockKind, typeof Drop> = {
+  liquido: Drop,
+  utensilio: Broom,
+  patrimonio: Toolbox,
+};
+
+const STOCK_KIND_TONE: Record<StockKind, string> = {
+  liquido: "bg-primary/10 text-primary",
+  utensilio: "bg-success/10 text-success",
+  patrimonio: "bg-premium/10 text-premium",
+};
+
+function StockKindIcon({ kind, size }: { kind: StockKind; size: number }) {
+  const Icon = STOCK_KIND_ICON[kind];
+  return (
+    <span
+      className={`flex shrink-0 items-center justify-center rounded-lg ${STOCK_KIND_TONE[kind]}`}
+      style={{ width: size, height: size }}
+      title={STOCK_KIND_LABEL[kind]}
+    >
+      <Icon size={Math.round(size * 0.5)} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
+    </span>
+  );
 }
 
 /** O produto do cadastro lido como item de estoque. */
@@ -1052,25 +1077,6 @@ export function ProductsPage() {
 
 
 
-  async function handleProductPhotoChange(
-    event: React.ChangeEvent<HTMLInputElement>
-  ) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    if (!file.type.startsWith("image/")) {
-      setError("Selecione uma imagem válida para a foto do produto.");
-      return;
-    }
-
-    try {
-      updateForm({ photoUrl: await resizeProductImage(file) });
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao processar a foto.");
-    }
-    event.target.value = "";
-  }
 
   function createPriceHistoryEntry(
     price: string,
@@ -1616,40 +1622,7 @@ export function ProductsPage() {
                           style={{ gridTemplateColumns: PRODUCTS_TABLE_GRID_TEMPLATE }}
                         >
                           <div className="flex min-w-0 items-center gap-3">
-                            {product.photoUrl ? (
-                              <span className="product-photo-preview group/photo relative h-9 w-9 shrink-0 cursor-zoom-in overflow-visible rounded-lg border border-border bg-card shadow-card transition-all duration-300 hover:border-success/40 hover:shadow-card-hover hover:ring-2 hover:ring-success/15">
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img
-                                  src={product.photoUrl}
-                                  alt={`Foto de ${product.name}`}
-                                  className="h-full w-full rounded-lg object-cover transition duration-300 group-hover/photo:scale-105 group-hover/photo:brightness-110"
-                                />
-                                <span className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg bg-foreground/0 text-white opacity-0 transition-all duration-300 group-hover/photo:bg-foreground/25 group-hover/photo:opacity-100">
-                                  <MagnifyingGlassPlus
-                                    size={14}
-                                    weight={PRODUCT_ICON_WEIGHT}
-                                    className="drop-shadow-card"
-                                    aria-hidden
-                                  />
-                                </span>
-                                <span className="pointer-events-none absolute left-0 top-11 z-[999] hidden h-44 w-44 overflow-hidden rounded-lg border border-border bg-card shadow-card p-1 opacity-0 shadow-2xl ring-1 ring-slate-900/5 group-hover/photo:block product-photo-preview-popover">
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img
-                                    src={product.photoUrl}
-                                    alt={`Prévia ampliada de ${product.name}`}
-                                    className="h-full w-full rounded-lg object-cover"
-                                  />
-                                </span>
-                              </span>
-                            ) : (
-                              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-success/10 text-success">
-                                {isLiquid ? (
-                                  <Drop size={18} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-                                ) : (
-                                  <Wrench size={18} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-                                )}
-                              </span>
-                            )}
+                            <StockKindIcon kind={stock.kind} size={36} />
                             <div className="min-w-0">
                               <p className="truncate text-sm font-semibold text-foreground">
                                 {product.name}
@@ -1756,24 +1729,7 @@ export function ProductsPage() {
                     >
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex items-center gap-3">
-                          {product.photoUrl ? (
-                            <span className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-border bg-card">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={product.photoUrl}
-                                alt={`Foto de ${product.name}`}
-                                className="h-full w-full rounded-lg object-cover"
-                              />
-                            </span>
-                          ) : (
-                            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-success/10 text-success">
-                              {isLiquid ? (
-                                <Drop size={20} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-                              ) : (
-                                <Wrench size={20} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-                              )}
-                            </span>
-                          )}
+                          <StockKindIcon kind={stock.kind} size={40} />
                           <div>
                             <h2 className="font-semibold text-foreground">
                               {product.name}
@@ -1945,51 +1901,6 @@ export function ProductsPage() {
                 )}
 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div className="rounded-lg border border-border bg-background p-4 sm:col-span-2">
-                    <div className="flex items-center gap-4">
-                      <div
-                        className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-card bg-cover bg-center text-muted shadow-card"
-                        style={
-                          form.photoUrl
-                            ? { backgroundImage: `url(${form.photoUrl})` }
-                            : undefined
-                        }
-                      >
-                        {!form.photoUrl && (
-                          <Camera size={24} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-                        )}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-foreground">
-                          Foto do produto
-                        </p>
-                        <p className="mt-1 text-xs text-muted">
-                          Opcional. Use uma imagem para identificar o produto.
-                        </p>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-success/10 px-3 py-2 text-xs font-semibold text-success transition-colors hover:bg-success hover:text-white">
-                            <Camera size={14} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-                            {form.photoUrl ? "Trocar foto" : "Adicionar foto"}
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="sr-only"
-                              onChange={handleProductPhotoChange}
-                            />
-                          </label>
-                          {form.photoUrl && (
-                            <button
-                              type="button"
-                              onClick={() => updateForm({ photoUrl: "" })}
-                              className="rounded-lg bg-danger/10 px-3 py-2 text-xs font-semibold text-danger transition-colors hover:bg-danger hover:text-white"
-                            >
-                              Remover
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
 
                   <div className="sm:col-span-2">
                     <Input
