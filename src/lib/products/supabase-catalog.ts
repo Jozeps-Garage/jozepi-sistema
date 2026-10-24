@@ -171,6 +171,27 @@ export async function loadSupabaseCatalog(
   };
 }
 
+/** Só os produtos, para quem precisa do cadastro completo sem tipos e usos. */
+export async function loadSupabaseProducts(
+  supabase: SupabaseLike,
+  workshopId: string
+): Promise<ProductItem[]> {
+  const query = supabase
+    .from("products")
+    .select(
+      "id, name, type, volume_ml, usage_per_wash_ml, quantity, durability_washes, total_cost, photo_url, supplier_id, stock_remaining, price_history, created_at"
+    );
+
+  if (!isQueryBuilder(query)) throw new Error("Cliente Supabase inválido.");
+
+  const result = await query
+    .eq("workshop_id", workshopId)
+    .order("name", { ascending: true });
+
+  if (result.error) throw new Error(result.error.message);
+  return ((result.data ?? []) as ProductRow[]).map(productFromRow);
+}
+
 export async function saveSupabaseProduct(
   supabase: SupabaseLike,
   workshopId: string,

@@ -58,6 +58,7 @@ import {
   type ChartMode,
 } from "@/components/finance/revenue-expense-chart";
 import { NfseDialog, type NfseInvoice } from "@/components/finance/nfse-dialog";
+import { StockEntryDialog } from "@/components/finance/stock-entry-dialog";
 import { SupplierQuickForm } from "@/components/suppliers/supplier-quick-form";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -423,6 +424,8 @@ interface TransactionItem {
   /** Produto do estoque, quando a linha veio de lá. Vazio: item avulso. */
   productId: string;
   volumeMl: string;
+  /** Já entrou no estoque: impede somar a mesma compra duas vezes. */
+  stockApplied?: boolean;
 }
 
 /** O que o lançamento precisa saber do estoque — não o cadastro inteiro. */
@@ -2367,6 +2370,7 @@ function TransactionList({
   editForm,
   nfseByTransaction,
   onEmitNfse,
+  onStockEntry,
   onEditTransaction,
   onDeleteTransaction,
   onChangePaymentStatus,
@@ -2391,6 +2395,8 @@ function TransactionList({
   /** Nota fiscal já emitida deste lançamento, se houver. */
   nfseByTransaction?: Map<string, NfseInvoice>;
   onEmitNfse?: (entry: FinanceEntry) => void;
+  /** Leva os itens da nota para o estoque. */
+  onStockEntry?: (entry: FinanceEntry) => void;
 }) {
   const [page, setPage] = useState(0);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
@@ -2715,6 +2721,11 @@ function TransactionList({
           // Nota de serviço é de receita, e só faz sentido depois que o
           // serviço foi prestado e o lançamento existe de fato no banco.
           const canEmitNfse = Boolean(onEmitNfse) && entry.type === "receita";
+          // Compra com itens e algum ainda não lançado: vale oferecer o estoque.
+          const canStockEntry =
+            Boolean(onStockEntry) &&
+            entry.type === "despesa" &&
+            (entry.items ?? []).some((item) => !item.stockApplied);
           const displayTitle =
             entry.kind === "automatic" && entry.clientName
               ? entry.clientName
@@ -3007,8 +3018,18 @@ function TransactionList({
                         </div>
                       )
                     )}
-                    {(onEditTransaction || nfse || canEmitNfse) && (
+                    {(onEditTransaction || nfse || canEmitNfse || canStockEntry) && (
                       <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+                        {canStockEntry && (
+                          <button
+                            type="button"
+                            onClick={() => onStockEntry?.(entry)}
+                            className="mr-auto inline-flex items-center gap-1.5 rounded-lg border border-dashed border-success/50 bg-success/5 px-3 py-2 text-xs font-semibold text-success transition-colors hover:border-success hover:bg-success/10"
+                          >
+                            <Package size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                            Lançar no estoque
+                          </button>
+                        )}
                         {nfse ? (
                           // Nota já existe: o que serve agora é o documento,
                           // não o botão de emitir de novo.
@@ -3305,6 +3326,7 @@ function transactionItemsFromRow(value: unknown): TransactionItem[] {
       unitAmount: Number.isFinite(unit) ? formatMoneyInput(unit) : "",
       productId: typeof item.productId === "string" ? item.productId : "",
       volumeMl: typeof item.volumeMl === "string" ? item.volumeMl : "",
+      stockApplied: item.stockApplied === true ? true : undefined,
     };
   });
 }
@@ -3319,6 +3341,7 @@ function transactionItemsToRow(items: TransactionItem[]) {
       unitAmount: parseFilterAmount(item.unitAmount) ?? 0,
       productId: item.productId || undefined,
       volumeMl: item.volumeMl.trim() || undefined,
+      stockApplied: item.stockApplied === true ? true : undefined,
     }));
 }
 
@@ -4066,6 +4089,7 @@ export function FinancePage() {
     new Map()
   );
   const [nfseEntry, setNfseEntry] = useState<FinanceEntry | null>(null);
+  const [stockEntryTarget, setStockEntryTarget] = useState<FinanceEntry | null>(null);
   const [nfseClients, setNfseClients] = useState<
     { id: string; name: string; document: string | null }[]
   >([]);
@@ -6269,6 +6293,27 @@ export function FinancePage() {
   }
 
   /**
+   * Grava na própria nota quais itens já entraram no estoque. É o que impede
+   * somar a mesma compra de novo se alguém apertar o botão outra vez.
+   */
+  async function markStockApplied(entry: FinanceEntry, appliedKeys: string[]) {
+    if (!workshopId || appliedKeys.length === 0) return;
+    const applied = new Set(appliedKeys);
+    const nextItems = (entry.items ?? []).map((item) =>
+      applied.has(item.uiKey) ? { ...item, stockApplied: true } : item
+    );
+
+    const { error: updateError } = await supabase
+      .from("financial_transactions")
+      .update({ items: transactionItemsToRow(nextItems) })
+      .eq("id", entry.id)
+      .eq("workshop_id", workshopId);
+
+    if (updateError) throw new Error(updateError.message);
+    void loadFinanceData();
+  }
+
+  /**
    * Cadastro de categoria pelo dropdown do lançamento, que é onde a falta
    * aparece. O tipo vem da página: em Receitas nasce receita, em Despesas
    * despesa — não há o que escolher. Já sai selecionada.
@@ -6990,6 +7035,7 @@ export function FinancePage() {
               )}
               <TransactionList
                 entries={filteredExpenseEntries}
+                onStockEntry={setStockEntryTarget}
                 accountNames={accountNames}
                 editingId={editingExpenseId}
                 editForm={
@@ -7671,6 +7717,20 @@ export function FinancePage() {
             next.set(nfseEntry.id, invoice);
             return next;
           });
+        }}
+      />
+
+      <StockEntryDialog
+        key={stockEntryTarget?.id ?? "estoque-fechado"}
+        open={stockEntryTarget !== null}
+        supabase={supabase}
+        workshopId={workshopId}
+        items={stockEntryTarget?.items ?? []}
+        purchaseDate={stockEntryTarget?.date ?? dateKey(today)}
+        supplierId={stockEntryTarget?.supplierId}
+        onClose={() => setStockEntryTarget(null)}
+        onApplied={async (keys) => {
+          if (stockEntryTarget) await markStockApplied(stockEntryTarget, keys);
         }}
       />
 
