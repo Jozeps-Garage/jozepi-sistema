@@ -1,9 +1,3 @@
-import {
-  ensurePackageServicesInCatalog,
-  loadCoatingPackages,
-  loadStagePackages,
-  packageCatalogName,
-} from "@/lib/services/packages";
 import type { QuoteItemKind } from "@/lib/quotes/types";
 
 export interface QuoteServiceRow {
@@ -34,18 +28,11 @@ export function kindFromCategory(category?: string | null): QuoteItemKind {
 export function buildQuoteCatalogOptions(
   services: QuoteServiceRow[]
 ): QuoteCatalogOption[] {
-  const coatings = loadCoatingPackages();
-  const stages = loadStagePackages();
-  const packageNames = new Set(
-    [
-      ...coatings.map((pkg) => packageCatalogName(pkg, "coating")),
-      ...stages.map((pkg) => packageCatalogName(pkg, "stage")),
-    ].map((name) => name.trim().toLowerCase())
-  );
-
+  // Tudo vem do catálogo do banco. Antes os pacotes de stage e coating eram
+  // injetados daqui, escritos no código, e os serviços de mesmo nome ficavam
+  // escondidos para não duplicar.
   const standalone = services
     .filter((service) => service.active)
-    .filter((service) => !packageNames.has(service.name.trim().toLowerCase()))
     .map((service) => ({
       key: `service:${service.id}`,
       kind: kindFromCategory(service.category),
@@ -54,26 +41,8 @@ export function buildQuoteCatalogOptions(
       serviceId: service.id,
     }));
 
-  const coatingOptions: QuoteCatalogOption[] = coatings.map((pkg) => ({
-    key: `package:${pkg.id}`,
-    kind: "coating",
-    name: pkg.badge,
-    price: pkg.price,
-    packageId: pkg.id,
-  }));
-
-  const stageOptions: QuoteCatalogOption[] = stages.map((pkg) => ({
-    key: `package:${pkg.id}`,
-    kind: "stage",
-    name: pkg.badge,
-    price: pkg.price,
-    packageId: pkg.id,
-  }));
-
   return [
-    ...coatingOptions,
     ...standalone.filter((item) => item.kind === "coating"),
-    ...stageOptions,
     ...standalone.filter((item) => item.kind === "stage"),
     ...standalone.filter((item) => item.kind === "servico"),
   ];
@@ -81,56 +50,17 @@ export function buildQuoteCatalogOptions(
 
 export async function resolveCatalogOption(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any,
-  workshopId: string,
-  services: QuoteServiceRow[],
+  _supabase: any,
+  _workshopId: string,
+  _services: QuoteServiceRow[],
   option: QuoteCatalogOption
 ): Promise<{ serviceId: string; name: string; kind: QuoteItemKind; price: number }> {
-  if (option.serviceId) {
-    return {
-      serviceId: option.serviceId,
-      name: option.name,
-      kind: option.kind,
-      price: option.price,
-    };
-  }
-
-  if (!option.packageId) {
+  if (!option.serviceId) {
     throw new Error("Item de catálogo inválido.");
   }
 
-  const kind = option.kind === "servico" ? "coating" : option.kind;
-  const pkg =
-    kind === "coating"
-      ? loadCoatingPackages().find((item) => item.id === option.packageId)
-      : loadStagePackages().find((item) => item.id === option.packageId);
-
-  if (!pkg) {
-    throw new Error("Pacote não encontrado.");
-  }
-
-  const catalogName = packageCatalogName(pkg, kind);
-  const synced = await ensurePackageServicesInCatalog(
-    supabase,
-    workshopId,
-    services.map((service) => ({
-      id: service.id,
-      name: service.name,
-      price: service.price,
-      duration_minutes: service.duration_minutes,
-      active: service.active,
-    }))
-  );
-  const matched = synced.find(
-    (service) => service.name.trim().toLowerCase() === catalogName.toLowerCase()
-  );
-
-  if (!matched) {
-    throw new Error("Não foi possível vincular o pacote a um serviço.");
-  }
-
   return {
-    serviceId: matched.id,
+    serviceId: option.serviceId,
     name: option.name,
     kind: option.kind,
     price: option.price,

@@ -38,7 +38,6 @@ import {
   resolveTimeZone,
   wallClockInTimeZone,
 } from "@/lib/timezone";
-import { ensurePackageServicesInCatalog } from "@/lib/services/packages";
 import { vehicleLabel, vehicleName } from "@/lib/vehicles/format";
 import {
   type Client,
@@ -857,17 +856,7 @@ export function AgendaCalendar() {
     );
 
     if (!servicesError) {
-      const loadedServices = (servicesData as AgendaService[]) ?? [];
-      try {
-        const withPackages = await ensurePackageServicesInCatalog(
-          supabase,
-          profile.workshop_id,
-          loadedServices
-        );
-        setServices(withPackages as AgendaService[]);
-      } catch {
-        setServices(loadedServices);
-      }
+      setServices((servicesData as AgendaService[]) ?? []);
     }
 
     const { data: appointmentsData, error: appointmentsError } = await fetchAppointments(

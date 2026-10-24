@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowCounterClockwise,
   CalendarBlank,
   Clock,
   PencilSimple,
@@ -13,24 +12,7 @@ import {
   Wrench,
   X,
 } from "@phosphor-icons/react";
-import {
-  COATING_PACKAGES,
-  ensurePackageServicesInCatalog,
-  getPackageDurationMinutes,
-  hasRemovedCoatingPackages,
-  hasRemovedStagePackages,
-  loadCoatingPackages,
-  loadStagePackages,
-  packageCatalogName,
-  restoreCoatingPackages,
-  restoreStagePackages,
-  saveCoatingPackageOverride,
-  saveStagePackageOverride,
-  STAGE_PACKAGES,
-  type ServicePackage,
-} from "@/lib/services/packages";
 
-type PackageStateOverride = { active?: boolean; removed?: boolean };
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dropdown } from "@/components/ui/dropdown";
@@ -129,7 +111,6 @@ interface CatalogRow {
   price: number;
   durationMinutes: number | null;
   active: boolean;
-  package?: ServicePackage;
   service?: ServiceItem;
 }
 
@@ -269,144 +250,6 @@ function formatDuration(minutes: number | null) {
   return `${hours}h${String(remainingMinutes).padStart(2, "0")}`;
 }
 
-function coatingProtectionSummary(pkg: ServicePackage) {
-  const subtitle = pkg.subtitle ?? "";
-  const untilMatch = subtitle.match(/até\s+\d+\s+anos?/i)?.[0];
-  if (untilMatch) return untilMatch.replace(/^até/i, "Até");
-  const yearsMatch = subtitle.match(/\d+\+?\s+anos?/i)?.[0];
-  return yearsMatch ?? "";
-}
-
-function stageInclusionSummary(pkg: ServicePackage) {
-  const items = pkg.newItems
-    .map((item) => item.replace(/^tudo do stage \d+\+?\s*/i, "").trim())
-    .filter(Boolean);
-  if (items.length === 0) return "";
-  if (items.length <= 2) return items.join(" · ");
-  return `${items.slice(0, 2).join(" · ")} · +${items.length - 2}`;
-}
-
-function PackageEditForm({
-  pkg,
-  kind,
-  price,
-  items,
-  newItem,
-  onPriceChange,
-  onItemChange,
-  onRemoveItem,
-  onNewItemChange,
-  onAddItem,
-  onSave,
-  onCancel,
-}: {
-  pkg: ServicePackage;
-  kind: "coating" | "stage";
-  price: string;
-  items: string[];
-  newItem: string;
-  onPriceChange: (value: string) => void;
-  onItemChange: (index: number, value: string) => void;
-  onRemoveItem: (index: number) => void;
-  onNewItemChange: (value: string) => void;
-  onAddItem: () => void;
-  onSave: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div className="p-4 sm:p-5">
-      <div className="mb-4 flex items-center gap-3">
-        <CatalogTypeBadge kind={kind} />
-        <span className="text-sm font-semibold text-foreground">
-          Editar {pkg.badge}
-        </span>
-      </div>
-
-      <div className="mb-4">
-        <label className="mb-1 block text-xs font-semibold text-muted">
-          Preço (R$)
-        </label>
-        <input
-          type="number"
-          min="0"
-          step="0.01"
-          value={price}
-          onChange={(event) => onPriceChange(event.target.value)}
-          className="w-40 rounded-lg border border-border bg-background px-3 py-2 text-sm font-bold text-foreground outline-none [appearance:textfield] focus:border-primary focus:ring-1 focus:ring-primary/30 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-        />
-      </div>
-
-      <div className="mb-4">
-        <label className="mb-2 block text-xs font-semibold text-muted">
-          {kind === "coating"
-            ? "Itens incluídos neste coating"
-            : "Serviços incluídos neste stage"}
-        </label>
-        <div className="space-y-2">
-          {items.map((item, idx) => (
-            <div key={`${pkg.id}-${idx}`} className="flex items-center gap-2">
-              <input
-                type="text"
-                value={item}
-                onChange={(event) => onItemChange(idx, event.target.value)}
-                className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary/30"
-              />
-              <button
-                type="button"
-                onClick={() => onRemoveItem(idx)}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-danger/10 text-danger transition-colors hover:bg-danger hover:text-white"
-                aria-label="Remover item"
-              >
-                <Trash size={13} weight={SERVICE_ICON_WEIGHT} aria-hidden />
-              </button>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-2 flex items-center gap-2">
-          <input
-            type="text"
-            value={newItem}
-            onChange={(event) => onNewItemChange(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && newItem.trim()) {
-                event.preventDefault();
-                onAddItem();
-              }
-            }}
-            placeholder="Novo item... (Enter para adicionar)"
-            className="min-w-0 flex-1 rounded-lg border border-dashed border-border bg-background px-3 py-1.5 text-sm text-foreground outline-none placeholder:text-muted focus:border-primary focus:ring-1 focus:ring-primary/30"
-          />
-          <button
-            type="button"
-            onClick={onAddItem}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-success/10 text-success transition-colors hover:bg-success hover:text-white"
-            aria-label="Adicionar item"
-          >
-            <Plus size={13} weight="bold" aria-hidden />
-          </button>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2 border-t border-border pt-4">
-        <button
-          type="button"
-          onClick={onSave}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-success px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-success/90"
-        >
-          Salvar alterações
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-4 py-2 text-xs font-semibold text-muted transition-colors hover:bg-card"
-        >
-          Cancelar
-        </button>
-      </div>
-    </div>
-  );
-}
 
 function getServiceCategory(service: Pick<ServiceItem, "category">) {
   return service.category?.trim() || "Outros";
@@ -501,23 +344,7 @@ export function ServicesPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
 
-  // Stage packages state (loaded from localStorage overrides merged over defaults)
-  // Use static defaults for SSR + first client paint; apply localStorage overrides after mount.
-  const [stagePackages, setStagePackages] = useState<ServicePackage[]>(() =>
-    STAGE_PACKAGES.map((pkg) => ({ ...pkg, active: true }))
-  );
-  const [coatingPackages, setCoatingPackages] = useState<ServicePackage[]>(() =>
-    COATING_PACKAGES.map((pkg) => ({ ...pkg, active: true }))
-  );
-  const [editingPackageId, setEditingPackageId] = useState<string | null>(null);
-  const [pkgEditPrice, setPkgEditPrice] = useState("");
-  const [pkgEditItems, setPkgEditItems] = useState<string[]>([]);
-  const [pkgEditNewItem, setPkgEditNewItem] = useState("");
   const [typeFilter, setTypeFilter] = useState<CatalogTypeFilter>("all");
-  const [packageToDelete, setPackageToDelete] = useState<ServicePackage | null>(
-    null
-  );
-  const [hasRemovedPackages, setHasRemovedPackages] = useState(false);
 
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [products, setProducts] = useState<ProductItem[]>([]);
@@ -593,18 +420,6 @@ export function ServicesPage() {
 
     setLoading(false);
   }
-
-  useEffect(() => {
-    setStagePackages(loadStagePackages());
-    setCoatingPackages(loadCoatingPackages());
-  }, []);
-
-  // Só dá para saber no cliente: o estado vive no localStorage.
-  useEffect(() => {
-    setHasRemovedPackages(
-      hasRemovedCoatingPackages() || hasRemovedStagePackages()
-    );
-  }, []);
 
   useEffect(() => {
     void Promise.resolve().then(loadServices);
@@ -717,7 +532,6 @@ export function ServicesPage() {
   }
 
   function openCreateForm() {
-    setEditingPackageId(null);
     setEditingService(null);
     const kind = typeFilter === "all" ? "servico" : typeFilter;
     setForm({ ...emptyForm, category: categoryFromKind(kind) });
@@ -728,7 +542,6 @@ export function ServicesPage() {
   }
 
   function openEditForm(service: ServiceItem) {
-    setEditingPackageId(null);
     setFormOpen(false);
     setFormClosing(false);
     setEditingService(service);
@@ -1115,17 +928,10 @@ export function ServicesPage() {
   }, 0);
 
   const normalizedSearchTerm = searchTerm.trim().toLowerCase();
-  const packageCatalogNames = new Set(
-    [
-      ...coatingPackages.map((pkg) => packageCatalogName(pkg, "coating")),
-      ...stagePackages.map((pkg) => packageCatalogName(pkg, "stage")),
-    ].map((name) => name.trim().toLowerCase())
-  );
-  const standaloneServices = services.filter((service) => {
-    const normalizedName = service.name.trim().toLowerCase();
-    return !packageCatalogNames.has(normalizedName);
-  });
-  const customServiceRows: CatalogRow[] = standaloneServices.map((service) => ({
+  // Todo o catálogo vem do banco. Antes os pacotes de stage e coating eram
+  // montados a partir do código e os serviços de mesmo nome ficavam ocultos
+  // para não duplicar a linha.
+  const customServiceRows: CatalogRow[] = services.map((service) => ({
     id: service.id,
     kind: kindFromCategory(getServiceCategory(service)),
     name: service.name,
@@ -1136,27 +942,7 @@ export function ServicesPage() {
     service,
   }));
   const catalogRows: CatalogRow[] = [
-    ...coatingPackages.map((pkg) => ({
-      id: pkg.id,
-      kind: "coating" as const,
-      name: pkg.badge,
-      summary: coatingProtectionSummary(pkg),
-      price: pkg.price,
-      durationMinutes: getPackageDurationMinutes(pkg.id),
-      active: pkg.active,
-      package: pkg,
-    })),
     ...customServiceRows.filter((row) => row.kind === "coating"),
-    ...stagePackages.map((pkg) => ({
-      id: pkg.id,
-      kind: "stage" as const,
-      name: pkg.badge,
-      summary: stageInclusionSummary(pkg),
-      price: pkg.price,
-      durationMinutes: getPackageDurationMinutes(pkg.id),
-      active: pkg.active,
-      package: pkg,
-    })),
     ...customServiceRows.filter((row) => row.kind === "stage"),
     ...customServiceRows.filter((row) => row.kind === "servico"),
   ];
@@ -1171,147 +957,6 @@ export function ServicesPage() {
       row.name.toLowerCase().includes(normalizedSearchTerm);
     return matchesType && matchesSearch;
   });
-
-  function openPackageEdit(pkg: ServicePackage) {
-    setEditingService(null);
-    setFormOpen(false);
-    setFormClosing(false);
-    setEditingPackageId(pkg.id);
-    setPkgEditPrice(String(pkg.price));
-    setPkgEditItems([...pkg.newItems]);
-    setPkgEditNewItem("");
-  }
-
-  function cancelPackageEdit() {
-    setEditingPackageId(null);
-    setPkgEditNewItem("");
-  }
-
-  function savePackageEdit(pkg: ServicePackage) {
-    const price = parseFloat(pkgEditPrice.replace(",", "."));
-    if (isNaN(price) || price < 0) return;
-    const newItems = pkgEditItems.filter((i) => i.trim() !== "");
-    const isCoating = pkg.id.startsWith("coating-");
-    if (isCoating) {
-      saveCoatingPackageOverride(pkg.id, { price, newItems });
-      setCoatingPackages((prev) =>
-        prev.map((p) => (p.id === pkg.id ? { ...p, price, newItems } : p))
-      );
-    } else {
-      saveStagePackageOverride(pkg.id, { price, newItems });
-      setStagePackages((prev) =>
-        prev.map((p) => (p.id === pkg.id ? { ...p, price, newItems } : p))
-      );
-    }
-    setEditingPackageId(null);
-    setPkgEditNewItem("");
-  }
-
-  function savePackageState(pkg: ServicePackage, override: PackageStateOverride) {
-    const apply = (list: ServicePackage[]) =>
-      override.removed
-        ? list.filter((item) => item.id !== pkg.id)
-        : list.map((item) =>
-            item.id === pkg.id ? { ...item, ...override } : item
-          );
-
-    if (pkg.id.startsWith("coating-")) {
-      saveCoatingPackageOverride(pkg.id, override);
-      setCoatingPackages(apply);
-    } else {
-      saveStagePackageOverride(pkg.id, override);
-      setStagePackages(apply);
-    }
-  }
-
-  // O pacote tem um serviço espelho no banco, que é o que a Agenda agenda.
-  // Sem atualizar os dois, um pacote desativado continuaria agendável.
-  async function syncPackageMirrorService(pkg: ServicePackage, active: boolean) {
-    const kind = pkg.id.startsWith("coating-") ? "coating" : "stage";
-    const catalogName = packageCatalogName(pkg, kind).trim().toLowerCase();
-    const mirror = services.find(
-      (service) => service.name.trim().toLowerCase() === catalogName
-    );
-    if (!mirror) return;
-
-    const { error: updateError } = await supabase
-      .from("services")
-      .update({ active })
-      .eq("id", mirror.id);
-
-    if (updateError) {
-      setError(updateError.message);
-      return;
-    }
-
-    setServices((prev) =>
-      prev.map((service) =>
-        service.id === mirror.id ? { ...service, active } : service
-      )
-    );
-  }
-
-  async function handleTogglePackageActive(pkg: ServicePackage) {
-    const nextActive = !pkg.active;
-    setError(null);
-    savePackageState(pkg, { active: nextActive });
-    await syncPackageMirrorService(pkg, nextActive);
-  }
-
-  async function executeDeletePackage(pkg: ServicePackage) {
-    setError(null);
-    savePackageState(pkg, { removed: true });
-    setHasRemovedPackages(true);
-    await syncPackageMirrorService(pkg, false);
-    setPackageToDelete(null);
-  }
-
-  function handleRestorePackages() {
-    restoreCoatingPackages();
-    restoreStagePackages();
-    setCoatingPackages(loadCoatingPackages());
-    setStagePackages(loadStagePackages());
-    setHasRemovedPackages(false);
-  }
-
-  async function handleBookPackage(pkg: ServicePackage) {
-    const kind = pkg.id.startsWith("coating-") ? "coating" : "stage";
-    const catalogName = packageCatalogName(pkg, kind);
-
-    if (workshopId) {
-      try {
-        const synced = await ensurePackageServicesInCatalog(
-          supabase,
-          workshopId,
-          services.map((service) => ({
-            id: service.id,
-            name: service.name,
-            price: service.price,
-            duration_minutes: service.duration_minutes,
-            active: service.active,
-          }))
-        );
-        const matched = synced.find(
-          (service) =>
-            service.name.trim().toLowerCase() === catalogName.toLowerCase()
-        );
-        if (matched) {
-          router.push(`/agenda?packageServices=${matched.id}`);
-          return;
-        }
-      } catch {
-        // fall through to name lookup below
-      }
-    }
-
-    const existing = services.find(
-      (service) =>
-        service.name.trim().toLowerCase() === catalogName.toLowerCase()
-    );
-    router.push(
-      existing ? `/agenda?packageServices=${existing.id}` : "/agenda"
-    );
-  }
 
   function handleBookService(serviceId: string) {
     router.push(`/agenda?packageServices=${serviceId}`);
@@ -1357,21 +1002,6 @@ export function ServicesPage() {
                 </button>
               );
             })}
-            {hasRemovedPackages && (
-              <button
-                type="button"
-                onClick={handleRestorePackages}
-                className="rounded-full border border-dashed border-border px-3 py-1.5 text-xs font-semibold text-muted transition-colors hover:border-primary/30 hover:text-foreground"
-              >
-                <ArrowCounterClockwise
-                  size={12}
-                  weight={SERVICE_ICON_WEIGHT}
-                  aria-hidden
-                  className="mr-1 inline"
-                />
-                Restaurar pacotes
-              </button>
-            )}
           </div>
         </div>
         <Button
@@ -1769,47 +1399,10 @@ export function ServicesPage() {
             </div>
           )}
           {visibleCatalogRows.map((row) => {
-            const pkg = row.package;
             const service = row.service;
-            const isPackageEditing = Boolean(pkg && editingPackageId === pkg.id);
             const isServiceEditing = Boolean(
               service && editingService?.id === service.id
             );
-            if (isPackageEditing && pkg) {
-              return (
-                <div
-                  key={row.id}
-                  className="border-b border-border/70 bg-background/60 last:border-b-0"
-                >
-                  <PackageEditForm
-                    pkg={pkg}
-                    kind={row.kind === "coating" ? "coating" : "stage"}
-                    price={pkgEditPrice}
-                    items={pkgEditItems}
-                    newItem={pkgEditNewItem}
-                    onPriceChange={setPkgEditPrice}
-                    onItemChange={(index, value) => {
-                      const next = [...pkgEditItems];
-                      next[index] = value;
-                      setPkgEditItems(next);
-                    }}
-                    onRemoveItem={(index) =>
-                      setPkgEditItems((prev) =>
-                        prev.filter((_, itemIndex) => itemIndex !== index)
-                      )
-                    }
-                    onNewItemChange={setPkgEditNewItem}
-                    onAddItem={() => {
-                      if (!pkgEditNewItem.trim()) return;
-                      setPkgEditItems((prev) => [...prev, pkgEditNewItem.trim()]);
-                      setPkgEditNewItem("");
-                    }}
-                    onSave={() => savePackageEdit(pkg)}
-                    onCancel={cancelPackageEdit}
-                  />
-                </div>
-              );
-            }
 
             if (isServiceEditing && service) {
               return (
@@ -2060,10 +1653,6 @@ export function ServicesPage() {
                     <button
                       type="button"
                       onClick={() => {
-                        if (pkg) {
-                          void handleBookPackage(pkg);
-                          return;
-                        }
                         if (service) handleBookService(service.id);
                       }}
                       className="inline-flex items-center gap-1 rounded-lg border border-success/30 bg-success/10 px-2.5 py-1.5 text-[11px] font-semibold text-success transition-colors hover:bg-success/20"
@@ -2077,10 +1666,6 @@ export function ServicesPage() {
                       <button
                         type="button"
                         onClick={() => {
-                          if (pkg) {
-                            openPackageEdit(pkg);
-                            return;
-                          }
                           if (service) openEditForm(service);
                         }}
                         className="flex h-6 w-6 items-center justify-center rounded text-muted/60 transition-colors hover:bg-background hover:text-foreground"
@@ -2093,38 +1678,6 @@ export function ServicesPage() {
                           aria-hidden
                         />
                       </button>
-                      {pkg && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => void handleTogglePackageActive(pkg)}
-                            className="flex h-6 w-6 items-center justify-center rounded text-muted/60 transition-colors hover:bg-background hover:text-foreground"
-                            title={pkg.active ? "Desativar" : "Ativar"}
-                            aria-label={
-                              pkg.active ? "Desativar pacote" : "Ativar pacote"
-                            }
-                          >
-                            <Power
-                              size={13}
-                              weight={SERVICE_ICON_WEIGHT}
-                              aria-hidden
-                            />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setPackageToDelete(pkg)}
-                            className="flex h-6 w-6 items-center justify-center rounded text-muted/60 transition-colors hover:bg-background hover:text-danger"
-                            title="Excluir"
-                            aria-label={`Excluir ${row.name}`}
-                          >
-                            <Trash
-                              size={13}
-                              weight={SERVICE_ICON_WEIGHT}
-                              aria-hidden
-                            />
-                          </button>
-                        </>
-                      )}
                       {service && (
                         <>
                           <button
@@ -2204,21 +1757,6 @@ export function ServicesPage() {
           }
         }
       `}</style>
-
-      <ConfirmDialog
-        open={Boolean(packageToDelete)}
-        title="Excluir pacote"
-        description={
-          packageToDelete
-            ? `Deseja excluir o pacote "${packageToDelete.badge}"? Ele sai do catálogo e deixa de ser agendável. Dá para trazer de volta pelo botão "Restaurar pacotes" no topo da lista.`
-            : ""
-        }
-        confirmLabel="Excluir pacote"
-        onCancel={() => setPackageToDelete(null)}
-        onConfirm={() => {
-          if (packageToDelete) void executeDeletePackage(packageToDelete);
-        }}
-      />
 
       <ConfirmDialog
         open={Boolean(serviceToDelete)}
