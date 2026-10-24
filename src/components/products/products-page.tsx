@@ -36,7 +36,6 @@ import {
   STOCK_KIND_LABEL,
   STOCK_KIND_OPTIONS,
   formatOnHand,
-  pluralize,
   isLowStock,
   tracksStock,
   type StockItem,
@@ -1781,10 +1780,7 @@ export function ProductsPage() {
                             {/* No celular não há cabeçalho de coluna, então a
                                 unidade é o rótulo e embaixo vai só o número. */}
                             <p className="text-xs font-medium uppercase tracking-wide text-muted">
-                              {pluralize(
-                                stock.unitLabel.trim() ||
-                                  (isLiquid ? "frasco" : "unidade")
-                              )}
+                              Unidades
                             </p>
                             <p
                               className={`mt-1 text-sm font-bold tabular-nums ${
@@ -1984,15 +1980,6 @@ export function ProductsPage() {
                   {form.kind !== "patrimonio" && (
                     <>
                       <Input
-                        label="Como você chama a embalagem"
-                        value={form.unitLabel}
-                        autoComplete="off"
-                        onChange={(event) =>
-                          updateForm({ unitLabel: event.target.value })
-                        }
-                        placeholder={form.kind === "liquido" ? "galão" : "pano"}
-                      />
-                      <Input
                         label="Quantas você tem hoje"
                         type="number"
                         min="0"
@@ -2032,7 +2019,7 @@ export function ProductsPage() {
                     label={
                       form.kind === "patrimonio"
                         ? "Quanto custou"
-                        : `Custo de ${form.unitLabel.trim() || "uma embalagem"}`
+                        : "Custo de cada unidade"
                     }
                     value={form.totalCost}
                     autoComplete="off"

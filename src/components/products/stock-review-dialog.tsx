@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { useBodyScrollLock } from "@/lib/utils/body-scroll-lock";
 import {
   formatOnHand,
-  pluralize,
   tracksStock,
   type StockItem,
 } from "@/lib/products/stock";
@@ -187,9 +186,6 @@ export function StockReviewDialog({
                 const value = raw.trim() === "" ? null : Number(raw.replace(",", "."));
                 const changed =
                   value !== null && Number.isFinite(value) && value !== item.onHand;
-                const unit =
-                  item.unitLabel.trim() || (item.kind === "liquido" ? "frasco" : "unidade");
-
                 return (
                   <li
                     key={item.id}
@@ -215,12 +211,12 @@ export function StockReviewDialog({
                           }))
                         }
                         placeholder={String(item.onHand)}
-                        aria-label={`Quantas ${pluralize(unit)} de ${item.name}`}
+                        aria-label={`Quantas unidades de ${item.name}`}
                         className={`w-20 rounded-md border bg-input px-3 py-2 text-right text-sm text-foreground outline-none focus:ring-2 focus:ring-accent/20 ${
                           changed ? "border-success" : "border-border"
                         }`}
                       />
-                      <span className="w-16 text-xs text-muted">{pluralize(unit)}</span>
+                      <span className="w-16 text-xs text-muted">unidades</span>
                     </div>
                   </li>
                 );

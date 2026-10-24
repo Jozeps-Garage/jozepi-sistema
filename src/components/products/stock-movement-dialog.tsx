@@ -13,7 +13,6 @@ import {
   buildStockCycles,
   formatDuration,
   formatOnHand,
-  pluralize,
   type StockCycle,
   type StockItem,
   type StockMovement,
@@ -79,8 +78,6 @@ export function StockMovementDialog({
   }, [open, load]);
 
   if (!open || !item || typeof document === "undefined") return null;
-
-  const unit = item.unitLabel.trim() || (item.kind === "liquido" ? "frasco" : "unidade");
 
   async function handleBaixa() {
     if (saving || !workshopId || !item) return;
@@ -159,7 +156,7 @@ export function StockMovementDialog({
 
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[6rem_11rem_minmax(0,1fr)]">
           <Input
-            label={`Saíram (${pluralize(unit)})`}
+            label="Saíram (unidades)"
             inputMode="decimal"
             value={quantity}
             onChange={(event) => setQuantity(event.target.value)}
@@ -219,7 +216,7 @@ export function StockMovementDialog({
                     Entrou {formatDate(cycle.startedOn)}
                     {cycle.endedOn ? ` · acabou ${formatDate(cycle.endedOn)}` : ""}
                     {cycle.purchased > 0
-                      ? ` · ${cycle.purchased} ${pluralize(unit)}`
+                      ? ` · ${cycle.purchased} ${cycle.purchased === 1 ? "unidade" : "unidades"}`
                       : ""}
                   </p>
                 </li>

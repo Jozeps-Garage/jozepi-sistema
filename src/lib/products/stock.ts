@@ -73,30 +73,18 @@ export function isLowStock(item: StockItem) {
   return item.onHand <= item.minOnHand;
 }
 
-/** "3 galões", "1 pano", "12 unidades" — plural simples, sem inventar regra. */
+/**
+ * "1 unidade", "12 unidades". O nome da embalagem saiu do cadastro: era um
+ * campo a mais para preencher em troca de uma palavra na tela.
+ */
 export function formatOnHand(item: StockItem) {
   const quantity = item.onHand;
-  const unit = item.unitLabel.trim() || "unidade";
-  const rounded = Number.isInteger(quantity) ? String(quantity) : quantity.toFixed(2).replace(".", ",");
-  if (quantity === 1) return `1 ${unit}`;
-  return `${rounded} ${pluralize(unit)}`;
+  const rounded = Number.isInteger(quantity)
+    ? String(quantity)
+    : quantity.toFixed(2).replace(".", ",");
+  return `${rounded} ${quantity === 1 ? "unidade" : "unidades"}`;
 }
 
-/**
- * Plural das palavras que viram unidade de estoque numa oficina: galão→galões,
- * pincel→pincéis, litro→litros. Não é um pluralizador de português inteiro —
- * cobre as terminações que aparecem aqui e cai no "+s" no resto.
- */
-export function pluralize(word: string) {
-  const lower = word.toLowerCase();
-  if (lower.endsWith("ão")) return `${word.slice(0, -2)}ões`;
-  if (lower.endsWith("el")) return `${word.slice(0, -2)}éis`;
-  if (lower.endsWith("al")) return `${word.slice(0, -2)}ais`;
-  if (lower.endsWith("il")) return `${word.slice(0, -2)}is`;
-  if (lower.endsWith("m")) return `${word.slice(0, -1)}ns`;
-  if (/[rsz]$/.test(lower)) return `${word}es`;
-  return `${word}s`;
-}
 
 /** O volume total guardado, quando faz sentido dizer. */
 export function totalVolumeMl(item: StockItem) {
