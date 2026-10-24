@@ -70,6 +70,18 @@ export interface ProductForm {
   supplierId: string;
   depreciationMode: DepreciationMode;
   acquiredAt: string;
+  // Modelo por embalagem (047).
+  kind: StockKind;
+  /** Quantas embalagens/unidades há hoje. */
+  onHand: string;
+  /** Abaixo disso o painel avisa. Vazio: não avisa. */
+  minOnHand: string;
+  /** Como você chama a embalagem: galão, frasco, pano. */
+  unitLabel: string;
+  /** Tamanho de UMA embalagem, em ml. Só líquido. */
+  packageVolumeMl: string;
+  /** Quanto o equipamento vale hoje. Só patrimônio. */
+  resaleValue: string;
 }
 
 export interface ServiceProductUsage {
@@ -96,6 +108,12 @@ export const emptyProductForm: ProductForm = {
   supplierId: "",
   depreciationMode: "none",
   acquiredAt: "",
+  kind: "liquido",
+  onHand: "1",
+  minOnHand: "",
+  unitLabel: "frasco",
+  packageVolumeMl: "",
+  resaleValue: "",
 };
 
 export const productTypeOptions: ProductTypeOption[] = [

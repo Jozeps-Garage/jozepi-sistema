@@ -35,6 +35,7 @@ import {
 } from "@/lib/suppliers/save";
 import {
   STOCK_KIND_LABEL,
+  STOCK_KIND_OPTIONS,
   formatOnHand,
   formatVolume,
   isLowStock,
@@ -43,6 +44,7 @@ import {
   type StockItem,
   type StockKind,
 } from "@/lib/products/stock";
+import { formatMoneyInput, parseCurrencyInput } from "@/lib/utils/money";
 import { createClient } from "@/lib/supabase/client";
 import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { formatCurrency, formatPhone, normalizeOptionalPhone } from "@/lib/utils/format";
@@ -981,7 +983,21 @@ export function ProductsPage() {
       photoUrl: product.photoUrl ?? "",
       supplierId: product.supplierId ?? "",
       depreciationMode: getUtensilDepreciationMode(product),
-      acquiredAt: getUtensilAcquiredAt(product),
+      acquiredAt: product.acquiredOn ?? getUtensilAcquiredAt(product),
+      kind: stockItemOf(product).kind,
+      onHand: String(product.onHand ?? 0),
+      minOnHand: product.minOnHand === null || product.minOnHand === undefined
+        ? ""
+        : String(product.minOnHand),
+      unitLabel: stockItemOf(product).unitLabel,
+      packageVolumeMl:
+        product.packageVolumeMl === null || product.packageVolumeMl === undefined
+          ? ""
+          : String(product.packageVolumeMl),
+      resaleValue:
+        product.resaleValue === null || product.resaleValue === undefined
+          ? ""
+          : formatMoneyInput(product.resaleValue),
     });
     setError(null);
     setTypeError(null);
@@ -1426,9 +1442,35 @@ export function ProductsPage() {
       getUtensilDepreciationMode(editingProduct) === depreciationMode
         ? getProductRemainingStock(editingProduct)
         : initialStock;
+    // Campos do modelo por embalagem. `onHand` aqui é o que você declarou no
+    // cadastro; depois dele, só entrada, baixa ou revisão mudam o saldo.
+    const onHand = Number(form.onHand.replace(",", ".")) || 0;
+    const minOnHand = form.minOnHand.trim()
+      ? Number(form.minOnHand.replace(",", "."))
+      : null;
+    let resaleValue: number | null = null;
+    if (form.kind === "patrimonio" && form.resaleValue.trim()) {
+      try {
+        resaleValue = parseCurrencyInput(form.resaleValue);
+      } catch {
+        setError("Informe um valor de revenda válido.");
+        return;
+      }
+    }
+
     const nextProduct: ProductItem = {
       ...baseProduct,
       stockRemaining: String(Math.min(initialStock, preservedRemaining)),
+      kind: form.kind,
+      onHand: form.kind === "patrimonio" ? 0 : onHand,
+      minOnHand: form.kind === "patrimonio" ? null : minOnHand,
+      unitLabel: form.unitLabel.trim() || (form.kind === "liquido" ? "frasco" : "unidade"),
+      packageVolumeMl:
+        form.kind === "liquido" && form.packageVolumeMl.trim()
+          ? Number(form.packageVolumeMl)
+          : null,
+      resaleValue,
+      acquiredOn: form.kind === "patrimonio" && form.acquiredAt ? form.acquiredAt : null,
     };
 
     try {
@@ -2219,28 +2261,28 @@ export function ProductsPage() {
                       placeholder="Shampoo automotivo"
                     />
                   </div>
+                  {/* Uma escolha só: ela decide quais campos fazem sentido.
+                      O `type` antigo segue junto para o resto do app. */}
                   <Dropdown
-                    label="Tipo"
-                    value={form.type}
-                    options={typeOptions}
-                    onChange={(type) => {
-                      const nextType = type as ProductType;
-                      updateForm(
-                        nextType === "utensil"
-                          ? { type: nextType }
-                          : {
-                              type: nextType,
-                              depreciationMode: "none",
-                              acquiredAt: "",
-                              durabilityWashes: "",
-                            }
-                      );
+                    label="Categoria"
+                    value={form.kind}
+                    options={STOCK_KIND_OPTIONS}
+                    onChange={(value) => {
+                      const kind = value as StockKind;
+                      updateForm({
+                        kind,
+                        type: kind === "liquido" ? "liquid" : "utensil",
+                        unitLabel:
+                          kind === "liquido"
+                            ? form.unitLabel || "frasco"
+                            : form.unitLabel || "unidade",
+                        depreciationMode: "none",
+                        durabilityWashes: "",
+                        ...(kind === "patrimonio" ? {} : { resaleValue: "" }),
+                        ...(kind === "liquido" ? {} : { packageVolumeMl: "" }),
+                      });
                       setTypeError(null);
                     }}
-                    actionLabel="Adicionar"
-                    createPlaceholder="Ex: Cera, Equipamento, Químico"
-                    onCreateOption={handleAddType}
-                    onDeleteOption={handleDeleteType}
                   />
                   <Dropdown
                     label="Fornecedor"
@@ -2255,46 +2297,78 @@ export function ProductsPage() {
                     </p>
                   )}
 
-                  {form.type === "liquid" ? (
+                  {form.kind === "liquido" && (
                     <Input
-                      label="Volume total (ml)"
+                      label="Volume de cada embalagem (ml)"
                       type="number"
                       min="0"
                       step="1"
                       className="number-input-no-spinner"
-                      value={form.volumeMl}
+                      value={form.packageVolumeMl}
                       onChange={(event) =>
-                        updateForm({ volumeMl: event.target.value })
+                        updateForm({ packageVolumeMl: event.target.value })
                       }
                       placeholder="5000"
-                      suffix={
-                        <CaretUpDown
-                          size={16}
-                          weight={PRODUCT_ICON_WEIGHT}
-                          aria-hidden
-                        />
-                      }
                     />
-                  ) : (
-                    <Input
-                      label={
-                        form.type === "utensil" && form.depreciationMode === "usage"
-                          ? "Vida útil (usos)"
-                          : "Quantidade"
-                      }
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={form.quantity}
-                      onChange={(event) =>
-                        updateForm({ quantity: event.target.value })
-                      }
-                      placeholder={
-                        form.type === "utensil" && form.depreciationMode === "usage"
-                          ? "200"
-                          : "3"
-                      }
-                    />
+                  )}
+
+                  {form.kind !== "patrimonio" && (
+                    <>
+                      <Input
+                        label="Como você chama a embalagem"
+                        value={form.unitLabel}
+                        autoComplete="off"
+                        onChange={(event) =>
+                          updateForm({ unitLabel: event.target.value })
+                        }
+                        placeholder={form.kind === "liquido" ? "galão" : "pano"}
+                      />
+                      <Input
+                        label="Quantas você tem hoje"
+                        type="number"
+                        min="0"
+                        step="1"
+                        className="number-input-no-spinner"
+                        value={form.onHand}
+                        onChange={(event) => updateForm({ onHand: event.target.value })}
+                        placeholder="3"
+                      />
+                      <Input
+                        label="Avisar quando chegar em (opcional)"
+                        type="number"
+                        min="0"
+                        step="1"
+                        className="number-input-no-spinner"
+                        value={form.minOnHand}
+                        onChange={(event) =>
+                          updateForm({ minOnHand: event.target.value })
+                        }
+                        placeholder="1"
+                      />
+                    </>
+                  )}
+
+                  {form.kind === "patrimonio" && (
+                    <>
+                      <Input
+                        label="Data de aquisição"
+                        type="date"
+                        value={form.acquiredAt}
+                        onChange={(event) =>
+                          updateForm({ acquiredAt: event.target.value })
+                        }
+                      />
+                      <Input
+                        label="Quanto vale hoje (opcional)"
+                        prefix="R$"
+                        value={form.resaleValue}
+                        autoComplete="off"
+                        onChange={(event) =>
+                          updateForm({ resaleValue: event.target.value })
+                        }
+                        placeholder="500,00"
+                      />
+                    </>
                   )}
 
                   <Input
