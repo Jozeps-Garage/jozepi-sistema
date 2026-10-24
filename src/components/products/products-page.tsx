@@ -33,6 +33,16 @@ import {
   isMissingSupplierColumn,
   saveSupplierRow,
 } from "@/lib/suppliers/save";
+import {
+  STOCK_KIND_LABEL,
+  formatOnHand,
+  formatVolume,
+  isLowStock,
+  totalVolumeMl,
+  tracksStock,
+  type StockItem,
+  type StockKind,
+} from "@/lib/products/stock";
 import { createClient } from "@/lib/supabase/client";
 import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { formatCurrency, formatPhone, normalizeOptionalPhone } from "@/lib/utils/format";
@@ -354,6 +364,26 @@ function mapSupplierRow(row: Record<string, unknown>): Supplier {
     notes: typeof row.notes === "string" ? row.notes : null,
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
+  };
+}
+
+/** O produto do cadastro lido como item de estoque. */
+function stockItemOf(product: ProductItem): StockItem {
+  const kind: StockKind =
+    product.kind ?? (product.type === "liquid" ? "liquido" : "utensilio");
+  return {
+    id: product.id,
+    name: product.name,
+    kind,
+    onHand: product.onHand ?? 0,
+    minOnHand: product.minOnHand ?? null,
+    unitLabel: product.unitLabel || (kind === "liquido" ? "frasco" : "unidade"),
+    packageVolumeMl: product.packageVolumeMl ?? null,
+    unitCost: 0,
+    resaleValue: product.resaleValue ?? null,
+    acquiredOn: product.acquiredOn ?? null,
+    supplierId: product.supplierId ?? null,
+    photoUrl: product.photoUrl ?? null,
   };
 }
 
@@ -1799,19 +1829,10 @@ export function ProductsPage() {
                     </div>
 
                     {sortedProducts.map((product) => {
-                      const isLiquid = product.type === "liquid";
-                      const remainingStock = getProductRemainingStock(product);
-                      const initialStock = getProductInitialStock(product);
-                      const stockPercent = getProductStockPercent(product);
-                      const stockUnit = getProductStockUnit(product);
-                      const progressWidth = Math.max(0, Math.min(100, stockPercent));
-                      const criticalStock = stockPercent < 20;
-                      const warningStock = stockPercent >= 20 && stockPercent <= 50;
-                      const progressClass = criticalStock
-                        ? "bg-danger"
-                        : warningStock
-                          ? "bg-warning"
-                          : "bg-success";
+                      const stock = stockItemOf(product);
+                      const isLiquid = stock.kind === "liquido";
+                      const volume = totalVolumeMl(stock);
+                      const low = isLowStock(stock);
 
                       return (
                         <div
@@ -1868,24 +1889,38 @@ export function ProductsPage() {
                           </div>
 
                           <p className="text-sm text-foreground">
-                            {isLiquid
-                              ? `${product.volumeMl} ml`
-                              : `${formatStockAmount(initialStock)} ${stockUnit}`}
+                            {isLiquid && stock.packageVolumeMl
+                              ? `${stock.packageVolumeMl} ml`
+                              : "—"}
                           </p>
 
                           <ProductCostDisplay product={product} compact />
 
+                          {/* Contagem, não barra: o saldo só muda por entrada,
+                              baixa ou revisão. */}
                           <div className="min-w-0">
-                            <p className="truncate text-xs text-muted">
-                              {formatStockAmount(remainingStock)} {stockUnit} /{" "}
-                              {formatStockAmount(initialStock)} {stockUnit}
-                            </p>
-                            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-border">
-                              <div
-                                className={`h-full rounded-full transition-all ${progressClass}`}
-                                style={{ width: `${progressWidth}%` }}
-                              />
-                            </div>
+                            {tracksStock(stock.kind) ? (
+                              <>
+                                <p
+                                  className={`truncate text-sm font-semibold ${
+                                    low ? "text-danger" : "text-foreground"
+                                  }`}
+                                >
+                                  {formatOnHand(stock)}
+                                </p>
+                                <p className="truncate text-xs text-muted">
+                                  {volume ? formatVolume(volume) : ""}
+                                  {low ? " · abaixo do mínimo" : ""}
+                                </p>
+                              </>
+                            ) : (
+                              <p className="truncate text-xs text-muted">
+                                Patrimônio
+                                {stock.resaleValue !== null
+                                  ? ` · vale ${formatCurrency(stock.resaleValue)}`
+                                  : ""}
+                              </p>
+                            )}
                           </div>
 
                           <div className="flex justify-end gap-1.5">
@@ -1932,19 +1967,10 @@ export function ProductsPage() {
               {/* Cards (mobile) */}
               <div className="space-y-4 md:hidden">
                 {sortedProducts.map((product) => {
-                  const isLiquid = product.type === "liquid";
-                  const remainingStock = getProductRemainingStock(product);
-                  const initialStock = getProductInitialStock(product);
-                  const stockPercent = getProductStockPercent(product);
-                  const stockUnit = getProductStockUnit(product);
-                  const progressWidth = Math.max(0, Math.min(100, stockPercent));
-                  const criticalStock = stockPercent < 20;
-                  const warningStock = stockPercent >= 20 && stockPercent <= 50;
-                  const progressClass = criticalStock
-                    ? "bg-danger"
-                    : warningStock
-                      ? "bg-warning"
-                      : "bg-success";
+                  const stock = stockItemOf(product);
+                  const isLiquid = stock.kind === "liquido";
+                  const volume = totalVolumeMl(stock);
+                  const low = isLowStock(stock);
 
                   return (
                     <article
@@ -2023,16 +2049,12 @@ export function ProductsPage() {
                       <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
                         <div className="rounded-lg bg-background px-4 py-3">
                           <span className="font-medium text-muted">
-                            {isLiquid
-                              ? "Volume total"
-                              : getUtensilDepreciationMode(product) === "none"
-                                ? "Quantidade"
-                                : "Vida útil"}
+                            {isLiquid ? "Embalagem" : "Tipo"}
                           </span>
                           <p className="mt-1 font-bold text-foreground">
-                            {isLiquid
-                              ? `${product.volumeMl} ml`
-                              : `${formatStockAmount(initialStock)} ${stockUnit}`}
+                            {isLiquid && stock.packageVolumeMl
+                              ? `${stock.packageVolumeMl} ml`
+                              : STOCK_KIND_LABEL[stock.kind]}
                           </p>
                         </div>
                         <div className="rounded-lg bg-background px-4 py-3">
@@ -2042,19 +2064,42 @@ export function ProductsPage() {
                       </div>
 
                       <div className="mt-3 rounded-lg bg-background px-4 py-3">
-                        <p className="text-xs font-medium text-muted">
-                          Estoque atual
-                        </p>
-                        <p className="mt-1 text-xs font-semibold text-foreground">
-                          {formatStockAmount(remainingStock)} {stockUnit} /{" "}
-                          {formatStockAmount(initialStock)} {stockUnit}
-                        </p>
-                        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-border">
-                          <div
-                            className={`h-full rounded-full transition-all ${progressClass}`}
-                            style={{ width: `${progressWidth}%` }}
-                          />
-                        </div>
+                        {tracksStock(stock.kind) ? (
+                          <>
+                            <p className="text-xs font-medium text-muted">
+                              Em estoque
+                            </p>
+                            <p
+                              className={`mt-1 text-sm font-bold ${
+                                low ? "text-danger" : "text-foreground"
+                              }`}
+                            >
+                              {formatOnHand(stock)}
+                              {volume ? (
+                                <span className="font-medium text-muted">
+                                  {" "}
+                                  · {formatVolume(volume)}
+                                </span>
+                              ) : null}
+                            </p>
+                            {low && (
+                              <p className="mt-0.5 text-xs font-semibold text-danger">
+                                Abaixo do mínimo
+                              </p>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-xs font-medium text-muted">
+                              Patrimônio
+                            </p>
+                            <p className="mt-1 text-sm font-bold text-foreground">
+                              {stock.resaleValue !== null
+                                ? `Vale ${formatCurrency(stock.resaleValue)}`
+                                : "Sem valor de revenda"}
+                            </p>
+                          </>
+                        )}
                       </div>
                     </article>
                   );

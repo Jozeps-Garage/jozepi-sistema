@@ -85,7 +85,8 @@ CREATE INDEX IF NOT EXISTS idx_products_kind
 CREATE TABLE IF NOT EXISTS stock_movements (
   id             UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   workshop_id    UUID NOT NULL REFERENCES workshops(id) ON DELETE CASCADE,
-  product_id     UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  -- TEXT, não UUID: products.id é TEXT porque o app gera o id no cliente.
+  product_id     TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
   kind           TEXT NOT NULL CHECK (kind IN ('entrada', 'baixa', 'revisao')),
   -- entrada/baixa: quanto entrou ou saiu. revisao: quanto foi contado.
   quantity       NUMERIC(12, 2) NOT NULL CHECK (quantity >= 0),

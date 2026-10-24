@@ -9,6 +9,7 @@ import {
   type ProductTypeOption,
   type ServiceProductUsage,
 } from "@/lib/products/catalog";
+import type { StockKind } from "@/lib/products/stock";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 interface ProductRow {
@@ -25,6 +26,13 @@ interface ProductRow {
   stock_remaining: string | null;
   price_history: ProductPriceHistoryEntry[] | null;
   created_at?: string | null;
+  kind?: string | null;
+  on_hand?: number | string | null;
+  min_on_hand?: number | string | null;
+  unit_label?: string | null;
+  package_volume_ml?: number | string | null;
+  resale_value?: number | string | null;
+  acquired_on?: string | null;
 }
 
 interface ProductTypeRow {
@@ -66,7 +74,37 @@ function productFromRow(row: ProductRow): ProductItem {
     stockRemaining: row.stock_remaining ?? undefined,
     priceHistory: Array.isArray(row.price_history) ? row.price_history : [],
     createdAt: row.created_at ?? undefined,
+    kind: stockKindFromRow(row),
+    onHand: toNumberOrZero(row.on_hand),
+    minOnHand: toNumberOrNull(row.min_on_hand),
+    unitLabel:
+      row.unit_label ?? (row.type === "liquid" ? "frasco" : "unidade"),
+    packageVolumeMl: toNumberOrNull(row.package_volume_ml),
+    resaleValue: toNumberOrNull(row.resale_value),
+    acquiredOn: row.acquired_on ?? null,
   });
+}
+
+function toNumberOrNull(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toNumberOrZero(value: number | string | null | undefined) {
+  return toNumberOrNull(value) ?? 0;
+}
+
+/** Linha que a 047 ainda não alcançou cai pelo tipo antigo. */
+function stockKindFromRow(row: ProductRow): StockKind {
+  if (
+    row.kind === "liquido" ||
+    row.kind === "utensilio" ||
+    row.kind === "patrimonio"
+  ) {
+    return row.kind;
+  }
+  return row.type === "liquid" ? "liquido" : "utensilio";
 }
 
 function productToRow(product: ProductItem, workshopId: string) {
@@ -84,6 +122,13 @@ function productToRow(product: ProductItem, workshopId: string) {
     supplier_id: product.supplierId ?? null,
     stock_remaining: product.stockRemaining ?? null,
     price_history: product.priceHistory ?? [],
+    kind: product.kind ?? (product.type === "liquid" ? "liquido" : "utensilio"),
+    on_hand: product.onHand ?? 0,
+    min_on_hand: product.minOnHand ?? null,
+    unit_label: product.unitLabel ?? null,
+    package_volume_ml: product.packageVolumeMl ?? null,
+    resale_value: product.resaleValue ?? null,
+    acquired_on: product.acquiredOn ?? null,
     updated_at: new Date().toISOString(),
   };
 }
@@ -127,7 +172,7 @@ export async function loadSupabaseCatalog(
   const productsQuery = supabase
     .from("products")
     .select(
-      "id, name, type, volume_ml, usage_per_wash_ml, quantity, durability_washes, total_cost, photo_url, supplier_id, stock_remaining, price_history, created_at"
+      "id, name, type, volume_ml, usage_per_wash_ml, quantity, durability_washes, total_cost, photo_url, supplier_id, stock_remaining, price_history, created_at, kind, on_hand, min_on_hand, unit_label, package_volume_ml, resale_value, acquired_on"
     );
   const typesQuery = supabase
     .from("product_types")
@@ -179,7 +224,7 @@ export async function loadSupabaseProducts(
   const query = supabase
     .from("products")
     .select(
-      "id, name, type, volume_ml, usage_per_wash_ml, quantity, durability_washes, total_cost, photo_url, supplier_id, stock_remaining, price_history, created_at"
+      "id, name, type, volume_ml, usage_per_wash_ml, quantity, durability_washes, total_cost, photo_url, supplier_id, stock_remaining, price_history, created_at, kind, on_hand, min_on_hand, unit_label, package_volume_ml, resale_value, acquired_on"
     );
 
   if (!isQueryBuilder(query)) throw new Error("Cliente Supabase inválido.");

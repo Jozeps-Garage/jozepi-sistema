@@ -1,3 +1,5 @@
+import type { StockKind } from "@/lib/products/stock";
+
 export type ProductType = string;
 
 export type DepreciationMode = "none" | "time" | "usage";
@@ -40,6 +42,20 @@ export interface ProductItem {
   stockRemaining?: string;
   priceHistory?: ProductPriceHistoryEntry[];
   createdAt?: string;
+  // Modelo novo (migration 047): contagem por embalagem, sem barra.
+  /** liquido | utensilio | patrimonio */
+  kind?: StockKind;
+  /** Quantas embalagens/unidades há. Patrimônio não usa. */
+  onHand?: number;
+  /** Abaixo disso o painel avisa. Nulo: não avisa. */
+  minOnHand?: number | null;
+  /** Como você chama a embalagem: galão, frasco, pano. */
+  unitLabel?: string;
+  /** Tamanho de UMA embalagem, em ml. Só líquido. */
+  packageVolumeMl?: number | null;
+  /** Quanto o equipamento vale hoje. Só patrimônio. */
+  resaleValue?: number | null;
+  acquiredOn?: string | null;
 }
 
 export interface ProductForm {
