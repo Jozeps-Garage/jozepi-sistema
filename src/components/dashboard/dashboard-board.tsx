@@ -6,7 +6,6 @@ import {
   CashflowWidget,
   ChartWidget,
   ClientsWidget,
-  LowStockWidget,
   RevenueWidget,
   ServicesWidget,
 } from "@/components/dashboard/dashboard-widgets";
@@ -54,11 +53,8 @@ export function DashboardBoard({ data }: { data: DashboardData }) {
           <AgendaWidget data={data} />
         </div>
 
-        <div className="lg:col-span-4">
+        <div className="lg:col-span-6">
           <ChartWidget data={data} />
-        </div>
-        <div className="lg:col-span-2">
-          <LowStockWidget data={data} />
         </div>
       </div>
     </div>

@@ -21,7 +21,6 @@ import {
   formatTime,
   getClientName,
   getClientPhone,
-  getProductStockPercent,
   getServiceNames,
   getStatusClasses,
   getStatusLabel,
@@ -394,50 +393,3 @@ export function ChartWidget({ data }: { data: DashboardData }) {
   );
 }
 
-export function LowStockWidget({ data }: { data: DashboardData }) {
-  return (
-    <div className="card-surface flex h-full flex-col">
-      <div className="mb-3 flex items-center gap-2.5">
-        <span className="icon-chip icon-chip-premium">
-          <WarningCircle size={18} weight="light" aria-hidden />
-        </span>
-        <h2 className="section-title">Estoque baixo</h2>
-      </div>
-      {data.lowStockProducts.length === 0 ? (
-        <p className="text-xs text-muted">Todos os produtos com estoque adequado</p>
-      ) : (
-        <ul className="space-y-1.5">
-          {data.lowStockProducts.slice(0, 5).map((product) => {
-            const pct = Math.round(getProductStockPercent(product));
-            return (
-              <li
-                key={product.name}
-                className="flex items-center justify-between gap-2"
-              >
-                <p className="truncate text-xs font-medium text-foreground">
-                  {product.name}
-                </p>
-                <span className="shrink-0 rounded-full bg-danger/10 px-2 py-0.5 text-[10px] font-semibold text-danger">
-                  {pct}%
-                </span>
-              </li>
-            );
-          })}
-          {data.lowStockProducts.length > 5 && (
-            <li className="text-[11px] text-muted">
-              +{data.lowStockProducts.length - 5} outros
-            </li>
-          )}
-        </ul>
-      )}
-      <div className="mt-auto pt-2">
-        <Link
-          href="/produtos"
-          className="text-xs font-semibold text-premium transition-opacity hover:opacity-70"
-        >
-          Ver estoque →
-        </Link>
-      </div>
-    </div>
-  );
-}

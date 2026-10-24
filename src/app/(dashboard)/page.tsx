@@ -6,10 +6,8 @@ import type {
   DashboardTodo,
   NextAppointment,
   PendingExpenseRow,
-  ProductRow,
   UnpaidOrderRow,
 } from "@/lib/dashboard/types";
-import { getProductStockPercent } from "@/lib/dashboard/types";
 import { createClient } from "@/lib/supabase/server";
 import { cashDate, getMonthlyRevenue, isPaidCashStatus } from "@/lib/finance/cash";
 import { DEFAULT_ACCOUNT_NAME, toMoneyNumber } from "@/lib/finance/types";
@@ -72,7 +70,6 @@ export default async function DashboardPage() {
 
   let weekAppointments: AppointmentRow[] = [];
   let nextTodayAppointment: NextAppointment | null = null;
-  let lowStockProducts: ProductRow[] = [];
   let unpaidOrders: UnpaidOrderRow[] = [];
   let pendingExpenses: PendingExpenseRow[] = [];
   let monthlyChartData: MonthChartData[] = [];
@@ -178,15 +175,6 @@ export default async function DashboardPage() {
       .maybeSingle();
 
     nextTodayAppointment = (nextData ?? null) as NextAppointment | null;
-
-    const { data: productsData } = await supabase
-      .from("products")
-      .select("name, type, stock_remaining, volume_ml, quantity")
-      .eq("workshop_id", workshopId)
-      .not("stock_remaining", "is", null);
-
-    const allProducts = (productsData as ProductRow[] | null) ?? [];
-    lowStockProducts = allProducts.filter((p) => getProductStockPercent(p) < 20);
 
     const { data: unpaidData } = await supabase
       .from("service_orders")
@@ -368,7 +356,6 @@ export default async function DashboardPage() {
     weekAppointments,
     todayDateKey,
     nextTodayAppointment,
-    lowStockProducts,
     unpaidOrders,
     pendingExpenses,
     monthlyChartData,

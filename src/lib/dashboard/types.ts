@@ -72,7 +72,6 @@ export type DashboardData = {
   weekAppointments: AppointmentRow[];
   todayDateKey: string;
   nextTodayAppointment: NextAppointment | null;
-  lowStockProducts: ProductRow[];
   unpaidOrders: UnpaidOrderRow[];
   pendingExpenses: PendingExpenseRow[];
   monthlyChartData: MonthChartData[];
@@ -120,16 +119,6 @@ export function getStatusClasses(status: string) {
   return "bg-warning/10 text-warning";
 }
 
-export function getProductStockPercent(product: ProductRow): number {
-  const remaining = parseFloat(product.stock_remaining ?? "0");
-  const initial =
-    parseFloat(
-      product.type === "liquid"
-        ? (product.volume_ml ?? "1")
-        : (product.quantity ?? "1")
-    ) || 1;
-  return (remaining / initial) * 100;
-}
 
 export function formatTime(timeStr: string | null) {
   if (!timeStr) return "";
