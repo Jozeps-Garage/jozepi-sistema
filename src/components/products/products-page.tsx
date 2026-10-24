@@ -461,8 +461,12 @@ function ProductCostDisplay({
   align?: "left" | "right";
   compact?: boolean;
 }) {
-  const purchase = formatCurrency(parseMoney(product.totalCost || "0"));
+  const unitCost = parseMoney(product.totalCost || "0");
+  const stock = stockItemOf(product);
   const currentValue = getDepreciatedValue(product);
+  // O custo é de UMA embalagem; sozinho, ao lado de "3 frascos", parecia
+  // dizer que o estoque inteiro vale isso.
+  const stockValue = tracksStock(stock.kind) ? unitCost * stock.onHand : null;
 
   return (
     <div className={align === "right" ? "text-right" : "text-left"}>
@@ -473,8 +477,13 @@ function ProductCostDisplay({
             : "mt-1 font-bold text-foreground"
         }
       >
-        {purchase}
+        {formatCurrency(unitCost)}
       </p>
+      {stockValue !== null && stock.onHand !== 1 && (
+        <p className="mt-0.5 text-[11px] font-medium text-muted">
+          {formatCurrency(stockValue)} em estoque
+        </p>
+      )}
       {currentValue !== null && (
         <p className="mt-0.5 text-[11px] font-medium text-muted">
           Valor atual: {formatCurrency(currentValue)}
@@ -1416,10 +1425,14 @@ export function ProductsPage() {
     }
     return sortDirection === "asc" ? comparison : -comparison;
   });
-  const totalInvested = filteredProducts.reduce(
-    (total, product) => total + parseMoney(product.totalCost || "0"),
-    0
-  );
+  // O custo cadastrado é de UMA embalagem. Investido é ele vezes o que há em
+  // mãos — somar o unitário dava o valor de um frasco de cada produto.
+  const totalInvested = filteredProducts.reduce((total, product) => {
+    const unit = parseMoney(product.totalCost || "0");
+    const stock = stockItemOf(product);
+    if (!tracksStock(stock.kind)) return total + unit;
+    return total + unit * stock.onHand;
+  }, 0);
   const selectedSupplier =
     suppliers.find((supplier) => supplier.id === selectedSupplierId) ?? null;
   const productTypeFilterOptions = [
@@ -1561,10 +1574,10 @@ export function ProductsPage() {
                         onSort={handleSort}
                       />
                       <span className="text-xs font-semibold uppercase tracking-wide text-muted">
-                        Volume total
+                        Embalagem
                       </span>
                       <SortableColumnHeader
-                        label="Valor"
+                        label="Custo unitário"
                         icon={CurrencyDollar}
                         column="value"
                         activeColumn={sortColumn}
@@ -2077,7 +2090,11 @@ export function ProductsPage() {
                   )}
 
                   <Input
-                    label="Custo total do produto"
+                    label={
+                      form.kind === "patrimonio"
+                        ? "Quanto custou"
+                        : `Custo de ${form.unitLabel.trim() || "uma embalagem"}`
+                    }
                     value={form.totalCost}
                     autoComplete="off"
                     onChange={(event) =>
