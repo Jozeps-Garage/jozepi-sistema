@@ -137,7 +137,7 @@ const PRODUCT_FILTER_EXIT_MS = 300;
 // inline style to both the header row and every product row so they can
 // never drift out of alignment regardless of CSS class generation.
 const PRODUCTS_TABLE_GRID_TEMPLATE =
-  "minmax(220px, 1fr) 110px 150px 190px 172px";
+  "minmax(180px, 1fr) 90px 140px 80px 100px";
 
 
 function ProductInlineFilterButton({
@@ -1573,7 +1573,7 @@ export function ProductsPage() {
               {/* Tabela (md+) */}
               <div className="hidden overflow-hidden rounded-lg border border-border bg-card shadow-card md:block">
                 <div className="overflow-x-auto">
-                  <div className="min-w-[840px]">
+                  <div className="min-w-[590px]">
                     <div
                       className="grid items-center gap-4 border-b border-border bg-background/60 px-4 py-3"
                       style={{ gridTemplateColumns: PRODUCTS_TABLE_GRID_TEMPLATE }}
@@ -1605,6 +1605,7 @@ export function ProductsPage() {
                         activeColumn={sortColumn}
                         direction={sortDirection}
                         onSort={handleSort}
+                        align="right"
                       />
                       <span className="text-right text-xs font-semibold uppercase tracking-wide text-muted">
                         Ações
