@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Dropdown } from "@/components/ui/dropdown";
 import { useBodyScrollLock } from "@/lib/utils/body-scroll-lock";
 import { formatCurrency } from "@/lib/utils/format";
-import { formatStockAmount, type ProductItem } from "@/lib/products/catalog";
+import type { ProductItem } from "@/lib/products/catalog";
 import {
   loadSupabaseProducts,
   saveSupabaseProduct,
@@ -122,9 +122,11 @@ export function StockEntryDialog({
     { value: "", label: "Escolha o produto…" },
     ...products.map((product) => ({
       value: product.id,
-      label: `${product.name} · ${formatStockAmount(
-        Number(product.stockRemaining ?? 0)
-      )}${product.type === "liquid" ? " ml" : " un."}`,
+      // Saldo do modelo por embalagem: o stockRemaining antigo ainda carrega
+      // mililitros e mostrava "Bactran · 990 ml" ao lado de "fica com 3".
+      label: `${product.name} · ${product.onHand ?? 0} ${
+        (product.onHand ?? 0) === 1 ? "unidade" : "unidades"
+      }`,
     })),
     { value: CREATE, label: "+ Criar produto a partir desta linha" },
     { value: SKIP, label: "Não é produto de estoque — ignorar" },
