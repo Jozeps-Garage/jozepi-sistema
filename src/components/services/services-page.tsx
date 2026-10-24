@@ -160,10 +160,14 @@ const CATALOG_KIND_BADGE: Record<CatalogKind, string> = {
   servico: "bg-background text-muted",
 };
 
+/**
+ * Stage não é um tipo de serviço, é um jeito de vender vários de uma vez —
+ * então não filtra junto de Coating e Serviços. Os stages continuam no
+ * catálogo, com a etiqueta deles, e entram no filtro "Serviços".
+ */
 const CATALOG_TYPE_FILTERS: { id: CatalogTypeFilter; label: string }[] = [
   { id: "all", label: "Todos" },
   { id: "coating", label: "Coating" },
-  { id: "stage", label: "Stages" },
   { id: "servico", label: "Serviços" },
 ];
 
@@ -1157,7 +1161,11 @@ export function ServicesPage() {
     ...customServiceRows.filter((row) => row.kind === "servico"),
   ];
   const visibleCatalogRows = catalogRows.filter((row) => {
-    const matchesType = typeFilter === "all" || row.kind === typeFilter;
+    const matchesType =
+      typeFilter === "all" ||
+      row.kind === typeFilter ||
+      // Stage é um pacote de serviços: sem isto ele só apareceria em "Todos".
+      (typeFilter === "servico" && row.kind === "stage");
     const matchesSearch =
       !normalizedSearchTerm ||
       row.name.toLowerCase().includes(normalizedSearchTerm);
