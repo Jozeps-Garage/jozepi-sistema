@@ -36,9 +36,8 @@ import {
   STOCK_KIND_LABEL,
   STOCK_KIND_OPTIONS,
   formatOnHand,
-  formatVolume,
+  pluralize,
   isLowStock,
-  totalVolumeMl,
   tracksStock,
   type StockItem,
   type StockKind,
@@ -1586,7 +1585,7 @@ export function ProductsPage() {
                         align="right"
                       />
                       <SortableColumnHeader
-                        label="Estoque atual"
+                        label="Unidades"
                         icon={Stack}
                         column="stock"
                         activeColumn={sortColumn}
@@ -1601,7 +1600,6 @@ export function ProductsPage() {
                     {sortedProducts.map((product) => {
                       const stock = stockItemOf(product);
                       const isLiquid = stock.kind === "liquido";
-                      const volume = totalVolumeMl(stock);
                       const low = isLowStock(stock);
 
                       return (
@@ -1668,27 +1666,24 @@ export function ProductsPage() {
 
                           {/* Contagem, não barra: o saldo só muda por entrada,
                               baixa ou revisão. */}
-                          <div className="min-w-0">
+                          {/* Só o número: a unidade é o cabeçalho da coluna. */}
+                          <div className="min-w-0 text-right">
                             {tracksStock(stock.kind) ? (
-                              <>
-                                <p
-                                  className={`truncate text-sm font-semibold ${
-                                    low ? "text-danger" : "text-foreground"
-                                  }`}
-                                >
-                                  {formatOnHand(stock)}
-                                </p>
-                                <p className="truncate text-xs text-muted">
-                                  {volume ? formatVolume(volume) : ""}
-                                  {low ? " · abaixo do mínimo" : ""}
-                                </p>
-                              </>
+                              <p
+                                className={`text-sm font-semibold tabular-nums ${
+                                  low ? "text-danger" : "text-foreground"
+                                }`}
+                                title={
+                                  low
+                                    ? `${formatOnHand(stock)} · abaixo do mínimo`
+                                    : formatOnHand(stock)
+                                }
+                              >
+                                {stock.onHand}
+                              </p>
                             ) : (
-                              <p className="truncate text-xs text-muted">
-                                Patrimônio
-                                {stock.resaleValue !== null
-                                  ? ` · vale ${formatCurrency(stock.resaleValue)}`
-                                  : ""}
+                              <p className="text-sm text-muted" title="Patrimônio">
+                                —
                               </p>
                             )}
                           </div>
@@ -1734,7 +1729,6 @@ export function ProductsPage() {
                 {sortedProducts.map((product) => {
                   const stock = stockItemOf(product);
                   const isLiquid = stock.kind === "liquido";
-                  const volume = totalVolumeMl(stock);
                   const low = isLowStock(stock);
 
                   return (
@@ -1826,21 +1820,20 @@ export function ProductsPage() {
                       <div className="mt-3 rounded-lg bg-background px-4 py-3">
                         {tracksStock(stock.kind) ? (
                           <>
-                            <p className="text-xs font-medium text-muted">
-                              Em estoque
+                            {/* No celular não há cabeçalho de coluna, então a
+                                unidade é o rótulo e embaixo vai só o número. */}
+                            <p className="text-xs font-medium uppercase tracking-wide text-muted">
+                              {pluralize(
+                                stock.unitLabel.trim() ||
+                                  (isLiquid ? "frasco" : "unidade")
+                              )}
                             </p>
                             <p
-                              className={`mt-1 text-sm font-bold ${
+                              className={`mt-1 text-sm font-bold tabular-nums ${
                                 low ? "text-danger" : "text-foreground"
                               }`}
                             >
-                              {formatOnHand(stock)}
-                              {volume ? (
-                                <span className="font-medium text-muted">
-                                  {" "}
-                                  · {formatVolume(volume)}
-                                </span>
-                              ) : null}
+                              {stock.onHand}
                             </p>
                             {low && (
                               <p className="mt-0.5 text-xs font-semibold text-danger">
