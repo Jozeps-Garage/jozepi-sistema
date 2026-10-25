@@ -3734,10 +3734,13 @@ function TransactionFormCard({
                           compact
                         />
                       </div>
-                      <div className="w-28">
+                      {/* Mais largo que os vizinhos: "Valor unitário" por
+                          extenso não cabe em 7rem sem quebrar em duas linhas,
+                          e a linha toda é alinhada pela base dos campos. */}
+                      <div className="w-36">
                         <Input
                           id={`item-${item.uiKey}-valor`}
-                          label="Valor"
+                          label="Valor unitário"
                           prefix="R$"
                           inputMode="decimal"
                           value={item.unitAmount}
