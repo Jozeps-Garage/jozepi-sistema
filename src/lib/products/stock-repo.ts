@@ -6,6 +6,7 @@ import {
   type StockKind,
   type StockMovement,
 } from "@/lib/products/stock";
+import { formatMoneyInput } from "@/lib/utils/money";
 
 const STOCK_SELECT =
   "id, name, kind, on_hand, min_on_hand, unit_label, package_volume_ml, resale_value, acquired_on, total_cost, supplier_id, photo_url, type, volume_ml, quantity";
@@ -216,9 +217,23 @@ export async function recordMovement(
 
   if (movementError) throw new Error(movementError.message);
 
+  // A compra também é o preço mais recente do produto. Quem cria o produto
+  // pelo dropdown da despesa escolhe a categoria antes de digitar o valor, e
+  // o cadastro nasceria em R$ 0,00 para sempre.
+  // Formato BR de propósito: o cadastro lê "." como separador de milhar, e
+  // gravar "110.00" viraria R$ 11.000,00 na próxima leitura.
+  const priceUpdate =
+    input.kind === "entrada" && input.unitCost && input.unitCost > 0
+      ? { total_cost: formatMoneyInput(input.unitCost) }
+      : {};
+
   const { error: productError } = await supabase
     .from("products")
-    .update({ on_hand: balance, updated_at: new Date().toISOString() })
+    .update({
+      on_hand: balance,
+      ...priceUpdate,
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", input.productId)
     .eq("workshop_id", workshopId);
 
