@@ -27,9 +27,14 @@ export function productFromInvoiceLine(input: {
   volumeMl: number;
   unitAmount: number;
   supplierId?: string;
+  /** O que foi comprado. Sem isto, deduz pelo ml — nunca dá patrimônio. */
+  kind?: StockKind;
+  /** Data da compra, que vira a data de aquisição do patrimônio. */
+  purchaseDate?: string;
 }): ProductItem {
-  const isLiquid = input.volumeMl > 0;
-  const kind: StockKind = isLiquid ? "liquido" : "utensilio";
+  const kind: StockKind = input.kind ?? (input.volumeMl > 0 ? "liquido" : "utensilio");
+  const isLiquid = kind === "liquido";
+  const isPatrimonio = kind === "patrimonio";
 
   return {
     id:
@@ -51,9 +56,11 @@ export function productFromInvoiceLine(input: {
     onHand: 0,
     minOnHand: null,
     unitLabel: "unidade",
-    packageVolumeMl: isLiquid ? input.volumeMl : null,
-    resaleValue: null,
-    acquiredOn: null,
+    packageVolumeMl: isLiquid && input.volumeMl > 0 ? input.volumeMl : null,
+    // Máquina recém-comprada vale o que se pagou nela: é o único número
+    // honesto no dia da compra, e fica editável para quando deixar de ser.
+    resaleValue: isPatrimonio && input.unitAmount > 0 ? input.unitAmount : null,
+    acquiredOn: isPatrimonio ? (input.purchaseDate ?? null) : null,
     supplierId: input.supplierId,
     priceHistory: [],
   };

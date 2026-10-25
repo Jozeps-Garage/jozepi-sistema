@@ -7,7 +7,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Dropdown } from "@/components/ui/dropdown";
 import { useBodyScrollLock } from "@/lib/utils/body-scroll-lock";
-import { formatCurrency } from "@/lib/utils/format";
+import { formatCurrency, formatDate } from "@/lib/utils/format";
 import type { ProductItem } from "@/lib/products/catalog";
 import {
   loadSupabaseProducts,
@@ -15,6 +15,11 @@ import {
 } from "@/lib/products/supabase-catalog";
 import { productFromInvoiceLine } from "@/lib/products/stock-entry";
 import { recordMovement } from "@/lib/products/stock-repo";
+import {
+  STOCK_KIND_LABEL,
+  STOCK_KIND_OPTIONS,
+  type StockKind,
+} from "@/lib/products/stock";
 
 /** A linha da nota, do jeito que o formulário de despesa guarda. */
 export interface StockEntryItem {
@@ -34,6 +39,11 @@ function toNumber(value: string) {
   const normalized = value.trim().replace(/\./g, "").replace(",", ".");
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** Palpite do tipo: ml preenchido é líquido engarrafado; o resto, utensílio. */
+function guessKind(volumeMl: string): StockKind {
+  return toNumber(volumeMl) > 0 ? "liquido" : "utensilio";
 }
 
 /**
@@ -67,6 +77,8 @@ export function StockEntryDialog({
 }) {
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [choice, setChoice] = useState<Record<string, string>>({});
+  /** O que cada linha vira, quando a escolha é criar produto novo. */
+  const [kinds, setKinds] = useState<Record<string, StockKind>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -177,6 +189,8 @@ export function StockEntryDialog({
             volumeMl: entry.volumeMl,
             unitAmount: entry.unitAmount,
             supplierId,
+            kind: kinds[item.uiKey] ?? guessKind(item.volumeMl),
+            purchaseDate: entry.date,
           });
           await saveSupabaseProduct(supabase, workshopId, created);
           productId = created.id;
@@ -266,6 +280,7 @@ export function StockEntryDialog({
               const volume = toNumber(item.volumeMl);
               const pick = choice[item.uiKey];
               const product = products.find((candidate) => candidate.id === pick);
+              const kind = kinds[item.uiKey] ?? guessKind(item.volumeMl);
 
               return (
                 <div key={item.uiKey} className="border-t border-border pt-4 first:border-0 first:pt-0">
@@ -298,10 +313,31 @@ export function StockEntryDialog({
                     </p>
                   )}
                   {pick === CREATE && (
-                    <p className="mt-1.5 text-xs font-medium text-premium">
-                      Cria &ldquo;{item.description}&rdquo; no cadastro com{" "}
-                      {quantity} {quantity === 1 ? "unidade" : "unidades"}.
-                    </p>
+                    <>
+                      <div className="mt-2">
+                        <Dropdown
+                          label="O que é"
+                          value={kind}
+                          options={STOCK_KIND_OPTIONS}
+                          onChange={(value) =>
+                            setKinds((prev) => ({
+                              ...prev,
+                              [item.uiKey]: value as StockKind,
+                            }))
+                          }
+                          compact
+                        />
+                      </div>
+                      <p className="mt-1.5 text-xs font-medium text-premium">
+                        Cria &ldquo;{item.description}&rdquo; como{" "}
+                        {STOCK_KIND_LABEL[kind].toLowerCase()}
+                        {kind === "patrimonio"
+                          ? `, adquirido em ${formatDate(purchaseDate)}.`
+                          : `, com ${quantity} ${
+                              quantity === 1 ? "unidade" : "unidades"
+                            }.`}
+                      </p>
+                    </>
                   )}
                 </div>
               );
