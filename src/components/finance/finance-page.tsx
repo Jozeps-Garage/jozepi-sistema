@@ -14,7 +14,6 @@ import {
   ArrowUp,
   CalendarBlank,
   CaretLeft,
-  CalendarCheck,
   CaretDown,
   CaretRight,
   CaretUp,
@@ -29,7 +28,6 @@ import {
   Package,
   CircleHalf,
   Funnel,
-  ListChecks,
   Note,
   PencilSimple,
   Plus,
@@ -4618,7 +4616,6 @@ export function FinancePage() {
     start: startOfMonth(previousMonthDate),
     end: endOfMonth(previousMonthDate),
   };
-  const todayRange = getPeriodRange("today", "", "", today);
   const currentMonthStart = dateKey(currentMonthRange.start);
   const currentMonthEnd = dateKey(currentMonthRange.end);
   const monthRevenueTotal = sumPaidRevenueInRange(
@@ -5039,17 +5036,6 @@ export function FinancePage() {
   ).sort((a, b) => b.amount - a.amount);
   const clientRanking = clientRankingAll.slice(0, RANKING_PREVIEW_SIZE);
 
-  const todayOrders = reportOrders.filter((order) => {
-    const orderDate = getOrderDate(order);
-    return orderDate ? isDateInRange(orderDate, todayRange) : false;
-  });
-  const todayRevenue = sumEntries(
-    revenueEntries.filter((entry) => isDateInRange(entry.date, todayRange))
-  );
-  const todayExpenses = sumEntries(
-    expenseEntries.filter((entry) => isDateInRange(entry.date, todayRange))
-  );
-  const todayProfit = todayRevenue - todayExpenses;
   const activeFixedCosts = fixedCosts.filter((cost) => cost.active);
   const fixedCostTransactionsBySource = useMemo(
     () => getFixedCostTransactionsBySource(transactions),
@@ -6526,51 +6512,6 @@ export function FinancePage() {
           {activeTab === "overview" && (
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
               <div className="space-y-6">
-                <section className="rounded-lg border border-border bg-card shadow-card p-5 shadow-card">
-                  <div className="mb-5 flex items-center gap-3">
-                    <span className="icon-chip h-10 w-10">
-                      <CalendarCheck size={20} weight={FINANCE_ICON_WEIGHT} aria-hidden />
-                    </span>
-                    <div>
-                      <h2 className="section-title">
-                        Resumo do dia
-                      </h2>
-                      <p className="text-sm text-muted">
-                        Serviços finalizados e resultado de hoje.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <div className="rounded-lg bg-background px-4 py-3">
-                      <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-muted">
-                        <ListChecks size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
-                        Serviços
-                      </p>
-                      <p className="mt-1 currency-display text-foreground">
-                        {todayOrders.length}
-                      </p>
-                    </div>
-                    <div className="rounded-lg bg-background px-4 py-3">
-                      <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-muted">
-                        <ArrowUp size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
-                        Receita
-                      </p>
-                      <p className="mt-1 currency-display text-success">
-                        {formatCurrency(todayRevenue)}
-                      </p>
-                    </div>
-                    <div className="rounded-lg bg-background px-4 py-3">
-                      <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-muted">
-                        <Wallet size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
-                        Lucro
-                      </p>
-                      <p className={`mt-1 currency-display ${todayProfit >= 0 ? "text-success" : "text-danger"}`}>
-                        {formatCurrency(todayProfit)}
-                      </p>
-                    </div>
-                  </div>
-                </section>
-
                 <UpcomingDuesSection
                   items={upcomingDueItems}
                   today={dateKey(today)}
