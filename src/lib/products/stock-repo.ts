@@ -118,9 +118,10 @@ export async function loadMovements(
   return ((data as Record<string, unknown>[] | null) ?? []).map(movementFromRow);
 }
 
-/** Movimento com o nome do produto junto, para a aba de histórico. */
+/** Movimento com nome e categoria do produto, para a aba de histórico. */
 export interface MovementWithProduct extends StockMovement {
   productName: string;
+  productKind: StockKind;
 }
 
 export async function loadAllMovements(
@@ -129,7 +130,7 @@ export async function loadAllMovements(
 ): Promise<MovementWithProduct[]> {
   const { data, error } = await supabase
     .from("stock_movements")
-    .select(`${MOVEMENT_SELECT}, products(name)`)
+    .select(`${MOVEMENT_SELECT}, products(name, kind)`)
     .eq("workshop_id", workshopId)
     .order("occurred_on", { ascending: false })
     .order("created_at", { ascending: false });
@@ -139,12 +140,13 @@ export async function loadAllMovements(
   return ((data as Record<string, unknown>[] | null) ?? []).map((row) => {
     const joined = row.products;
     const product = (Array.isArray(joined) ? joined[0] : joined) as
-      | { name?: string }
+      | { name?: string; kind?: string }
       | null
       | undefined;
     return {
       ...movementFromRow(row),
       productName: product?.name ?? "Produto removido",
+      productKind: kindFromRow({ kind: product?.kind }),
     };
   });
 }

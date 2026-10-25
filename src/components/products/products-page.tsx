@@ -7,8 +7,6 @@ import {
   CaretUp,
   CaretUpDown,
   CurrencyDollar,
-  Broom,
-  Drop,
   EnvelopeSimple,
   Faders,
   Funnel,
@@ -18,7 +16,6 @@ import {
   PencilSimple,
   Plus,
   Trash,
-  Toolbox,
   X,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
@@ -40,6 +37,7 @@ import {
 } from "@/lib/products/stock";
 import { formatMoneyInput, parseCurrencyInput } from "@/lib/utils/money";
 import { StockHistoryTab } from "@/components/products/stock-history-tab";
+import { StockKindIcon } from "@/components/products/stock-kind-icon";
 import { StockMovementDialog } from "@/components/products/stock-movement-dialog";
 import { recordMovement } from "@/lib/products/stock-repo";
 import { createClient } from "@/lib/supabase/client";
@@ -337,32 +335,6 @@ function mapSupplierRow(row: Record<string, unknown>): Supplier {
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
   };
-}
-
-/** Um ícone por categoria: a lista separa os três de relance. */
-const STOCK_KIND_ICON: Record<StockKind, typeof Drop> = {
-  liquido: Drop,
-  utensilio: Broom,
-  patrimonio: Toolbox,
-};
-
-const STOCK_KIND_TONE: Record<StockKind, string> = {
-  liquido: "bg-primary/10 text-primary",
-  utensilio: "bg-success/10 text-success",
-  patrimonio: "bg-premium/10 text-premium",
-};
-
-function StockKindIcon({ kind, size }: { kind: StockKind; size: number }) {
-  const Icon = STOCK_KIND_ICON[kind];
-  return (
-    <span
-      className={`flex shrink-0 items-center justify-center rounded-lg ${STOCK_KIND_TONE[kind]}`}
-      style={{ width: size, height: size }}
-      title={STOCK_KIND_LABEL[kind]}
-    >
-      <Icon size={Math.round(size * 0.5)} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-    </span>
-  );
 }
 
 /** O produto do cadastro lido como item de estoque. */

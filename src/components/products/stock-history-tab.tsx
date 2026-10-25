@@ -4,32 +4,45 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { MagnifyingGlass } from "@phosphor-icons/react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Dropdown } from "@/components/ui/dropdown";
+import { StockKindIcon } from "@/components/products/stock-kind-icon";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
-import { MOVEMENT_LABEL, type MovementKind } from "@/lib/products/stock";
+import {
+  STOCK_KIND_OPTIONS,
+  buildWriteOffs,
+  formatDuration,
+  type StockWriteOff,
+} from "@/lib/products/stock";
 import {
   loadAllMovements,
   type MovementWithProduct,
 } from "@/lib/products/stock-repo";
 
-const KIND_FILTERS: { value: string; label: string }[] = [
+const KIND_FILTERS = [
   { value: "all", label: "Tudo" },
-  { value: "entrada", label: "Compras" },
-  { value: "baixa", label: "Baixas" },
-  { value: "revisao", label: "Conferências" },
+  ...STOCK_KIND_OPTIONS.map((option) => ({
+    value: option.value as string,
+    label: option.label,
+  })),
 ];
 
-const KIND_TONE: Record<MovementKind, string> = {
-  entrada: "bg-success/10 text-success",
-  baixa: "bg-danger/10 text-danger",
-  revisao: "bg-primary/10 text-primary",
-};
+/** De onde veio o que saiu: é isto que responde "quanto tempo durou". */
+function originLine(row: StockWriteOff<MovementWithProduct>) {
+  if (row.inStockSince === null) return "Sem entrada registrada";
+  const entrou = `entrou ${formatDate(row.inStockSince)}`;
+  if (!row.emptied) return `Em estoque · ${entrou}`;
+  // "durou no mesmo dia" não se lê; no dia da entrada a frase é outra.
+  if (row.days === 0) return "Acabou · entrou e saiu no mesmo dia";
+  return `Acabou · durou ${formatDuration(row.days ?? 0)} · ${entrou}`;
+}
 
 /**
- * Tudo que entrou e saiu do estoque, em ordem.
+ * O que já saiu do estoque.
  *
- * O valor pago vem gravado no próprio movimento, não do preço atual do
- * produto: preço muda, e recalcular pelo de hoje faria o histórico mentir
- * sobre o que custou na época.
+ * Só baixa: entrada e revisão enchiam a lista de linhas que não respondiam
+ * nada — a compra você já vê na despesa, e a conferência é rotina. A pergunta
+ * que esta aba existe para responder é quanto tempo um produto durou, então
+ * cada baixa vem ao lado de desde quando aquele saldo estava ali e do que se
+ * pagou por ele — gravado no movimento da compra, não no preço de hoje.
  */
 export function StockHistoryTab({
   supabase,
@@ -68,21 +81,49 @@ export function StockHistoryTab({
     void Promise.resolve().then(load);
   }, [load]);
 
+  // A baixa precisa da história inteira do produto para saber desde quando
+  // havia saldo, então os movimentos são separados por produto antes de virar
+  // linha — e só então reordenados, do mais recente para o mais antigo.
+  const writeOffs = useMemo(() => {
+    const byProduct = new Map<string, MovementWithProduct[]>();
+    movements.forEach((movement) => {
+      const list = byProduct.get(movement.productId);
+      if (list) list.push(movement);
+      else byProduct.set(movement.productId, [movement]);
+    });
+
+    const rows: StockWriteOff<MovementWithProduct>[] = [];
+    byProduct.forEach((list) => {
+      const ascending = [...list].sort((a, b) =>
+        a.occurredOn === b.occurredOn
+          ? a.createdAt.localeCompare(b.createdAt)
+          : a.occurredOn.localeCompare(b.occurredOn)
+      );
+      rows.push(...buildWriteOffs(ascending));
+    });
+
+    return rows.sort((a, b) =>
+      a.movement.occurredOn === b.movement.occurredOn
+        ? b.movement.createdAt.localeCompare(a.movement.createdAt)
+        : b.movement.occurredOn.localeCompare(a.movement.occurredOn)
+    );
+  }, [movements]);
+
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return movements.filter((movement) => {
-      if (kindFilter !== "all" && movement.kind !== kindFilter) return false;
+    return writeOffs.filter((row) => {
+      if (kindFilter !== "all" && row.movement.productKind !== kindFilter) {
+        return false;
+      }
       if (!term) return true;
-      return movement.productName.toLowerCase().includes(term);
+      return row.movement.productName.toLowerCase().includes(term);
     });
-  }, [movements, kindFilter, search]);
+  }, [writeOffs, kindFilter, search]);
 
-  const totalPago = visible
-    .filter((movement) => movement.kind === "entrada")
-    .reduce(
-      (total, movement) => total + (movement.unitCost ?? 0) * movement.quantity,
-      0
-    );
+  const valueOf = (row: StockWriteOff<MovementWithProduct>) =>
+    row.unitCost === null ? null : row.unitCost * row.movement.quantity;
+
+  const totalSaiu = visible.reduce((total, row) => total + (valueOf(row) ?? 0), 0);
 
   return (
     <section className="product-tab-panel-enter space-y-5">
@@ -113,10 +154,10 @@ export function StockHistoryTab({
           </div>
         </div>
 
-        {totalPago > 0 && (
+        {totalSaiu > 0 && (
           <p className="text-sm text-muted">
-            Comprado no período listado:{" "}
-            <strong className="text-foreground">{formatCurrency(totalPago)}</strong>
+            Saiu no período listado:{" "}
+            <strong className="text-foreground">{formatCurrency(totalSaiu)}</strong>
           </p>
         )}
       </div>
@@ -134,17 +175,15 @@ export function StockHistoryTab({
           </p>
         ) : visible.length === 0 ? (
           <p className="px-4 py-10 text-center text-sm text-muted">
-            {movements.length === 0
-              ? "Nada movimentou o estoque ainda. Compras lançadas na despesa, baixas e conferências aparecem aqui."
-              : "Nenhuma movimentação com esse filtro."}
+            {writeOffs.length === 0
+              ? "Nenhuma baixa ainda. Quando um produto acabar ou um utensílio for descartado, a baixa aparece aqui com desde quando ele estava em estoque."
+              : "Nenhuma baixa com esse filtro."}
           </p>
         ) : (
           <ul className="divide-y divide-border">
-            {visible.map((movement) => {
-              const pago =
-                movement.kind === "entrada" && movement.unitCost !== null
-                  ? movement.unitCost * movement.quantity
-                  : null;
+            {visible.map((row) => {
+              const { movement } = row;
+              const saiu = valueOf(row);
 
               return (
                 <li
@@ -154,32 +193,21 @@ export function StockHistoryTab({
                   <span className="w-20 shrink-0 text-xs font-semibold tabular-nums text-muted">
                     {formatDate(movement.occurredOn)}
                   </span>
-                  <span
-                    className={`w-24 shrink-0 rounded-full px-2 py-0.5 text-center text-[11px] font-bold ${
-                      KIND_TONE[movement.kind]
-                    }`}
-                  >
-                    {MOVEMENT_LABEL[movement.kind]}
-                  </span>
+                  <StockKindIcon kind={movement.productKind} size={28} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-semibold text-foreground">
                       {movement.productName}
                     </span>
-                    {movement.notes && (
-                      <span className="block truncate text-xs text-muted">
-                        {movement.notes}
-                      </span>
-                    )}
+                    <span className="block truncate text-xs text-muted">
+                      {originLine(row)}
+                      {movement.notes ? ` · ${movement.notes}` : ""}
+                    </span>
                   </span>
-                  <span className="w-24 shrink-0 text-right text-sm font-semibold tabular-nums text-foreground">
-                    {movement.kind === "revisao"
-                      ? `= ${movement.balanceAfter}`
-                      : movement.kind === "entrada"
-                        ? `+${movement.quantity}`
-                        : `−${movement.quantity}`}
+                  <span className="w-20 shrink-0 text-right text-sm font-semibold tabular-nums text-danger">
+                    −{movement.quantity}
                   </span>
                   <span className="w-28 shrink-0 text-right text-sm tabular-nums text-muted">
-                    {pago !== null ? formatCurrency(pago) : "—"}
+                    {saiu !== null ? formatCurrency(saiu) : "—"}
                   </span>
                 </li>
               );

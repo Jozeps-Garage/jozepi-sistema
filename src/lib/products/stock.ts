@@ -167,6 +167,61 @@ export function buildStockCycles(movements: StockMovement[]): StockCycle[] {
   return cycles.reverse();
 }
 
+export interface StockWriteOff<T extends StockMovement = StockMovement> {
+  movement: T;
+  /** Desde quando havia saldo deste item. Nulo: nunca houve entrada. */
+  inStockSince: string | null;
+  /** Custo unitário da última compra antes desta baixa. */
+  unitCost: number | null;
+  /** Dias entre aquela entrada e esta baixa. */
+  days: number | null;
+  /** A baixa zerou o saldo — aí sim o item acabou. */
+  emptied: boolean;
+}
+
+/**
+ * As baixas de um produto, cada uma sabendo de onde veio o que saiu.
+ *
+ * Só a baixa é notícia: revisão e entrada enchiam o histórico de linhas que
+ * não respondem nada. Mas uma baixa sozinha também não responde — "saíram 4"
+ * só vira informação ao lado de desde quando estavam ali e do que custaram.
+ *
+ * Espera os movimentos em ordem cronológica crescente.
+ */
+export function buildWriteOffs<T extends StockMovement>(movements: T[]): StockWriteOff<T>[] {
+  const writeOffs: StockWriteOff<T>[] = [];
+  let since: string | null = null;
+  // Último preço conhecido: atravessa o ciclo, porque é o que se pagou pelo
+  // que está saindo agora. Uma compra nova por cima substitui.
+  let unitCost: number | null = null;
+  let previousBalance = 0;
+
+  for (const movement of movements) {
+    if (previousBalance === 0 && movement.balanceAfter > 0) {
+      since = movement.occurredOn;
+    }
+    if (movement.kind === "entrada" && movement.unitCost !== null) {
+      unitCost = movement.unitCost;
+    }
+
+    if (movement.kind === "baixa") {
+      writeOffs.push({
+        movement,
+        inStockSince: since,
+        unitCost,
+        days: since ? daysBetween(since, movement.occurredOn) : null,
+        emptied: movement.balanceAfter === 0,
+      });
+    }
+
+    // Zerou: o próximo saldo começa outra contagem de tempo.
+    if (movement.balanceAfter === 0) since = null;
+    previousBalance = movement.balanceAfter;
+  }
+
+  return writeOffs;
+}
+
 export function daysBetween(from: string, to: string) {
   const start = Date.parse(`${from}T00:00:00`);
   const end = Date.parse(`${to}T00:00:00`);
