@@ -3839,6 +3839,17 @@ function TransactionFormCard({
               {form.items.map((item) => {
                 const quantity = parseFilterAmount(item.quantity) ?? 1;
                 const unit = parseFilterAmount(item.unitAmount) ?? 0;
+                const linkedProduct = item.productId
+                  ? stockProducts.find((product) => product.id === item.productId)
+                  : undefined;
+                // Serviço: fora do estoque e sem produto por trás.
+                const isService = !item.productId && item.stockApplied === true;
+                // Mililitro é coisa de líquido engarrafado. Pano, máquina e
+                // mão de obra não têm volume, e o campo aberto só convidava a
+                // preencher um número que não quer dizer nada.
+                const volumeMatters = linkedProduct
+                  ? linkedProduct.kind === "liquido"
+                  : !isService;
                 return (
                   <div
                     key={item.uiKey}
@@ -3859,6 +3870,7 @@ function TransactionFormCard({
                           updateItem(item.uiKey, {
                             description: name,
                             productId: "",
+                            volumeMl: "",
                             stockApplied: true,
                           })
                         }
@@ -3885,7 +3897,8 @@ function TransactionFormCard({
                           updateItem(item.uiKey, {
                             description: product.name,
                             productId: product.id,
-                            volumeMl: product.volumeMl,
+                            volumeMl:
+                              product.kind === "liquido" ? product.volumeMl : "",
                             // Só sugere o custo se o campo ainda está vazio.
                             // O catálogo guarda "89"; o campo quer "89,00".
                             unitAmount:
@@ -3903,11 +3916,12 @@ function TransactionFormCard({
                           id={`item-${item.uiKey}-ml`}
                           label="ML"
                           inputMode="decimal"
-                          value={item.volumeMl}
+                          value={volumeMatters ? item.volumeMl : ""}
                           onChange={(event) =>
                             updateItem(item.uiKey, { volumeMl: event.target.value })
                           }
-                          placeholder="500"
+                          placeholder={volumeMatters ? "500" : "—"}
+                          disabled={!volumeMatters}
                           compact
                         />
                       </div>
