@@ -118,10 +118,12 @@ export async function loadMovements(
   return ((data as Record<string, unknown>[] | null) ?? []).map(movementFromRow);
 }
 
-/** Movimento com nome e categoria do produto, para a aba de histórico. */
+/** Movimento com nome, categoria e custo do produto, para o histórico. */
 export interface MovementWithProduct extends StockMovement {
   productName: string;
   productKind: StockKind;
+  /** Custo que está no cadastro hoje. Serve de aproximação, não de fato. */
+  productUnitCost: number;
 }
 
 export async function loadAllMovements(
@@ -130,7 +132,7 @@ export async function loadAllMovements(
 ): Promise<MovementWithProduct[]> {
   const { data, error } = await supabase
     .from("stock_movements")
-    .select(`${MOVEMENT_SELECT}, products(name, kind)`)
+    .select(`${MOVEMENT_SELECT}, products(name, kind, total_cost)`)
     .eq("workshop_id", workshopId)
     .order("occurred_on", { ascending: false })
     .order("created_at", { ascending: false });
@@ -140,13 +142,14 @@ export async function loadAllMovements(
   return ((data as Record<string, unknown>[] | null) ?? []).map((row) => {
     const joined = row.products;
     const product = (Array.isArray(joined) ? joined[0] : joined) as
-      | { name?: string; kind?: string }
+      | { name?: string; kind?: string; total_cost?: unknown }
       | null
       | undefined;
     return {
       ...movementFromRow(row),
       productName: product?.name ?? "Produto removido",
       productKind: kindFromRow({ kind: product?.kind }),
+      productUnitCost: moneyFromText(product?.total_cost),
     };
   });
 }

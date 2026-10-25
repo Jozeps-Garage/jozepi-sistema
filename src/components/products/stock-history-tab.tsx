@@ -25,6 +25,24 @@ const KIND_FILTERS = [
   })),
 ];
 
+/**
+ * Quanto custou o que saiu.
+ *
+ * O preço da compra que abasteceu aquele saldo é o número certo. Quando não
+ * há compra atrás da baixa — saldo que veio de conferência, ou de antes de
+ * existir histórico — vale mais mostrar o custo do cadastro avisando que é
+ * aproximação do que deixar a coluna muda.
+ */
+function valueOf(row: StockWriteOff<MovementWithProduct>) {
+  const quantity = row.movement.quantity;
+  if (row.unitCost !== null) {
+    return { amount: row.unitCost * quantity, estimated: false };
+  }
+  const fallback = row.movement.productUnitCost;
+  if (fallback > 0) return { amount: fallback * quantity, estimated: true };
+  return null;
+}
+
 /** Motivo que só repete o que a linha já diz vira ruído: "Acabou · acabou". */
 function extraNote(row: StockWriteOff<MovementWithProduct>) {
   const note = row.movement.notes?.trim();
@@ -130,10 +148,12 @@ export function StockHistoryTab({
     });
   }, [writeOffs, kindFilter, search]);
 
-  const valueOf = (row: StockWriteOff<MovementWithProduct>) =>
-    row.unitCost === null ? null : row.unitCost * row.movement.quantity;
-
-  const totalSaiu = visible.reduce((total, row) => total + (valueOf(row) ?? 0), 0);
+  const totalSaiu = visible.reduce(
+    (total, row) => total + (valueOf(row)?.amount ?? 0),
+    0
+  );
+  // Um total com estimativa dentro não pode se passar por exato.
+  const totalEstimado = visible.some((row) => valueOf(row)?.estimated);
 
   return (
     <section className="product-tab-panel-enter space-y-5">
@@ -167,7 +187,10 @@ export function StockHistoryTab({
         {totalSaiu > 0 && (
           <p className="text-sm text-muted">
             Saiu no período listado:{" "}
-            <strong className="text-foreground">{formatCurrency(totalSaiu)}</strong>
+            <strong className="text-foreground">
+              {totalEstimado ? "≈ " : ""}
+              {formatCurrency(totalSaiu)}
+            </strong>
           </p>
         )}
       </div>
@@ -235,8 +258,17 @@ export function StockHistoryTab({
                   <span className="w-20 shrink-0 text-right text-sm font-semibold tabular-nums text-danger">
                     −{movement.quantity}
                   </span>
-                  <span className="w-28 shrink-0 text-right text-sm tabular-nums text-muted">
-                    {saiu !== null ? formatCurrency(saiu) : "—"}
+                  <span
+                    className="w-28 shrink-0 text-right text-sm tabular-nums text-muted"
+                    title={
+                      saiu?.estimated
+                        ? "Aproximado pelo custo do cadastro: esta saída não tem compra com valor registrado."
+                        : undefined
+                    }
+                  >
+                    {saiu === null
+                      ? "—"
+                      : `${saiu.estimated ? "≈ " : ""}${formatCurrency(saiu.amount)}`}
                   </span>
                 </li>
               );
