@@ -11,7 +11,6 @@ import {
 } from "react";
 import {
   ArrowsClockwise,
-  ArrowUp,
   CalendarBlank,
   CaretLeft,
   CaretDown,
@@ -2783,11 +2782,15 @@ function TransactionList({
           // Nota de serviço é de receita, e só faz sentido depois que o
           // serviço foi prestado e o lançamento existe de fato no banco.
           const canEmitNfse = Boolean(onEmitNfse) && entry.type === "receita";
-          // Compra com itens e algum ainda não lançado: vale oferecer o estoque.
+          // Compra com item ligado a um produto e ainda não lançado: vale
+          // oferecer o estoque. Linha de texto livre não conta — quem não
+          // escolheu produto nem criou um não quis mexer em saldo nenhum.
           const canStockEntry =
             Boolean(onStockEntry) &&
             entry.type === "despesa" &&
-            (entry.items ?? []).some((item) => !item.stockApplied);
+            (entry.items ?? []).some(
+              (item) => item.productId && !item.stockApplied
+            );
           const displayTitle =
             entry.kind === "automatic" && entry.clientName
               ? entry.clientName
@@ -8076,7 +8079,6 @@ export function FinancePage() {
         workshopId={workshopId}
         items={stockEntryTarget?.items ?? []}
         purchaseDate={stockEntryTarget?.date ?? dateKey(today)}
-        supplierId={stockEntryTarget?.supplierId}
         transactionId={stockEntryTarget?.id}
         onClose={() => setStockEntryTarget(null)}
         onApplied={async (keys) => {

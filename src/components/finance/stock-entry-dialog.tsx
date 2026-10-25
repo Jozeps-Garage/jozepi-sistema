@@ -7,19 +7,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Dropdown } from "@/components/ui/dropdown";
 import { useBodyScrollLock } from "@/lib/utils/body-scroll-lock";
-import { formatCurrency, formatDate } from "@/lib/utils/format";
+import { formatCurrency } from "@/lib/utils/format";
 import type { ProductItem } from "@/lib/products/catalog";
-import {
-  loadSupabaseProducts,
-  saveSupabaseProduct,
-} from "@/lib/products/supabase-catalog";
-import { productFromInvoiceLine } from "@/lib/products/stock-entry";
+import { loadSupabaseProducts } from "@/lib/products/supabase-catalog";
 import { recordMovement } from "@/lib/products/stock-repo";
-import {
-  STOCK_KIND_LABEL,
-  STOCK_KIND_OPTIONS,
-  type StockKind,
-} from "@/lib/products/stock";
 
 /** A linha da nota, do jeito que o formulário de despesa guarda. */
 export interface StockEntryItem {
@@ -32,18 +23,12 @@ export interface StockEntryItem {
   stockApplied?: boolean;
 }
 
-const CREATE = "__criar__";
 const SKIP = "__pular__";
 
 function toNumber(value: string) {
   const normalized = value.trim().replace(/\./g, "").replace(",", ".");
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-/** Palpite do tipo: ml preenchido é líquido engarrafado; o resto, utensílio. */
-function guessKind(volumeMl: string): StockKind {
-  return toNumber(volumeMl) > 0 ? "liquido" : "utensilio";
 }
 
 /**
@@ -59,7 +44,6 @@ export function StockEntryDialog({
   workshopId,
   items,
   purchaseDate,
-  supplierId,
   transactionId,
   onClose,
   onApplied,
@@ -69,7 +53,6 @@ export function StockEntryDialog({
   workshopId: string | null;
   items: StockEntryItem[];
   purchaseDate: string;
-  supplierId?: string;
   /** Despesa que originou a compra, para o histórico apontar de volta. */
   transactionId?: string;
   onClose: () => void;
@@ -77,15 +60,15 @@ export function StockEntryDialog({
 }) {
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [choice, setChoice] = useState<Record<string, string>>({});
-  /** O que cada linha vira, quando a escolha é criar produto novo. */
-  const [kinds, setKinds] = useState<Record<string, StockKind>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useBodyScrollLock(open);
 
-  const pending = items.filter((item) => !item.stockApplied);
+  // Só linha ligada a um produto. Texto livre fica na nota e pronto: quem
+  // não escolheu da lista nem criou o produto não pediu para mexer no saldo.
+  const pending = items.filter((item) => item.productId && !item.stockApplied);
 
   const load = useCallback(async () => {
     if (!workshopId) {
@@ -140,7 +123,6 @@ export function StockEntryDialog({
         (product.onHand ?? 0) === 1 ? "unidade" : "unidades"
       }`,
     })),
-    { value: CREATE, label: "+ Criar produto a partir desta linha" },
     { value: SKIP, label: "Não é produto de estoque — ignorar" },
   ];
 
@@ -179,29 +161,11 @@ export function StockEntryDialog({
 
         // A compra entra como movimento: é ele que move o saldo e que o
         // histórico lê depois para dizer o que foi comprado e por quanto.
-        let productId = pick;
-        let saldoAtual = 0;
+        const product = products.find((candidate) => candidate.id === pick);
+        if (!product) continue;
 
-        if (pick === CREATE) {
-          const created = productFromInvoiceLine({
-            name: item.description,
-            quantity: entry.quantity,
-            volumeMl: entry.volumeMl,
-            unitAmount: entry.unitAmount,
-            supplierId,
-            kind: kinds[item.uiKey] ?? guessKind(item.volumeMl),
-            purchaseDate: entry.date,
-          });
-          await saveSupabaseProduct(supabase, workshopId, created);
-          productId = created.id;
-        } else {
-          const product = products.find((candidate) => candidate.id === pick);
-          if (!product) continue;
-          saldoAtual = product.onHand ?? 0;
-        }
-
-        await recordMovement(supabase, workshopId, saldoAtual, {
-          productId,
+        await recordMovement(supabase, workshopId, product.onHand ?? 0, {
+          productId: product.id,
           kind: "entrada",
           quantity: entry.quantity,
           occurredOn: entry.date,
@@ -280,7 +244,6 @@ export function StockEntryDialog({
               const volume = toNumber(item.volumeMl);
               const pick = choice[item.uiKey];
               const product = products.find((candidate) => candidate.id === pick);
-              const kind = kinds[item.uiKey] ?? guessKind(item.volumeMl);
 
               return (
                 <div key={item.uiKey} className="border-t border-border pt-4 first:border-0 first:pt-0">
@@ -311,33 +274,6 @@ export function StockEntryDialog({
                       {quantity === 1 ? "unidade" : "unidades"} em {product.name}
                       , que fica com {(product.onHand ?? 0) + quantity}.
                     </p>
-                  )}
-                  {pick === CREATE && (
-                    <>
-                      <div className="mt-2">
-                        <Dropdown
-                          label="O que é"
-                          value={kind}
-                          options={STOCK_KIND_OPTIONS}
-                          onChange={(value) =>
-                            setKinds((prev) => ({
-                              ...prev,
-                              [item.uiKey]: value as StockKind,
-                            }))
-                          }
-                          compact
-                        />
-                      </div>
-                      <p className="mt-1.5 text-xs font-medium text-premium">
-                        Cria &ldquo;{item.description}&rdquo; como{" "}
-                        {STOCK_KIND_LABEL[kind].toLowerCase()}
-                        {kind === "patrimonio"
-                          ? `, adquirido em ${formatDate(purchaseDate)}.`
-                          : `, com ${quantity} ${
-                              quantity === 1 ? "unidade" : "unidades"
-                            }.`}
-                      </p>
-                    </>
                   )}
                 </div>
               );
