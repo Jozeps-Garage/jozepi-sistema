@@ -3421,7 +3421,9 @@ function ProductPicker({
   const existe = products.some(
     (product) => product.name.trim().toLowerCase() === typed.toLowerCase()
   );
-  const podeCriar = typed.length > 0 && !existe && Boolean(onCreate ?? onService);
+  const temAtalhoDeCriar = Boolean(onCreate ?? onService);
+  // Nome vazio ou já cadastrado: o atalho aparece, mas sem o que fazer.
+  const podeCriar = typed.length > 0 && !existe;
 
   async function handleCreate(kind: StockKind) {
     if (!onCreate || creating) return;
@@ -3467,8 +3469,61 @@ function ProductPicker({
           }
         />
       </div>
-      {open && (products.length > 0 || podeCriar) && (
+      {open && (products.length > 0 || temAtalhoDeCriar) && (
         <div className="absolute left-0 right-0 top-full z-40 mt-1 max-h-72 overflow-y-auto rounded-lg border border-border bg-card p-1.5 shadow-card-hover">
+          {/* Atalho de cadastrar na primeira linha, como no dropdown de
+              fornecedor: quem vai criar não precisa descobrir que pode. */}
+          {temAtalhoDeCriar && (
+            <div className="mb-2 rounded-md border border-dashed border-success/50 bg-success/5 px-2.5 py-2">
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-success">
+                <Plus size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                {podeCriar ? `Criar “${typed}” como` : "Criar novo produto"}
+              </p>
+              <p className="mt-0.5 text-[11px] text-muted">
+                {typed.length === 0
+                  ? "Escreva o nome no campo acima e escolha a categoria."
+                  : existe
+                    ? "Esse nome já está no estoque — escolha na lista abaixo."
+                    : "Escolha a categoria para cadastrar na hora."}
+              </p>
+              <div className="mt-1.5 grid grid-cols-4 gap-1">
+                {onService && (
+                  <CreateChoice
+                    label="Serviço"
+                    hint="Fica só na nota: serviço não entra no estoque"
+                    chip={
+                      <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-lg bg-foreground/5 text-muted">
+                        <Wrench size={11} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                      </span>
+                    }
+                    disabled={!podeCriar || creating !== null}
+                    onClick={() => {
+                      onService(typed);
+                      setOpen(false);
+                    }}
+                  />
+                )}
+                {onCreate &&
+                  STOCK_KIND_OPTIONS.map((option) => (
+                    <CreateChoice
+                      key={option.value}
+                      label={STOCK_KIND_SHORT[option.value]}
+                      hint={`Cadastra como ${STOCK_KIND_LABEL[option.value].toLowerCase()}`}
+                      chip={<StockKindIcon kind={option.value} size={22} />}
+                      loading={creating === option.value}
+                      disabled={!podeCriar || creating !== null}
+                      onClick={() => void handleCreate(option.value)}
+                    />
+                  ))}
+              </div>
+              {createError && (
+                <p className="pt-1.5 text-[11px] font-medium text-danger">
+                  {createError}
+                </p>
+              )}
+            </div>
+          )}
+
           {matches.length === 0 ? (
             <p className="px-2.5 py-2 text-xs text-muted">
               Nada no estoque com esse nome.
@@ -3501,49 +3556,6 @@ function ProductPicker({
                 </span>
               </button>
             ))
-          )}
-
-          {podeCriar && (
-            <div className="mt-1 border-t border-border pt-2">
-              <p className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-widest text-muted">
-                Criar &ldquo;{typed}&rdquo; como
-              </p>
-              <div className="grid grid-cols-4 gap-1">
-                {onService && (
-                  <CreateChoice
-                    label="Serviço"
-                    hint="Fica só na nota: serviço não entra no estoque"
-                    chip={
-                      <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-lg bg-foreground/5 text-muted">
-                        <Wrench size={11} weight={FINANCE_ICON_WEIGHT} aria-hidden />
-                      </span>
-                    }
-                    disabled={creating !== null}
-                    onClick={() => {
-                      onService(typed);
-                      setOpen(false);
-                    }}
-                  />
-                )}
-                {onCreate &&
-                  STOCK_KIND_OPTIONS.map((option) => (
-                    <CreateChoice
-                      key={option.value}
-                      label={STOCK_KIND_SHORT[option.value]}
-                      hint={`Cadastra como ${STOCK_KIND_LABEL[option.value].toLowerCase()}`}
-                      chip={<StockKindIcon kind={option.value} size={22} />}
-                      loading={creating === option.value}
-                      disabled={creating !== null}
-                      onClick={() => void handleCreate(option.value)}
-                    />
-                  ))}
-              </div>
-              {createError && (
-                <p className="px-2.5 pt-1.5 text-[11px] font-medium text-danger">
-                  {createError}
-                </p>
-              )}
-            </div>
           )}
         </div>
       )}
