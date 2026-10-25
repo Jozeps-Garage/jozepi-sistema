@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { MagnifyingGlass } from "@phosphor-icons/react";
+import { ArrowDown, ArrowUp, MagnifyingGlass } from "@phosphor-icons/react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Dropdown } from "@/components/ui/dropdown";
 import { StockKindIcon } from "@/components/products/stock-kind-icon";
@@ -25,14 +25,24 @@ const KIND_FILTERS = [
   })),
 ];
 
-/** De onde veio o que saiu: é isto que responde "quanto tempo durou". */
-function originLine(row: StockWriteOff<MovementWithProduct>) {
-  if (row.inStockSince === null) return "Sem entrada registrada";
-  const entrou = `entrou ${formatDate(row.inStockSince)}`;
-  if (!row.emptied) return `Em estoque · ${entrou}`;
+/** Motivo que só repete o que a linha já diz vira ruído: "Acabou · acabou". */
+function extraNote(row: StockWriteOff<MovementWithProduct>) {
+  const note = row.movement.notes?.trim();
+  if (!note) return "";
+  if (row.emptied && /^acabou\.?$/i.test(note)) return "";
+  return ` · ${note}`;
+}
+
+/** O que a baixa fez com o saldo. As datas ficam nas setas, ao lado. */
+function statusLine(row: StockWriteOff<MovementWithProduct>) {
+  if (!row.emptied) {
+    const resto = row.movement.balanceAfter;
+    return `Sobrou ${resto} ${resto === 1 ? "unidade" : "unidades"}`;
+  }
+  if (row.days === null) return "Acabou";
   // "durou no mesmo dia" não se lê; no dia da entrada a frase é outra.
-  if (row.days === 0) return "Acabou · entrou e saiu no mesmo dia";
-  return `Acabou · durou ${formatDuration(row.days ?? 0)} · ${entrou}`;
+  if (row.days === 0) return "Acabou no mesmo dia";
+  return `Acabou · durou ${formatDuration(row.days)}`;
 }
 
 /**
@@ -190,8 +200,27 @@ export function StockHistoryTab({
                   key={movement.id}
                   className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3"
                 >
-                  <span className="w-20 shrink-0 text-xs font-semibold tabular-nums text-muted">
-                    {formatDate(movement.occurredOn)}
+                  {/* Entrou em verde, saiu em vermelho: a leitura da linha
+                      começa pelas duas datas que a aba existe para comparar. */}
+                  <span className="w-24 shrink-0 space-y-0.5 text-xs font-semibold tabular-nums">
+                    <span
+                      className="flex items-center gap-1.5 text-success"
+                      aria-label={
+                        row.inStockSince
+                          ? `Entrou em ${formatDate(row.inStockSince)}`
+                          : "Sem entrada registrada"
+                      }
+                    >
+                      <ArrowDown size={12} weight="bold" aria-hidden />
+                      {row.inStockSince ? formatDate(row.inStockSince) : "—"}
+                    </span>
+                    <span
+                      className="flex items-center gap-1.5 text-danger"
+                      aria-label={`Saiu em ${formatDate(movement.occurredOn)}`}
+                    >
+                      <ArrowUp size={12} weight="bold" aria-hidden />
+                      {formatDate(movement.occurredOn)}
+                    </span>
                   </span>
                   <StockKindIcon kind={movement.productKind} size={28} />
                   <span className="min-w-0 flex-1">
@@ -199,8 +228,8 @@ export function StockHistoryTab({
                       {movement.productName}
                     </span>
                     <span className="block truncate text-xs text-muted">
-                      {originLine(row)}
-                      {movement.notes ? ` · ${movement.notes}` : ""}
+                      {statusLine(row)}
+                      {extraNote(row)}
                     </span>
                   </span>
                   <span className="w-20 shrink-0 text-right text-sm font-semibold tabular-nums text-danger">
