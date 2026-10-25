@@ -154,6 +154,27 @@ export async function loadAllMovements(
   });
 }
 
+/**
+ * Apaga o registro de um movimento, e só isso.
+ *
+ * O saldo fica onde está de propósito: devolver a quantidade seria adivinhar
+ * o que aconteceu depois — uma conferência posterior já mandou no saldo, e
+ * corrigir estoque é trabalho de "Conferir estoque", não de apagar história.
+ */
+export async function deleteMovement(
+  supabase: SupabaseClient,
+  workshopId: string,
+  movementId: string
+) {
+  const { error } = await supabase
+    .from("stock_movements")
+    .delete()
+    .eq("id", movementId)
+    .eq("workshop_id", workshopId);
+
+  if (error) throw new Error(error.message);
+}
+
 export interface MovementInput {
   productId: string;
   kind: MovementKind;

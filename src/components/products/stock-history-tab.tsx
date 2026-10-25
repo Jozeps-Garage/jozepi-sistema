@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, MagnifyingGlass } from "@phosphor-icons/react";
+import { ArrowDown, ArrowUp, MagnifyingGlass, Trash } from "@phosphor-icons/react";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dropdown } from "@/components/ui/dropdown";
 import { StockKindIcon } from "@/components/products/stock-kind-icon";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
@@ -13,6 +14,7 @@ import {
   type StockWriteOff,
 } from "@/lib/products/stock";
 import {
+  deleteMovement,
   loadAllMovements,
   type MovementWithProduct,
 } from "@/lib/products/stock-repo";
@@ -84,6 +86,8 @@ export function StockHistoryTab({
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<MovementWithProduct | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     if (!workshopId) {
@@ -154,6 +158,24 @@ export function StockHistoryTab({
   );
   // Um total com estimativa dentro não pode se passar por exato.
   const totalEstimado = visible.some((row) => valueOf(row)?.estimated);
+
+  async function handleDelete() {
+    if (deleting || !workshopId || !confirming) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await deleteMovement(supabase, workshopId, confirming.id);
+      // Some da lista sem recarregar a aba inteira.
+      setMovements((prev) => prev.filter((row) => row.id !== confirming.id));
+      setConfirming(null);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Não foi possível excluir o registro."
+      );
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   return (
     <section className="product-tab-panel-enter space-y-5">
@@ -270,12 +292,39 @@ export function StockHistoryTab({
                       ? "—"
                       : `${saiu.estimated ? "≈ " : ""}${formatCurrency(saiu.amount)}`}
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => setConfirming(movement)}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-danger transition-colors hover:bg-danger/10"
+                    aria-label={`Excluir a baixa de ${movement.productName}`}
+                    title="Excluir este registro"
+                  >
+                    <Trash size={15} weight="light" aria-hidden />
+                  </button>
                 </li>
               );
             })}
           </ul>
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirming !== null}
+        title="Excluir registro do histórico"
+        description={
+          confirming
+            ? `Apaga do histórico a baixa de ${confirming.quantity} ${
+                confirming.quantity === 1 ? "unidade" : "unidades"
+              } de "${confirming.productName}". O saldo em estoque não muda — para corrigi-lo, use "Conferir estoque" na aba Produtos.`
+            : ""
+        }
+        confirmLabel="Excluir registro"
+        loading={deleting}
+        onCancel={() => {
+          if (!deleting) setConfirming(null);
+        }}
+        onConfirm={() => void handleDelete()}
+      />
     </section>
   );
 }
