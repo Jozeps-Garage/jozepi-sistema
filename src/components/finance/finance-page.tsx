@@ -38,6 +38,7 @@ import {
   Trophy,
   Wallet,
   WarningCircle,
+  Wrench,
   XCircle,
 } from "@phosphor-icons/react";
 import {
@@ -57,6 +58,14 @@ import {
 } from "@/components/finance/revenue-expense-chart";
 import { NfseDialog, type NfseInvoice } from "@/components/finance/nfse-dialog";
 import { StockEntryDialog } from "@/components/finance/stock-entry-dialog";
+import { StockKindIcon } from "@/components/products/stock-kind-icon";
+import { productFromInvoiceLine } from "@/lib/products/stock-entry";
+import { saveSupabaseProduct } from "@/lib/products/supabase-catalog";
+import {
+  STOCK_KIND_LABEL,
+  STOCK_KIND_OPTIONS,
+  type StockKind,
+} from "@/lib/products/stock";
 import { SupplierQuickForm } from "@/components/suppliers/supplier-quick-form";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -426,13 +435,30 @@ interface TransactionItem {
   stockApplied?: boolean;
 }
 
+/** Nome curto para a grade de quatro colunas do "criar como". */
+const STOCK_KIND_SHORT: Record<StockKind, string> = {
+  liquido: "Líquido",
+  utensilio: "Utensílio",
+  patrimonio: "Patrimônio",
+};
+
+/** O kind cru da linha do banco. Sem a 047, cai em utensílio. */
+function stockKindOf(value: unknown): StockKind {
+  return value === "liquido" || value === "utensilio" || value === "patrimonio"
+    ? value
+    : "utensilio";
+}
+
 /** O que o lançamento precisa saber do estoque — não o cadastro inteiro. */
 interface StockProduct {
   id: string;
   name: string;
+  kind: StockKind;
+  /** Volume de uma embalagem, em ml. Vazio: não é líquido. */
   volumeMl: string;
   totalCost: string;
-  stockRemaining: string;
+  /** Quantas embalagens há hoje. */
+  onHand: number;
 }
 
 interface TransactionForm {
@@ -3353,13 +3379,21 @@ function ProductPicker({
   products,
   onPick,
   onType,
+  onCreate,
+  onService,
 }: {
   item: TransactionItem;
   products: StockProduct[];
   onPick: (product: StockProduct) => void;
   onType: (description: string) => void;
+  /** Cadastra o produto na hora. Devolve mensagem de erro, ou nada. */
+  onCreate?: (name: string, kind: StockKind) => Promise<string | void>;
+  /** Marca a linha como serviço: fica no texto e não vai para o estoque. */
+  onService?: (name: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState<StockKind | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
   const closeTimeoutRef = useRef<number | null>(null);
 
   const matches = useMemo(() => {
@@ -3381,6 +3415,27 @@ function ProductPicker({
     products.find((product) => product.id === item.productId)?.name ===
       item.description.trim();
 
+  const typed = item.description.trim();
+  // Nome que já existe no catálogo não vira botão de criar: seria produto
+  // duplicado, e a sugestão de cima já resolve.
+  const existe = products.some(
+    (product) => product.name.trim().toLowerCase() === typed.toLowerCase()
+  );
+  const podeCriar = typed.length > 0 && !existe && Boolean(onCreate ?? onService);
+
+  async function handleCreate(kind: StockKind) {
+    if (!onCreate || creating) return;
+    setCreating(kind);
+    setCreateError(null);
+    const message = await onCreate(typed, kind);
+    setCreating(null);
+    if (typeof message === "string" && message) {
+      setCreateError(message);
+      return;
+    }
+    setOpen(false);
+  }
+
   return (
     <div
       className="relative"
@@ -3393,25 +3448,30 @@ function ProductPicker({
         setOpen(true);
       }}
     >
-      <Input
-        id={`item-${item.uiKey}-produto`}
-        label="Produto ou serviço"
-        value={item.description}
-        onChange={(event) => onType(event.target.value)}
-        placeholder="Comece a digitar e escolha do estoque"
-        compact
-        suffix={
-          exactPick ? (
-            <Package size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
-          ) : undefined
-        }
-      />
-      {open && products.length > 0 && (
-        <div className="absolute left-0 right-0 top-full z-40 mt-1 max-h-56 overflow-y-auto rounded-lg border border-border bg-card p-1.5 shadow-card-hover">
+      {/* Clicar no campo reabre a lista. Só o foco não basta: depois de
+          escolher ou criar, o foco nunca saiu daqui, e um segundo clique não
+          dispara foco nenhum. Fica neste invólucro, não no de fora, senão o
+          clique numa sugestão subiria e reabriria o menu que acabou de fechar. */}
+      <div onClick={() => setOpen(true)}>
+        <Input
+          id={`item-${item.uiKey}-produto`}
+          label="Produto ou serviço"
+          value={item.description}
+          onChange={(event) => onType(event.target.value)}
+          placeholder="Comece a digitar e escolha do estoque"
+          compact
+          suffix={
+            exactPick ? (
+              <Package size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+            ) : undefined
+          }
+        />
+      </div>
+      {open && (products.length > 0 || podeCriar) && (
+        <div className="absolute left-0 right-0 top-full z-40 mt-1 max-h-72 overflow-y-auto rounded-lg border border-border bg-card p-1.5 shadow-card-hover">
           {matches.length === 0 ? (
             <p className="px-2.5 py-2 text-xs text-muted">
-              Nada no estoque com esse nome. Pode seguir digitando: vai entrar
-              como item avulso.
+              Nada no estoque com esse nome.
             </p>
           ) : (
             matches.map((product) => (
@@ -3425,13 +3485,16 @@ function ProductPicker({
                 }}
                 className="flex w-full items-baseline justify-between gap-3 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-background"
               >
-                <span className="min-w-0 truncate text-sm font-semibold text-foreground">
+                <StockKindIcon kind={product.kind} size={22} />
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
                   {product.name}
                 </span>
                 <span className="shrink-0 text-[11px] font-medium text-muted">
                   {[
-                    product.volumeMl ? `${product.volumeMl} ml` : "",
-                    product.stockRemaining ? `${product.stockRemaining} em estoque` : "",
+                    product.kind === "liquido" && product.volumeMl
+                      ? `${product.volumeMl} ml`
+                      : "",
+                    `${product.onHand} em estoque`,
                   ]
                     .filter(Boolean)
                     .join(" · ")}
@@ -3439,9 +3502,86 @@ function ProductPicker({
               </button>
             ))
           )}
+
+          {podeCriar && (
+            <div className="mt-1 border-t border-border pt-2">
+              <p className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-widest text-muted">
+                Criar &ldquo;{typed}&rdquo; como
+              </p>
+              <div className="grid grid-cols-4 gap-1">
+                {onService && (
+                  <CreateChoice
+                    label="Serviço"
+                    hint="Fica só na nota: serviço não entra no estoque"
+                    chip={
+                      <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-lg bg-foreground/5 text-muted">
+                        <Wrench size={11} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+                      </span>
+                    }
+                    disabled={creating !== null}
+                    onClick={() => {
+                      onService(typed);
+                      setOpen(false);
+                    }}
+                  />
+                )}
+                {onCreate &&
+                  STOCK_KIND_OPTIONS.map((option) => (
+                    <CreateChoice
+                      key={option.value}
+                      label={STOCK_KIND_SHORT[option.value]}
+                      hint={`Cadastra como ${STOCK_KIND_LABEL[option.value].toLowerCase()}`}
+                      chip={<StockKindIcon kind={option.value} size={22} />}
+                      loading={creating === option.value}
+                      disabled={creating !== null}
+                      onClick={() => void handleCreate(option.value)}
+                    />
+                  ))}
+              </div>
+              {createError && (
+                <p className="px-2.5 pt-1.5 text-[11px] font-medium text-danger">
+                  {createError}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
+  );
+}
+
+/** Um dos quatro atalhos de "criar como": ícone em cima, nome embaixo. */
+function CreateChoice({
+  label,
+  hint,
+  chip,
+  loading = false,
+  disabled = false,
+  onClick,
+}: {
+  label: string;
+  hint: string;
+  chip: React.ReactNode;
+  loading?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      // Sem perder o foco do campo: o menu fecha no blur.
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onClick}
+      disabled={disabled}
+      title={hint}
+      className="flex flex-col items-center gap-1 rounded-md px-1 py-2 transition-colors hover:bg-background disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {chip}
+      <span className="text-[10px] font-semibold text-muted">
+        {loading ? "Criando…" : label}
+      </span>
+    </button>
   );
 }
 
@@ -3483,6 +3623,7 @@ function TransactionFormCard({
   onManageCategories,
   onCreateSupplier,
   stockProducts = [],
+  onCreateStockProduct,
   loading,
   error,
   buttonLabel,
@@ -3508,6 +3649,14 @@ function TransactionFormCard({
   onCreateSupplier?: () => void;
   /** Catálogo para sugerir nas linhas da nota. Vazio: só texto livre. */
   stockProducts?: StockProduct[];
+  /** Cadastra o produto pelo próprio dropdown. Erro volta como mensagem. */
+  onCreateStockProduct?: (input: {
+    name: string;
+    kind: StockKind;
+    volumeMl: string;
+    unitAmount: string;
+    date: string;
+  }) => Promise<StockProduct | string>;
   loading: boolean;
   error: string | null;
   buttonLabel: string;
@@ -3691,6 +3840,34 @@ function TransactionFormCard({
                           // Digitou por cima: a linha deixa de apontar para o
                           // produto do estoque até escolher de novo.
                           updateItem(item.uiKey, { description, productId: "" })
+                        }
+                        onService={(name) =>
+                          // Serviço não tem saldo: fica na nota e o diálogo
+                          // de estoque não pergunta sobre esta linha.
+                          updateItem(item.uiKey, {
+                            description: name,
+                            productId: "",
+                            stockApplied: true,
+                          })
+                        }
+                        onCreate={
+                          onCreateStockProduct
+                            ? async (name, kind) => {
+                                const created = await onCreateStockProduct({
+                                  name,
+                                  kind,
+                                  volumeMl: item.volumeMl,
+                                  unitAmount: item.unitAmount,
+                                  date: form.date,
+                                });
+                                if (typeof created === "string") return created;
+                                updateItem(item.uiKey, {
+                                  description: created.name,
+                                  productId: created.id,
+                                  volumeMl: created.volumeMl,
+                                });
+                              }
+                            : undefined
                         }
                         onPick={(product) =>
                           updateItem(item.uiKey, {
@@ -4226,7 +4403,9 @@ export function FinancePage() {
         // Só o que a linha da nota precisa: nome, volume, custo e saldo.
         supabase
           .from("products")
-          .select("id, name, volume_ml, total_cost, stock_remaining")
+          .select(
+            "id, name, volume_ml, total_cost, kind, on_hand, package_volume_ml"
+          )
           .eq("workshop_id", profileWorkshopId)
           .order("name", { ascending: true }),
         supabase
@@ -4313,10 +4492,17 @@ export function FinancePage() {
           (row) => ({
             id: String(row.id),
             name: String(row.name ?? ""),
-            volumeMl: typeof row.volume_ml === "string" ? row.volume_ml : "",
+            kind: stockKindOf(row.kind),
+            // O volume por embalagem é o do modelo novo; volume_ml ainda
+            // carrega o total antigo em produto que ninguém editou desde a 047.
+            volumeMl:
+              row.package_volume_ml !== null && row.package_volume_ml !== undefined
+                ? String(row.package_volume_ml)
+                : typeof row.volume_ml === "string"
+                  ? row.volume_ml
+                  : "",
             totalCost: typeof row.total_cost === "string" ? row.total_cost : "",
-            stockRemaining:
-              typeof row.stock_remaining === "string" ? row.stock_remaining : "",
+            onHand: Number(row.on_hand ?? 0) || 0,
           })
         )
       );
@@ -6307,6 +6493,54 @@ export function FinancePage() {
    * aparece. O tipo vem da página: em Receitas nasce receita, em Despesas
    * despesa — não há o que escolher. Já sai selecionada.
    */
+  /**
+   * Cadastra o produto sem sair do lançamento.
+   *
+   * Nasce com saldo zero: quem move o estoque é a entrada da compra, em
+   * "Lançar no estoque" — assim a compra fica registrada no histórico em vez
+   * de o produto aparecer já cheio, vindo do nada.
+   */
+  async function handleCreateStockProduct(input: {
+    name: string;
+    kind: StockKind;
+    volumeMl: string;
+    unitAmount: string;
+    date: string;
+  }): Promise<StockProduct | string> {
+    if (!workshopId) return "Oficina não encontrada. Recarregue a página.";
+    const name = input.name.trim();
+    if (!name) return "Dê um nome ao produto.";
+
+    try {
+      const created = productFromInvoiceLine({
+        name,
+        quantity: 1,
+        volumeMl: parseFilterAmount(input.volumeMl) ?? 0,
+        unitAmount: parseFilterAmount(input.unitAmount) ?? 0,
+        kind: input.kind,
+        purchaseDate: input.date,
+      });
+      await saveSupabaseProduct(supabase, workshopId, created);
+
+      const stock: StockProduct = {
+        id: created.id,
+        name: created.name,
+        kind: input.kind,
+        volumeMl: created.packageVolumeMl ? String(created.packageVolumeMl) : "",
+        totalCost: created.totalCost,
+        onHand: 0,
+      };
+      setStockProducts((prev) =>
+        [...prev, stock].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+      );
+      return stock;
+    } catch (err) {
+      return err instanceof Error
+        ? err.message
+        : "Não foi possível cadastrar o produto.";
+    }
+  }
+
   async function handleCreateCategory(name: string, type: TransactionType) {
     const trimmed = name.trim();
     const repeated = categories.find(
@@ -6967,6 +7201,7 @@ export function FinancePage() {
                   supplierOptions={expenseSupplierOptions}
                   onCreateSupplier={() => setSupplierFormOpen(true)}
                   stockProducts={stockProducts}
+                  onCreateStockProduct={handleCreateStockProduct}
                   loading={savingExpense}
                   error={expenseError}
                   buttonLabel="Salvar despesa"
@@ -7002,6 +7237,7 @@ export function FinancePage() {
                       supplierOptions={expenseSupplierOptions}
                       onCreateSupplier={() => setSupplierFormOpen(true)}
                       stockProducts={stockProducts}
+                      onCreateStockProduct={handleCreateStockProduct}
                       loading={savingExpense}
                       error={expenseError}
                       buttonLabel={
