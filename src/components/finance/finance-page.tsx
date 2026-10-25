@@ -83,6 +83,15 @@ import {
 } from "@/lib/finance/accounts";
 import { accountBalance, cashDate as cashflowDate, isPaidCashStatus, sumPaidRevenueInRange } from "@/lib/finance/cash";
 import {
+  DISCOUNT_TYPE_OPTIONS,
+  discountAmount,
+  grossFromNet,
+  isDiscountType,
+  netFromGross,
+  normalizeDiscountValue,
+  type DiscountType,
+} from "@/lib/finance/discount";
+import {
   inDueAlertWindow,
   INSTALLMENT_PERIODS,
   addPeriodToDateKey,
@@ -160,6 +169,9 @@ interface FinancialTransaction {
   installment_group_id: string | null;
   installment_number: number | null;
   installment_total: number | null;
+  /** Desconto da nota. Nulo enquanto a 050 não rodar, ou sem desconto. */
+  discount_type: string | null;
+  discount_value: number | null;
   created_at: string;
 }
 
@@ -411,6 +423,9 @@ interface FinanceEntry {
   installmentGroupId?: string | null;
   installmentNumber?: number | null;
   installmentTotal?: number | null;
+  /** Desconto aplicado. `amount` já vem abatido. */
+  discountType?: DiscountType;
+  discountValue?: number;
 }
 
 type FinanceDeleteConfirm =
@@ -479,6 +494,9 @@ interface TransactionForm {
   installmentPeriod: InstallmentPeriod;
   /** As parcelas como ficam na tela: dá para mexer em cada uma antes de salvar. */
   installments: InstallmentDraft[];
+  /** Desconto da nota. `amount` é o bruto; o que se paga é o líquido. */
+  discountType: DiscountType;
+  discountValue: string;
 }
 
 interface InstallmentDraft {
@@ -785,6 +803,8 @@ const initialRevenueForm: TransactionForm = {
   installmentCount: "3",
   installmentPeriod: "mensal",
   installments: [],
+  discountType: "fixed",
+  discountValue: "",
   invoiceNumber: "",
   items: [],
   notes: "",
@@ -804,6 +824,8 @@ const initialExpenseForm: TransactionForm = {
   installmentCount: "3",
   installmentPeriod: "mensal",
   installments: [],
+  discountType: "fixed",
+  discountValue: "",
   invoiceNumber: "",
   items: [],
   notes: "",
@@ -1277,6 +1299,10 @@ function formatSupplierSaveError(message: string) {
     return "Sua sessão expirou e o servidor não reconhece mais quem está salvando. Entre de novo e repita o lançamento — nada foi gravado.";
   }
 
+  if (normalized.includes("discount_type") || normalized.includes("discount_value")) {
+    return "O desconto ainda não foi instalado no banco. Aplique a migration 050 no Supabase, ou salve o lançamento sem desconto.";
+  }
+
   if (normalized.includes("supplier_id") && normalized.includes("foreign key")) {
     return "Fornecedor inválido. Cadastre-o na aba Fornecedores em Produtos antes de vincular à despesa.";
   }
@@ -1284,6 +1310,10 @@ function formatSupplierSaveError(message: string) {
   return message;
 }
 
+// A 050 pode não ter rodado ainda: a cascata abaixo tenta a coluna nova e
+// cai para a lista anterior sem quebrar a página.
+const TRANSACTION_SELECT_PHASE4 =
+  "id, type, description, amount, category, category_id, account_id, service_order_id, supplier_id, product_id, source, payment_status, notes, items, invoice_number, transaction_date, effective_date, due_date, installment_group_id, installment_number, installment_total, discount_type, discount_value, created_at";
 const TRANSACTION_SELECT_PHASE3 =
   "id, type, description, amount, category, category_id, account_id, service_order_id, supplier_id, product_id, source, payment_status, notes, items, invoice_number, transaction_date, effective_date, due_date, installment_group_id, installment_number, installment_total, created_at";
 const TRANSACTION_SELECT_PHASE2 =
@@ -1338,6 +1368,12 @@ function normalizeTransactionRow(
       typeof row.installment_number === "number" ? row.installment_number : null,
     installment_total:
       typeof row.installment_total === "number" ? row.installment_total : null,
+    discount_type:
+      typeof row.discount_type === "string" ? row.discount_type : null,
+    discount_value:
+      row.discount_value === null || row.discount_value === undefined
+        ? null
+        : Number(row.discount_value) || 0,
     created_at: String(row.created_at ?? row.transaction_date),
   };
 }
@@ -1368,6 +1404,7 @@ async function loadFinancialTransactions(
   workshopId: string
 ) {
   const attempts = [
+    TRANSACTION_SELECT_PHASE4,
     TRANSACTION_SELECT_PHASE3,
     TRANSACTION_SELECT_PHASE2,
     TRANSACTION_SELECT_CASHFLOW,
@@ -1556,6 +1593,7 @@ async function fetchFinancialTransactionById(
   transactionId: string
 ) {
   const attempts = [
+    TRANSACTION_SELECT_PHASE4,
     TRANSACTION_SELECT_PHASE3,
     TRANSACTION_SELECT_PHASE2,
     TRANSACTION_SELECT_CASHFLOW,
@@ -3686,7 +3724,12 @@ function TransactionFormCard({
   const itemsTotal = sumTransactionItems(form.items);
   const showPayment = !sharedFieldsOnly;
   const installmentsTotal = sumInstallments(form.installments);
-  const amountValue = parseFilterAmount(form.amount) ?? 0;
+  const grossValue = parseFilterAmount(form.amount) ?? 0;
+  const discountTyped = parseFilterAmount(form.discountValue) ?? 0;
+  const discountMoney = discountAmount(grossValue, form.discountType, discountTyped);
+  // Daqui para baixo, "amount" é o que realmente se paga: é ele que vira
+  // parcela, que fecha com as parcelas e que vai para o banco.
+  const amountValue = netFromGross(grossValue, form.discountType, discountTyped);
   // Centavo de diferença não é erro: o usuário mexeu numa parcela e as contas
   // pararam de fechar com o valor total.
   const installmentsMismatch =
@@ -3725,9 +3768,17 @@ function TransactionFormCard({
     installmentCount?: string;
     installmentPeriod?: InstallmentPeriod;
     dueDate?: string;
+    discountType?: DiscountType;
+    discountValue?: string;
   }): Partial<TransactionForm> {
     if (!form.installmentsEnabled) return {};
-    const total = parseFilterAmount(patch.amount ?? form.amount) ?? 0;
+    // Parcela-se o que se paga, não o de tabela.
+    const gross = parseFilterAmount(patch.amount ?? form.amount) ?? 0;
+    const total = netFromGross(
+      gross,
+      patch.discountType ?? form.discountType,
+      parseFilterAmount(patch.discountValue ?? form.discountValue) ?? 0
+    );
     const count = Number(patch.installmentCount ?? form.installmentCount) || 0;
     if (count < 1) return {};
     return {
@@ -4002,6 +4053,52 @@ function TransactionFormCard({
               }}
             />
           </div>
+          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Dropdown
+              label="Tipo de desconto"
+              value={form.discountType}
+              options={DISCOUNT_TYPE_OPTIONS}
+              onChange={(value) => {
+                const discountType = isDiscountType(value) ? value : "fixed";
+                onChange({
+                  discountType,
+                  ...regenerate({ discountType }),
+                });
+              }}
+            />
+            <Input
+              label="Desconto"
+              prefix={form.discountType === "fixed" ? "R$" : undefined}
+              suffix={
+                form.discountType === "percent" ? (
+                  <span className="text-xs font-semibold">%</span>
+                ) : undefined
+              }
+              inputMode="decimal"
+              value={form.discountValue}
+              placeholder={form.discountType === "fixed" ? "0,00" : "0"}
+              onChange={(event) => {
+                const discountValue = event.target.value;
+                onChange({
+                  discountValue,
+                  ...regenerate({ discountValue }),
+                });
+              }}
+            />
+          </div>
+          {discountMoney > 0 && (
+            <p className="mt-3 flex flex-wrap items-baseline justify-between gap-2 border-t border-border pt-3 text-sm">
+              <span className="text-muted">
+                Valor pós descontos
+                <span className="ml-2 text-xs font-semibold text-danger">
+                  −{formatCurrency(discountMoney)}
+                </span>
+              </span>
+              <strong className="text-base font-bold text-foreground">
+                {formatCurrency(amountValue)}
+              </strong>
+            </p>
+          )}
         </FormSection>
       )}
 
@@ -4038,7 +4135,7 @@ function TransactionFormCard({
                     dueDate,
                     installments: enabled
                       ? buildInstallments(
-                          parseFilterAmount(form.amount) ?? 0,
+                          amountValue,
                           Number(form.installmentCount) || 3,
                           form.installmentPeriod,
                           dueDate
@@ -4792,6 +4889,10 @@ export function FinancePage() {
         installmentGroupId: transaction.installment_group_id,
         installmentNumber: transaction.installment_number,
         installmentTotal: transaction.installment_total,
+        discountType: isDiscountType(transaction.discount_type)
+          ? transaction.discount_type
+          : undefined,
+        discountValue: transaction.discount_value ?? undefined,
       };
     });
   }, [ordersById, suppliersById, transactions]);
@@ -5364,13 +5465,34 @@ export function FinancePage() {
         : expenseCategorySelectOptions
       ).find((option) => option.value === form.categoryId)?.label ?? "Outros";
 
-    let amount: number;
+    let gross: number;
     try {
-      amount = parseMoney(form.amount, { min: 0 });
+      gross = parseMoney(form.amount, { min: 0 });
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Informe um valor válido.");
       return;
     }
+
+    let discountTyped: number;
+    try {
+      discountTyped = form.discountValue.trim()
+        ? parseMoney(form.discountValue, { min: 0 })
+        : 0;
+    } catch {
+      setFormError("Informe um desconto válido.");
+      return;
+    }
+    const discountStored = normalizeDiscountValue(
+      gross,
+      form.discountType,
+      discountTyped
+    );
+    // O banco guarda o que saiu da conta. O bruto se recompõe pelo desconto.
+    const amount = netFromGross(gross, form.discountType, discountStored);
+    const hadDiscount = transactionId
+      ? transactionEntries.find((entry) => entry.id === transactionId)
+          ?.discountType !== undefined
+      : false;
 
     const supplierId =
       type === "despesa" && form.supplierId !== categoryFilterAll
@@ -5404,6 +5526,15 @@ export function FinancePage() {
       items: transactionItemsToRow(form.items),
       invoice_number: form.invoiceNumber.trim() || null,
       notes: form.notes.trim() || null,
+      // Só viaja quando existe: sem a 050 a coluna não está lá, e um
+      // lançamento sem desconto não tem por que esbarrar nisso. A exceção é
+      // tirar o desconto de um lançamento que tinha — aí a coluna existe, e
+      // precisa ser limpa, senão o desconto antigo volta na próxima abertura.
+      ...(discountStored > 0
+        ? { discount_type: form.discountType, discount_value: discountStored }
+        : hadDiscount
+          ? { discount_type: null, discount_value: null }
+          : {}),
     };
 
     if (transactionId) {
@@ -5649,13 +5780,28 @@ export function FinancePage() {
     closeManualForm(type);
   }
 
+  /**
+   * O formulário mostra o bruto, porque é o que estava na nota. O banco só
+   * guarda o líquido, então o bruto é recomposto a partir do desconto.
+   */
+  function formDiscountFields(entry: FinanceEntry) {
+    const discountType = entry.discountType ?? "fixed";
+    const discountValue = entry.discountValue ?? 0;
+    return {
+      amount: formatMoneyInput(
+        discountValue > 0
+          ? grossFromNet(entry.amount, discountType, discountValue)
+          : entry.amount
+      ),
+      discountType,
+      discountValue: discountValue > 0 ? formatMoneyInput(discountValue) : "",
+    };
+  }
+
   function handleEditRevenue(entry: FinanceEntry) {
     setRevenueForm({
       description: entry.description,
-      amount: entry.amount.toLocaleString("pt-BR", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }),
+      ...formDiscountFields(entry),
       date: entry.date,
       effectiveDate: entry.effectiveDate || entry.date,
       dueDate: entry.dueDate || entry.date,
@@ -5861,10 +6007,7 @@ export function FinancePage() {
   function handleEditExpense(entry: FinanceEntry) {
     setExpenseForm({
       description: entry.description,
-      amount: entry.amount.toLocaleString("pt-BR", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }),
+      ...formDiscountFields(entry),
       date: entry.date,
       effectiveDate: entry.effectiveDate || entry.date,
       dueDate: entry.dueDate || entry.date,
