@@ -3583,6 +3583,55 @@ function ProductPicker({
   );
 }
 
+/**
+ * O total da linha, que também escreve de volta no preço unitário.
+ *
+ * Nem toda nota traz o preço de um: muitas trazem o total do item, e dividir
+ * de cabeça é trabalho que a tela pode fazer. Enquanto o campo está sendo
+ * digitado ele mostra o que foi digitado, e não o total recalculado — senão
+ * "100" com quantidade 3 vira "99,99" debaixo do dedo.
+ */
+function ItemTotalInput({
+  id,
+  quantity,
+  unitAmount,
+  onChangeTotal,
+}: {
+  id: string;
+  quantity: number;
+  unitAmount: string;
+  /** Recebe o preço unitário já calculado, no formato do campo. */
+  onChangeTotal: (unitAmount: string) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const unit = parseFilterAmount(unitAmount) ?? 0;
+  const computed = unit > 0 ? formatMoneyInput(quantity * unit) : "";
+
+  return (
+    <Input
+      id={id}
+      label="Valor total"
+      prefix="R$"
+      inputMode="decimal"
+      value={draft ?? computed}
+      onChange={(event) => {
+        const typed = event.target.value;
+        setDraft(typed);
+        const total = parseFilterAmount(typed);
+        if (total === null) {
+          onChangeTotal("");
+          return;
+        }
+        const count = quantity > 0 ? quantity : 1;
+        onChangeTotal(formatMoneyInput(total / count));
+      }}
+      onBlur={() => setDraft(null)}
+      compact
+      className="pl-9"
+    />
+  );
+}
+
 /** Um dos quatro atalhos de "criar como": ícone em cima, nome embaixo. */
 function CreateChoice({
   label,
@@ -3871,7 +3920,6 @@ function TransactionFormCard({
             <div className="space-y-2">
               {form.items.map((item) => {
                 const quantity = parseFilterAmount(item.quantity) ?? 1;
-                const unit = parseFilterAmount(item.unitAmount) ?? 0;
                 const linkedProduct = item.productId
                   ? stockProducts.find((product) => product.id === item.productId)
                   : undefined;
@@ -3987,6 +4035,16 @@ function TransactionFormCard({
                           className="pl-9"
                         />
                       </div>
+                      <div className="w-32">
+                        <ItemTotalInput
+                          id={`item-${item.uiKey}-total`}
+                          quantity={quantity}
+                          unitAmount={item.unitAmount}
+                          onChangeTotal={(unitAmount) =>
+                            updateItem(item.uiKey, { unitAmount })
+                          }
+                        />
+                      </div>
                       <button
                         type="button"
                         onClick={() => removeItem(item.uiKey)}
@@ -3997,11 +4055,6 @@ function TransactionFormCard({
                         <Trash size={15} weight={FINANCE_ICON_WEIGHT} aria-hidden />
                       </button>
                     </div>
-                    {quantity > 1 && unit > 0 && (
-                      <p className="-mt-1 text-right text-xs text-muted sm:sr-only">
-                        {formatCurrency(quantity * unit)}
-                      </p>
-                    )}
                   </div>
                 );
               })}
