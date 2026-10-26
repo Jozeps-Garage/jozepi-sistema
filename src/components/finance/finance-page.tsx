@@ -56,10 +56,10 @@ import {
   type ChartMode,
 } from "@/components/finance/revenue-expense-chart";
 import { NfseDialog, type NfseInvoice } from "@/components/finance/nfse-dialog";
-import { StockEntryDialog } from "@/components/finance/stock-entry-dialog";
 import { StockKindIcon } from "@/components/products/stock-kind-icon";
 import { productFromInvoiceLine } from "@/lib/products/stock-entry";
 import { saveSupabaseProduct } from "@/lib/products/supabase-catalog";
+import { loadStockItems, recordMovement } from "@/lib/products/stock-repo";
 import {
   STOCK_KIND_LABEL,
   STOCK_KIND_OPTIONS,
@@ -2431,7 +2431,6 @@ function TransactionList({
   editForm,
   nfseByTransaction,
   onEmitNfse,
-  onStockEntry,
   onEditTransaction,
   onDeleteTransaction,
   onChangePaymentStatus,
@@ -2457,7 +2456,6 @@ function TransactionList({
   nfseByTransaction?: Map<string, NfseInvoice>;
   onEmitNfse?: (entry: FinanceEntry) => void;
   /** Leva os itens da nota para o estoque. */
-  onStockEntry?: (entry: FinanceEntry) => void;
 }) {
   const [page, setPage] = useState(0);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
@@ -2782,15 +2780,6 @@ function TransactionList({
           // Nota de serviço é de receita, e só faz sentido depois que o
           // serviço foi prestado e o lançamento existe de fato no banco.
           const canEmitNfse = Boolean(onEmitNfse) && entry.type === "receita";
-          // Compra com item ligado a um produto e ainda não lançado: vale
-          // oferecer o estoque. Linha de texto livre não conta — quem não
-          // escolheu produto nem criou um não quis mexer em saldo nenhum.
-          const canStockEntry =
-            Boolean(onStockEntry) &&
-            entry.type === "despesa" &&
-            (entry.items ?? []).some(
-              (item) => item.productId && !item.stockApplied
-            );
           const displayTitle =
             entry.kind === "automatic" && entry.clientName
               ? entry.clientName
@@ -3083,18 +3072,8 @@ function TransactionList({
                         </div>
                       )
                     )}
-                    {(onEditTransaction || nfse || canEmitNfse || canStockEntry) && (
+                    {(onEditTransaction || nfse || canEmitNfse) && (
                       <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-                        {canStockEntry && (
-                          <button
-                            type="button"
-                            onClick={() => onStockEntry?.(entry)}
-                            className="mr-auto inline-flex items-center gap-1.5 rounded-lg border border-dashed border-success/50 bg-success/5 px-3 py-2 text-xs font-semibold text-success transition-colors hover:border-success hover:bg-success/10"
-                          >
-                            <Package size={14} weight={FINANCE_ICON_WEIGHT} aria-hidden />
-                            Lançar no estoque
-                          </button>
-                        )}
                         {nfse ? (
                           // Nota já existe: o que serve agora é o documento,
                           // não o botão de emitir de novo.
@@ -4393,7 +4372,6 @@ export function FinancePage() {
     new Map()
   );
   const [nfseEntry, setNfseEntry] = useState<FinanceEntry | null>(null);
-  const [stockEntryTarget, setStockEntryTarget] = useState<FinanceEntry | null>(null);
   const [nfseClients, setNfseClients] = useState<
     { id: string; name: string; document: string | null }[]
   >([]);
@@ -5621,6 +5599,10 @@ export function FinancePage() {
         return;
       }
 
+      if (type === "despesa") {
+        await runStockEntry(transactionId, form.items, form.date);
+      }
+
       try {
         const savedTransaction = await fetchFinancialTransactionById(
           supabase,
@@ -5764,6 +5746,10 @@ export function FinancePage() {
     if (insertError || !insertedRow?.id) {
       setFormError(formatSupplierSaveError(insertError?.message ?? "Erro ao salvar."));
       return;
+    }
+
+    if (type === "despesa") {
+      await runStockEntry(insertedRow.id, form.items, form.date);
     }
 
     try {
@@ -6643,21 +6629,91 @@ export function FinancePage() {
    * Grava na própria nota quais itens já entraram no estoque. É o que impede
    * somar a mesma compra de novo se alguém apertar o botão outra vez.
    */
-  async function markStockApplied(entry: FinanceEntry, appliedKeys: string[]) {
-    if (!workshopId || appliedKeys.length === 0) return;
-    const applied = new Set(appliedKeys);
-    const nextItems = (entry.items ?? []).map((item) =>
+  /**
+   * Leva as linhas da nota para o estoque ao salvar a despesa.
+   *
+   * Era um segundo passo, num diálogo à parte, e com ele dois lugares faziam
+   * a mesma coisa: o dropdown dizia o que o item era, e o diálogo dizia de
+   * novo. Agora o dropdown é o único lugar onde se decide — linha ligada a um
+   * produto entra no estoque sozinha, com a quantidade e o preço que a nota
+   * tiver na hora de salvar. Por isso roda depois de salvar, e não no clique
+   * da categoria: ali o valor e o ml ainda nem foram digitados.
+   *
+   * Devolve os itens com as linhas já marcadas, ou nulo se nada entrou.
+   */
+  async function applyItemsToStock(
+    transactionId: string,
+    items: TransactionItem[],
+    purchaseDate: string
+  ): Promise<TransactionItem[] | null> {
+    if (!workshopId) return null;
+    const pending = items.filter(
+      (item) => item.productId && !item.stockApplied
+    );
+    if (pending.length === 0) return null;
+
+    // Saldo do banco, não da tela: a lista do lançamento não acompanha baixa
+    // nem conferência feitas em Produtos enquanto a despesa estava aberta.
+    const stock = await loadStockItems(supabase, workshopId);
+    const applied = new Set<string>();
+
+    for (const item of pending) {
+      const product = stock.find((row) => row.id === item.productId);
+      if (!product) continue;
+      const quantity = parseFilterAmount(item.quantity) ?? 1;
+      if (quantity <= 0) continue;
+
+      await recordMovement(
+        supabase,
+        workshopId,
+        product.onHand,
+        {
+          productId: product.id,
+          kind: "entrada",
+          quantity,
+          occurredOn: purchaseDate,
+          unitCost: parseFilterAmount(item.unitAmount) || null,
+          packageVolumeMl: parseFilterAmount(item.volumeMl) || null,
+          transactionId,
+          notes: "Compra lançada na despesa",
+        },
+        product.packageVolumeMl
+      );
+      applied.add(item.uiKey);
+    }
+
+    if (applied.size === 0) return null;
+    return items.map((item) =>
       applied.has(item.uiKey) ? { ...item, stockApplied: true } : item
     );
+  }
 
-    const { error: updateError } = await supabase
-      .from("financial_transactions")
-      .update({ items: transactionItemsToRow(nextItems) })
-      .eq("id", entry.id)
-      .eq("workshop_id", workshopId);
-
-    if (updateError) throw new Error(updateError.message);
-    void loadFinanceData();
+  /**
+   * A entrada no estoque acontece depois que o lançamento já existe, porque o
+   * movimento aponta de volta para ele. Falhar aqui não desfaz a despesa: ela
+   * está salva, e o aviso diz o que ficou pendente.
+   */
+  async function runStockEntry(
+    transactionId: string,
+    items: TransactionItem[],
+    purchaseDate: string
+  ) {
+    try {
+      const nextItems = await applyItemsToStock(transactionId, items, purchaseDate);
+      if (!nextItems) return;
+      const { error: itemsError } = await supabase
+        .from("financial_transactions")
+        .update({ items: transactionItemsToRow(nextItems) })
+        .eq("id", transactionId)
+        .eq("workshop_id", workshopId);
+      if (itemsError) throw new Error(itemsError.message);
+    } catch (err) {
+      setError(
+        `Despesa salva, mas o estoque não recebeu a compra: ${
+          err instanceof Error ? err.message : "erro desconhecido"
+        }`
+      );
+    }
   }
 
   /**
@@ -7386,7 +7442,6 @@ export function FinancePage() {
               )}
               <TransactionList
                 entries={filteredExpenseEntries}
-                onStockEntry={setStockEntryTarget}
                 accountNames={accountNames}
                 editingId={editingExpenseId}
                 editForm={
@@ -8069,20 +8124,6 @@ export function FinancePage() {
             next.set(nfseEntry.id, invoice);
             return next;
           });
-        }}
-      />
-
-      <StockEntryDialog
-        key={stockEntryTarget?.id ?? "estoque-fechado"}
-        open={stockEntryTarget !== null}
-        supabase={supabase}
-        workshopId={workshopId}
-        items={stockEntryTarget?.items ?? []}
-        purchaseDate={stockEntryTarget?.date ?? dateKey(today)}
-        transactionId={stockEntryTarget?.id}
-        onClose={() => setStockEntryTarget(null)}
-        onApplied={async (keys) => {
-          if (stockEntryTarget) await markStockApplied(stockEntryTarget, keys);
         }}
       />
 

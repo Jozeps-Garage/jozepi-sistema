@@ -186,6 +186,8 @@ export interface MovementInput {
   transactionId?: string | null;
   /** Quanto custou cada unidade. Só faz sentido em entrada. */
   unitCost?: number | null;
+  /** Tamanho da embalagem comprada, em ml. Só preenche quem ainda não tem. */
+  packageVolumeMl?: number | null;
 }
 
 /**
@@ -199,7 +201,8 @@ export async function recordMovement(
   supabase: SupabaseClient,
   workshopId: string,
   currentOnHand: number,
-  input: MovementInput
+  input: MovementInput,
+  currentPackageVolumeMl?: number | null
 ): Promise<number> {
   const balance = balanceAfterMovement(currentOnHand, input.kind, input.quantity);
 
@@ -227,11 +230,22 @@ export async function recordMovement(
       ? { total_cost: formatMoneyInput(input.unitCost) }
       : {};
 
+  // O volume da embalagem só entra se o cadastro ainda não souber: a nota diz
+  // o que foi comprado desta vez, e o cadastro manda sobre o que o produto é.
+  const volumeUpdate =
+    input.kind === "entrada" &&
+    input.packageVolumeMl &&
+    input.packageVolumeMl > 0 &&
+    !currentPackageVolumeMl
+      ? { package_volume_ml: input.packageVolumeMl }
+      : {};
+
   const { error: productError } = await supabase
     .from("products")
     .update({
       on_hand: balance,
       ...priceUpdate,
+      ...volumeUpdate,
       updated_at: new Date().toISOString(),
     })
     .eq("id", input.productId)
