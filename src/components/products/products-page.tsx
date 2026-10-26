@@ -39,7 +39,6 @@ import { formatMoneyInput, parseCurrencyInput } from "@/lib/utils/money";
 import { StockHistoryTab } from "@/components/products/stock-history-tab";
 import { StockKindIcon } from "@/components/products/stock-kind-icon";
 import { StockMovementDialog } from "@/components/products/stock-movement-dialog";
-import { recordMovement } from "@/lib/products/stock-repo";
 import { createClient } from "@/lib/supabase/client";
 import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { formatCurrency, formatPhone, normalizeOptionalPhone } from "@/lib/utils/format";
@@ -607,10 +606,6 @@ export function ProductsPage() {
   const [sortColumn, setSortColumn] = useState<ProductSortColumn>("name");
   const [sortDirection, setSortDirection] = useState<ProductSortDirection>("asc");
   const [activeProductTab, setActiveProductTab] = useState<ProductPageTab>("products");
-  /** Conferência acontece na própria lista: respeita busca e filtro. */
-  const [reviewing, setReviewing] = useState(false);
-  const [counted, setCounted] = useState<Record<string, string>>({});
-  const [savingReview, setSavingReview] = useState(false);
   const [movementTarget, setMovementTarget] = useState<StockItem | null>(null);
   const [showProductFilter, setShowProductFilter] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -1307,23 +1302,6 @@ export function ProductsPage() {
     if (!tracksStock(stock.kind)) return total + unit;
     return total + unit * stock.onHand;
   }, 0);
-  // Só o que você digitou e ficou diferente do saldo atual.
-  const countedChanges = filteredProducts
-    .map((product) => {
-      const stock = stockItemOf(product);
-      if (!tracksStock(stock.kind)) return null;
-      const raw = counted[product.id];
-      if (raw === undefined || raw.trim() === "") return null;
-      const value = Number(raw.replace(",", "."));
-      if (!Number.isFinite(value) || value < 0 || value === stock.onHand) {
-        return null;
-      }
-      return { product, stock, value };
-    })
-    .filter(
-      (row): row is { product: ProductItem; stock: StockItem; value: number } =>
-        row !== null
-    );
 
   /**
    * Troca a categoria de vários produtos de uma vez. Patrimônio não conta
@@ -1331,39 +1309,6 @@ export function ProductsPage() {
    * que o cadastro faz quando você muda um só.
    */
 
-
-  async function handleSaveReview() {
-    if (savingReview || !workshopId || countedChanges.length === 0) return;
-    setSavingReview(true);
-    setError(null);
-    try {
-      for (const { stock, value } of countedChanges) {
-        await recordMovement(supabase, workshopId, stock.onHand, {
-          productId: stock.id,
-          kind: "revisao",
-          quantity: value,
-          occurredOn: dateKey(today),
-          notes: "Conferência de estoque",
-        });
-      }
-      setProducts((prev) =>
-        prev.map((product) => {
-          const change = countedChanges.find(
-            (row) => row.product.id === product.id
-          );
-          return change ? { ...product, onHand: change.value } : product;
-        })
-      );
-      setCounted({});
-      setReviewing(false);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Não foi possível salvar a contagem."
-      );
-    } finally {
-      setSavingReview(false);
-    }
-  }
 
   const selectedSupplier =
     suppliers.find((supplier) => supplier.id === selectedSupplierId) ?? null;
@@ -1454,51 +1399,14 @@ export function ProductsPage() {
               />
             </div>
             <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-              {reviewing ? (
-                <>
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      setReviewing(false);
-                      setCounted({});
-                    }}
-                    disabled={savingReview}
-                    className="w-full sm:w-auto"
-                  >
-                    Cancelar
-                  </Button>
-                  <Button
-                    variant="success"
-                    onClick={() => void handleSaveReview()}
-                    loading={savingReview}
-                    disabled={countedChanges.length === 0}
-                    className="w-full sm:w-auto"
-                  >
-                    {countedChanges.length > 1
-                      ? `Salvar ${countedChanges.length} correções`
-                      : "Salvar contagem"}
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button
-                    variant="secondary"
-                    onClick={() => setReviewing(true)}
-                    className="w-full sm:w-auto"
-                  >
-                    <Faders size={16} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-                    Conferir estoque
-                  </Button>
-                  <Button
-                    variant="success"
-                    onClick={openCreateForm}
-                    className="w-full sm:w-auto"
-                  >
-                    <Plus size={16} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
-                    Adicionar produto
-                  </Button>
-                </>
-              )}
+              <Button
+                variant="success"
+                onClick={openCreateForm}
+                className="w-full sm:w-auto"
+              >
+                <Plus size={16} weight={PRODUCT_ICON_WEIGHT} aria-hidden />
+                Adicionar produto
+              </Button>
             </div>
           </div>
         )}
@@ -1617,38 +1525,16 @@ export function ProductsPage() {
 
                           <ProductCostDisplay product={product} compact />
 
-                          {/* Contagem, não barra: o saldo só muda por entrada,
-                              baixa ou revisão. */}
                           {/* Só o número: a unidade é o cabeçalho da coluna.
-                              Conferindo, ele vira campo na própria linha. */}
+                              O saldo muda por entrada de compra ou por baixa. */}
                           <div className="min-w-0 text-right">
-                            {!tracksStock(stock.kind) ? (
-                              <p className="text-sm text-muted" title="Patrimônio">
-                                —
-                              </p>
-                            ) : reviewing ? (
-                              <input
-                                inputMode="decimal"
-                                value={counted[product.id] ?? ""}
-                                onChange={(event) =>
-                                  setCounted((prev) => ({
-                                    ...prev,
-                                    [product.id]: event.target.value,
-                                  }))
-                                }
-                                placeholder={String(stock.onHand)}
-                                aria-label={`Quantas unidades de ${product.name}`}
-                                className={`w-20 rounded-md border bg-input px-2 py-1.5 text-right text-sm tabular-nums text-foreground outline-none focus:ring-2 focus:ring-accent/20 ${
-                                  countedChanges.some(
-                                    (row) => row.product.id === product.id
-                                  )
-                                    ? "border-success"
-                                    : "border-border"
-                                }`}
-                              />
-                            ) : (
+                            {tracksStock(stock.kind) ? (
                               <p className="text-sm font-semibold tabular-nums text-foreground">
                                 {stock.onHand}
+                              </p>
+                            ) : (
+                              <p className="text-sm text-muted" title="Patrimônio">
+                                —
                               </p>
                             )}
                           </div>
@@ -1772,31 +1658,9 @@ export function ProductsPage() {
                             <p className="text-xs font-medium uppercase tracking-wide text-muted">
                               Unidades
                             </p>
-                            {reviewing ? (
-                              <input
-                                inputMode="decimal"
-                                value={counted[product.id] ?? ""}
-                                onChange={(event) =>
-                                  setCounted((prev) => ({
-                                    ...prev,
-                                    [product.id]: event.target.value,
-                                  }))
-                                }
-                                placeholder={String(stock.onHand)}
-                                aria-label={`Quantas unidades de ${product.name}`}
-                                className={`mt-1 w-24 rounded-md border bg-input px-2 py-1.5 text-sm tabular-nums text-foreground outline-none focus:ring-2 focus:ring-accent/20 ${
-                                  countedChanges.some(
-                                    (row) => row.product.id === product.id
-                                  )
-                                    ? "border-success"
-                                    : "border-border"
-                                }`}
-                              />
-                            ) : (
-                              <p className="mt-1 text-sm font-bold tabular-nums text-foreground">
-                                {stock.onHand}
-                              </p>
-                            )}
+                            <p className="mt-1 text-sm font-bold tabular-nums text-foreground">
+                              {stock.onHand}
+                            </p>
                           </>
                         ) : (
                           <>
