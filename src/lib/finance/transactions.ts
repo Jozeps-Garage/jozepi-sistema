@@ -20,6 +20,9 @@ export interface QuickTransactionInput {
   effectiveDate?: string | null;
   dueDate?: string | null;
   paymentStatus?: PaymentStatus;
+  /** Só despesa. Nulo: lançamento sem fornecedor. */
+  supplierId?: string | null;
+  notes?: string | null;
 }
 
 export function isMissingColumnError(message: string, column: string) {
@@ -81,6 +84,8 @@ export async function createTransaction(
     payment_status: paymentStatus,
     effective_date: paidEffectiveDate(paymentStatus, input.date, input.effectiveDate),
     due_date: dueDate,
+    supplier_id: input.supplierId || null,
+    notes: input.notes?.trim() || null,
   };
 
   const attempts = [
@@ -117,7 +122,9 @@ export async function createTransaction(
       isMissingColumnError(result.error.message, "category_id") ||
       isMissingColumnError(result.error.message, "effective_date") ||
       isMissingColumnError(result.error.message, "due_date") ||
-      isMissingColumnError(result.error.message, "payment_status");
+      isMissingColumnError(result.error.message, "payment_status") ||
+      isMissingColumnError(result.error.message, "supplier_id") ||
+      isMissingColumnError(result.error.message, "notes");
     if (!missingCashflowColumn) break;
   }
 

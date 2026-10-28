@@ -16,8 +16,57 @@ import {
   createTransaction,
   type TransactionType,
 } from "@/lib/finance/transactions";
-import type { FinancialAccount, FinancialCategory } from "@/lib/finance/types";
+import type {
+  FinancialAccount,
+  FinancialCategory,
+  PaymentStatus,
+} from "@/lib/finance/types";
+import {
+  SUPPLIER_SELECT_FIELDS,
+  SUPPLIER_SELECT_LEGACY,
+  isMissingSupplierColumn,
+} from "@/lib/suppliers/save";
 import { parseCurrencyInput } from "@/lib/utils/money";
+
+interface SupplierOption {
+  id: string;
+  name: string;
+  trade_name?: string | null;
+}
+
+const SEM_FORNECEDOR = "";
+
+/** Nome de fachada manda quando existe: é por ele que a nota é reconhecida. */
+function supplierLabel(supplier: SupplierOption) {
+  return supplier.trade_name?.trim() || supplier.name;
+}
+
+async function loadSuppliers(
+  supabase: SupabaseClient,
+  workshopId: string
+): Promise<SupplierOption[]> {
+  let { data, error } = (await supabase
+    .from("suppliers")
+    .select(SUPPLIER_SELECT_FIELDS)
+    .eq("workshop_id", workshopId)) as {
+    data: unknown;
+    error: { message?: string } | null;
+  };
+  // Sem a 043 as colunas novas não existem; repete sem elas.
+  if (error && isMissingSupplierColumn(error)) {
+    ({ data, error } = (await supabase
+      .from("suppliers")
+      .select(SUPPLIER_SELECT_LEGACY)
+      .eq("workshop_id", workshopId)) as {
+      data: unknown;
+      error: { message?: string } | null;
+    });
+  }
+  if (error) return [];
+  return ((data as SupplierOption[] | null) ?? []).sort((a, b) =>
+    supplierLabel(a).localeCompare(supplierLabel(b), "pt-BR")
+  );
+}
 
 function todayKey() {
   const now = new Date();
@@ -52,6 +101,12 @@ export function TransactionSheet({
   const [categoryId, setCategoryId] = useState("");
   const [accountId, setAccountId] = useState("");
   const [date, setDate] = useState(todayKey());
+  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>("pago");
+  /** Pago: quando o dinheiro se moveu. Pendente: quando vence. */
+  const [settleDate, setSettleDate] = useState(todayKey());
+  const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
+  const [supplierId, setSupplierId] = useState(SEM_FORNECEDOR);
+  const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,18 +126,27 @@ export function TransactionSheet({
     setDescription("");
     setAmount("");
     setDate(todayKey());
+    setPaymentStatus("pago");
+    setSettleDate(todayKey());
+    setSupplierId(SEM_FORNECEDOR);
+    setNotes("");
     setError(null);
     setLoadingOptions(true);
 
     void (async () => {
       try {
-        const [loadedAccounts, loadedCategories] = await Promise.all([
-          loadFinancialAccounts(supabase, workshopId),
-          loadFinancialCategories(supabase, workshopId),
-        ]);
+        const [loadedAccounts, loadedCategories, loadedSuppliers] =
+          await Promise.all([
+            loadFinancialAccounts(supabase, workshopId),
+            loadFinancialCategories(supabase, workshopId),
+            // Fornecedor é conveniência: se a consulta falhar, o lançamento
+            // segue sem ele em vez de travar o formulário inteiro.
+            loadSuppliers(supabase, workshopId),
+          ]);
         if (cancelled) return;
         setAccounts(loadedAccounts);
         setCategories(loadedCategories);
+        setSuppliers(loadedSuppliers);
         setAccountId(defaultAccountId(loadedAccounts));
         setCategoryId(categoriesOfType(loadedCategories, type)[0]?.id ?? "");
       } catch (err) {
@@ -140,6 +204,7 @@ export function TransactionSheet({
     setSaving(true);
     setError(null);
     try {
+      const pago = paymentStatus === "pago";
       await createTransaction(supabase, workshopId, {
         type,
         description,
@@ -148,8 +213,13 @@ export function TransactionSheet({
         categoryId,
         accountId,
         date,
-        effectiveDate: date,
-        paymentStatus: "pago",
+        // Pago: a data em que o dinheiro se moveu. Pendente: o vencimento,
+        // e nenhuma data de pagamento — senão o caixa conta o que não entrou.
+        effectiveDate: pago ? settleDate || date : null,
+        dueDate: pago ? null : settleDate || date,
+        paymentStatus,
+        supplierId: isExpense ? supplierId || null : null,
+        notes,
       });
       onDone(
         "success",
@@ -190,6 +260,30 @@ export function TransactionSheet({
             onChange={(event) => setDate(event.target.value)}
           />
         </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Dropdown
+            label="Status"
+            value={paymentStatus}
+            onChange={(value) => setPaymentStatus(value as PaymentStatus)}
+            options={
+              isExpense
+                ? [
+                    { value: "pago", label: "Pago" },
+                    { value: "pendente", label: "A pagar" },
+                  ]
+                : [
+                    { value: "pago", label: "Recebido" },
+                    { value: "pendente", label: "A receber" },
+                  ]
+            }
+          />
+          <Input
+            label={paymentStatus === "pago" ? "Pago em" : "Vencimento"}
+            type="date"
+            value={settleDate}
+            onChange={(event) => setSettleDate(event.target.value)}
+          />
+        </div>
         <Dropdown
           label="Conta"
           value={accountId}
@@ -203,6 +297,26 @@ export function TransactionSheet({
           onChange={setCategoryId}
           options={categoryOptions}
           placeholder={loadingOptions ? "Carregando..." : "Selecione a categoria"}
+        />
+        {isExpense && suppliers.length > 0 && (
+          <Dropdown
+            label="Fornecedor (opcional)"
+            value={supplierId}
+            onChange={setSupplierId}
+            options={[
+              { value: SEM_FORNECEDOR, label: "Sem fornecedor" },
+              ...suppliers.map((supplier) => ({
+                value: supplier.id,
+                label: supplierLabel(supplier),
+              })),
+            ]}
+          />
+        )}
+        <Input
+          label="Observação (opcional)"
+          value={notes}
+          onChange={(event) => setNotes(event.target.value)}
+          placeholder={isExpense ? "Ex.: nota 1259" : "Ex.: pago em dinheiro"}
         />
         {error && <p className="text-sm text-danger">{error}</p>}
         <Button type="submit" loading={saving} className="w-full">
