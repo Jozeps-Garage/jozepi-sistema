@@ -9,13 +9,11 @@ import { Input } from "@/components/ui/input";
 import { useBodyScrollLock } from "@/lib/utils/body-scroll-lock";
 import { formatDate } from "@/lib/utils/format";
 import {
-  MOVEMENT_LABEL,
   buildStockCycles,
   formatDuration,
   formatOnHand,
   type StockCycle,
   type StockItem,
-  type StockMovement,
 } from "@/lib/products/stock";
 import { loadMovements, recordMovement } from "@/lib/products/stock-repo";
 
@@ -46,7 +44,6 @@ export function StockMovementDialog({
   const [quantity, setQuantity] = useState("1");
   const [occurredOn, setOccurredOn] = useState(today);
   const [notes, setNotes] = useState("");
-  const [movements, setMovements] = useState<StockMovement[]>([]);
   const [cycles, setCycles] = useState<StockCycle[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -63,9 +60,8 @@ export function StockMovementDialog({
       return;
     }
     try {
-      const loaded = await loadMovements(supabase, workshopId, productId);
-      setMovements([...loaded].reverse());
-      setCycles(buildStockCycles(loaded));
+      // A história inteira ainda é lida: é dela que saem os ciclos de vida.
+      setCycles(buildStockCycles(await loadMovements(supabase, workshopId, productId)));
       setLoading(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível ler o histórico.");
@@ -156,7 +152,7 @@ export function StockMovementDialog({
 
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[6rem_11rem_minmax(0,1fr)]">
           <Input
-            label="Saíram (unidades)"
+            label="Saíram"
             inputMode="decimal"
             value={quantity}
             onChange={(event) => setQuantity(event.target.value)}
@@ -219,38 +215,6 @@ export function StockMovementDialog({
                       ? ` · ${cycle.purchased} ${cycle.purchased === 1 ? "unidade" : "unidades"}`
                       : ""}
                   </p>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <h3 className="mt-5 text-sm font-semibold text-foreground">Movimentações</h3>
-          {movements.length === 0 ? (
-            <p className="mt-2 text-sm text-muted">Nenhuma ainda.</p>
-          ) : (
-            <ul className="mt-2 divide-y divide-border">
-              {movements.map((movement) => (
-                <li
-                  key={movement.id}
-                  className="flex items-baseline justify-between gap-3 py-2 text-sm"
-                >
-                  <span className="min-w-0">
-                    <span className="font-semibold text-foreground">
-                      {MOVEMENT_LABEL[movement.kind]}
-                    </span>
-                    <span className="text-muted">
-                      {" "}
-                      · {formatDate(movement.occurredOn)}
-                      {movement.notes ? ` · ${movement.notes}` : ""}
-                    </span>
-                  </span>
-                  <span className="shrink-0 tabular-nums text-muted">
-                    {movement.kind === "revisao"
-                      ? `= ${movement.balanceAfter}`
-                      : movement.kind === "entrada"
-                        ? `+${movement.quantity}`
-                        : `−${movement.quantity}`}
-                  </span>
                 </li>
               ))}
             </ul>
