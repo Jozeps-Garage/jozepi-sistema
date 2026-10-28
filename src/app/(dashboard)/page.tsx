@@ -184,6 +184,10 @@ export default async function DashboardPage() {
       .eq("workshop_id", workshopId)
       .eq("status", "finalizada")
       .in("payment_status", ["pendente", "parcial"])
+      // Serviço de cortesia não tem o que receber: sem isto a lavagem que
+      // você deu de graça fica para sempre em "a receber", e vencida, porque
+      // nenhum pagamento de R$ 0,00 vai acontecer para fechá-la.
+      .gt("total_amount", 0)
       .order("completed_at", { ascending: false })
       .limit(20);
 
