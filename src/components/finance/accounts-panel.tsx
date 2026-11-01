@@ -35,6 +35,10 @@ export interface AccountStatementLine {
   description: string;
   amount: number;
   kind: "receita" | "despesa" | "transfer_in" | "transfer_out";
+  /** Falso enquanto o valor não entrou nem saiu: fica fora do saldo da conta. */
+  settled: boolean;
+  /** "Pendente", "Parcial" ou "Vencido" — só nas linhas que ainda não moveram. */
+  statusLabel?: string;
   overdue?: boolean;
 }
 
@@ -119,6 +123,15 @@ export function AccountsPanel({
         inPeriod(line.date, period, customStart, customEnd)
       )
     : [];
+  // O que moveu é o que compõe o saldo mostrado acima; o resto é previsão.
+  const movedTotal = lines.reduce(
+    (sum, line) => (line.settled ? sum + line.amount : sum),
+    0
+  );
+  const forecastTotal = lines.reduce(
+    (sum, line) => (line.settled ? sum : sum + line.amount),
+    0
+  );
 
   function closeForm() {
     setShowForm(false);
@@ -189,6 +202,9 @@ export function AccountsPanel({
                 {FINANCIAL_ACCOUNT_TYPE_LABEL[selected.type]}
                 {selected.is_default ? " · Conta padrão" : ""}
               </p>
+              <p className="mt-0.5 text-xs text-muted">
+                Só o que já entrou ou saiu desta conta.
+              </p>
             </div>
             <Button
               type="button"
@@ -235,38 +251,74 @@ export function AccountsPanel({
               Nenhum movimento neste período.
             </p>
           ) : (
-            <ul className="divide-y divide-border">
-              {lines.map((line) => (
-                <li
-                  key={line.id}
-                  className={`flex items-center justify-between gap-3 px-4 py-3 ${
-                    line.overdue ? "bg-danger/5" : ""
-                  }`}
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-foreground">
-                      {line.description}
-                      {line.overdue ? (
-                        <span className="ml-2 rounded-full bg-danger/10 px-2 py-0.5 text-[10px] font-bold text-danger">
-                          Vencido
-                        </span>
-                      ) : null}
-                    </p>
-                    <p className="text-xs text-muted">
-                      {line.date.slice(8, 10)}/{line.date.slice(5, 7)}/{line.date.slice(0, 4)}
-                    </p>
-                  </div>
-                  <span
-                    className={`shrink-0 text-sm font-bold tabular-nums ${
-                      line.amount >= 0 ? "text-success" : "text-danger"
+            <>
+              <ul className="divide-y divide-border">
+                {lines.map((line) => (
+                  <li
+                    key={line.id}
+                    className={`flex items-center justify-between gap-3 px-4 py-3 ${
+                      line.overdue ? "bg-danger/5" : ""
                     }`}
                   >
-                    {line.amount >= 0 ? "+" : ""}
-                    {formatCurrency(line.amount)}
+                    <div className="min-w-0">
+                      <p
+                        className={`truncate text-sm font-semibold ${
+                          line.settled ? "text-foreground" : "text-muted"
+                        }`}
+                      >
+                        {line.description}
+                        {line.statusLabel ? (
+                          <span
+                            className={`ml-2 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                              line.overdue
+                                ? "bg-danger/10 text-danger"
+                                : "bg-foreground/5 text-muted"
+                            }`}
+                          >
+                            {line.statusLabel}
+                          </span>
+                        ) : null}
+                      </p>
+                      <p className="text-xs text-muted">
+                        {line.date.slice(8, 10)}/{line.date.slice(5, 7)}/{line.date.slice(0, 4)}
+                      </p>
+                    </div>
+                    <span
+                      className={`shrink-0 text-sm font-bold tabular-nums ${
+                        !line.settled
+                          ? "text-muted"
+                          : line.amount >= 0
+                            ? "text-success"
+                            : "text-danger"
+                      }`}
+                    >
+                      {line.amount >= 0 ? "+" : ""}
+                      {formatCurrency(line.amount)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {/* Fecha a conferência: o de cima é o que mexeu no saldo, o de
+                  baixo é o que ainda não mexeu. */}
+              <div className="border-t border-border bg-background/40 px-4 py-3">
+                <div className="flex items-center justify-between gap-3 text-xs">
+                  <span className="font-semibold text-muted">Movimentado no período</span>
+                  <span className="font-bold tabular-nums text-foreground">
+                    {movedTotal >= 0 ? "+" : ""}
+                    {formatCurrency(movedTotal)}
                   </span>
-                </li>
-              ))}
-            </ul>
+                </div>
+                {forecastTotal !== 0 && (
+                  <div className="mt-1.5 flex items-center justify-between gap-3 text-xs">
+                    <span className="font-semibold text-muted">Ainda não movimentado</span>
+                    <span className="font-bold tabular-nums text-muted">
+                      {forecastTotal >= 0 ? "+" : ""}
+                      {formatCurrency(forecastTotal)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
       </div>

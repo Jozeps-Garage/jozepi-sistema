@@ -5033,23 +5033,43 @@ export function FinancePage() {
     [accountBalances, accounts]
   );
 
+  /**
+   * O extrato tem que fechar com o saldo logo acima dele, e `accountBalance` só
+   * soma o que foi pago. Então cada linha diz se já movimentou: pendente e
+   * parcial aparecem como previsão, fora da conta, e cancelado nem aparece.
+   */
   function statementLinesForAccount(accountId: string): AccountStatementLine[] {
+    const todayKey = dateKey(today);
     const txLines: AccountStatementLine[] = transactionEntries
-      .filter((entry) => entry.accountId === accountId)
-      .map((entry) => ({
-        id: `tx-${entry.id}`,
-        date: cashflowDate({
-          effective_date: entry.effectiveDate,
-          transaction_date: entry.date,
-        }),
-        description: entry.description,
-        amount: entry.type === "receita" ? entry.amount : -entry.amount,
-        kind: entry.type,
-        overdue: isOverdue(
+      .filter(
+        (entry) => entry.accountId === accountId && entry.paymentStatus !== "cancelado"
+      )
+      .map((entry) => {
+        const settled = isPaidCashStatus(entry.paymentStatus);
+        const overdue = isOverdue(
           { payment_status: entry.paymentStatus, due_date: entry.dueDate },
-          dateKey(today)
-        ),
-      }));
+          todayKey
+        );
+        return {
+          id: `tx-${entry.id}`,
+          date: cashflowDate({
+            effective_date: entry.effectiveDate,
+            transaction_date: entry.date,
+          }),
+          description: entry.description,
+          amount: entry.type === "receita" ? entry.amount : -entry.amount,
+          kind: entry.type,
+          settled,
+          overdue,
+          statusLabel: settled
+            ? undefined
+            : overdue
+              ? "Vencido"
+              : entry.paymentStatus === "parcial"
+                ? "Parcial"
+                : "Pendente",
+        };
+      });
     const transferLines: AccountStatementLine[] = transfers
       .filter(
         (transfer) =>
@@ -5070,6 +5090,8 @@ export function FinancePage() {
             (incoming ? `Transferência de ${counterpart}` : `Transferência para ${counterpart}`),
           amount: incoming ? transfer.amount : -transfer.amount,
           kind: incoming ? "transfer_in" : "transfer_out",
+          // Transferência só existe depois de feita.
+          settled: true,
         };
       });
     return [...txLines, ...transferLines].sort((a, b) => b.date.localeCompare(a.date));
