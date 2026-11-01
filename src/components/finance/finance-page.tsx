@@ -558,11 +558,6 @@ const PAYMENT_STATUS_ORDER: Record<string, number> = {
   cancelado: 3,
 };
 
-/** A data que a linha mostra: vencimento quando existe, senão o lançamento. */
-function sortableDate(entry: FinanceEntry) {
-  return entry.dueDate || entry.date;
-}
-
 function compareEntries({ key, direction }: TransactionSort) {
   const factor = direction === "asc" ? 1 : -1;
   return (a: FinanceEntry, b: FinanceEntry) => {
@@ -570,7 +565,7 @@ function compareEntries({ key, direction }: TransactionSort) {
     if (key === "amount") {
       result = a.amount - b.amount;
     } else if (key === "date") {
-      result = sortableDate(a).localeCompare(sortableDate(b));
+      result = a.date.localeCompare(b.date);
     } else if (key === "status") {
       result =
         (PAYMENT_STATUS_ORDER[a.paymentStatus ?? "pago"] ?? 9) -
@@ -646,17 +641,19 @@ const financeOriginFilterOptions = [
 
 function createFinanceFilterState(
   customStart: string,
-  customEnd: string,
-  /** Despesa é conta a pagar, então a pergunta padrão dela é o vencimento.
-   *  Receita nasce de serviço prestado: a data que importa é o lançamento. */
-  dateField: FinanceFilterState["dateField"] = "date"
+  customEnd: string
 ): FinanceFilterState {
   return {
     // Mês corrente por padrão: a pergunta do dia a dia é "como está este mês",
     // e "todo o período" misturava três anos de lançamento na mesma lista.
     granularity: "month",
     anchor: customEnd,
-    dateField,
+    // Pela data do lançamento, receita e despesa igual: é a data que a lista
+    // mostra e por onde ela ordena. A despesa já foi por vencimento, mas
+    // quase toda despesa aqui nasce paga — aí o vencimento é só a data em que
+    // ela foi digitada, e um gasto de outubro ficava no mês errado. Quem está
+    // atrás de conta a pagar troca para "Vencimento" no filtro.
+    dateField: "date",
     customStart,
     customEnd,
     search: "",
@@ -1218,10 +1215,18 @@ function isDateInRange(date: string, range: DateRange) {
   return parsed >= range.start && parsed <= range.end;
 }
 
-function sortEntriesByLaunch(a: FinanceEntry, b: FinanceEntry) {
-  const byCreated = b.createdAt.localeCompare(a.createdAt);
-  if (byCreated !== 0) return byCreated;
-  return b.date.localeCompare(a.date);
+/**
+ * A lista abre pela data do lançamento — a que a coluna "Data" mostra e que o
+ * cabeçalho dela ordena —, não por quando ele foi digitado nem pelo
+ * vencimento. Corrigir a data de uma despesa tem que levá-la para o lugar
+ * dela no mês; ordenar pela digitação deixava um gasto de outubro no topo,
+ * entre os de novembro, e ordenar pelo vencimento deixava a coluna visível
+ * fora de ordem. Empate no mesmo dia: o mais recente primeiro.
+ */
+function sortEntriesByDate(a: FinanceEntry, b: FinanceEntry) {
+  const byDate = b.date.localeCompare(a.date);
+  if (byDate !== 0) return byDate;
+  return b.createdAt.localeCompare(a.createdAt);
 }
 
 // min = 0 libera lançamento sem valor (serviço trocado, cortesia). Transferência
@@ -2466,7 +2471,8 @@ function TransactionList({
   const editRowRef = useRef<HTMLDivElement>(null);
   const todayKeyValue = todayDateKey();
 
-  // null mantém a ordem que a página já entrega (lançamento mais recente).
+  // null mantém a ordem que a página já entrega (data do lançamento, mais
+  // recente primeiro).
   const [sort, setSort] = useState<TransactionSort | null>(null);
 
   function toggleSort(key: TransactionSortKey) {
@@ -4486,11 +4492,7 @@ export function FinancePage() {
     createFinanceFilterState(dateKey(startOfMonth(today)), dateKey(today))
   );
   const [expenseFilters, setExpenseFilters] = useState<FinanceFilterState>(() =>
-    createFinanceFilterState(
-      dateKey(startOfMonth(today)),
-      dateKey(today),
-      "dueDate"
-    )
+    createFinanceFilterState(dateKey(startOfMonth(today)), dateKey(today))
   );
   const [showFixedCostForm, setShowFixedCostForm] = useState(false);
   const [editingFixedCostId, setEditingFixedCostId] = useState<string | null>(null);
@@ -4944,14 +4946,14 @@ export function FinancePage() {
     () =>
       transactionEntries
         .filter((entry) => entry.type === "receita")
-        .sort(sortEntriesByLaunch),
+        .sort(sortEntriesByDate),
     [transactionEntries]
   );
   const expenseEntries = useMemo(
     () =>
       transactionEntries
         .filter((entry) => entry.type === "despesa")
-        .sort(sortEntriesByLaunch),
+        .sort(sortEntriesByDate),
     [transactionEntries]
   );
   const automaticRevenueServiceOrderIds = useMemo(() => {
@@ -7611,8 +7613,7 @@ export function FinancePage() {
                       setExpenseFilters(
                         createFinanceFilterState(
                           dateKey(startOfMonth(today)),
-                          dateKey(today),
-                          "dueDate"
+                          dateKey(today)
                         )
                       )
                     }
