@@ -572,7 +572,7 @@ function compareEntries({ key, direction }: TransactionSort) {
     if (key === "amount") {
       result = a.amount - b.amount;
     } else if (key === "date") {
-      result = a.date.localeCompare(b.date);
+      result = settlementDate(a).localeCompare(settlementDate(b));
     } else if (key === "status") {
       result =
         (PAYMENT_STATUS_ORDER[a.paymentStatus ?? "pago"] ?? 9) -
@@ -616,7 +616,7 @@ type FinanceFilterState = {
   /** Um dia qualquer dentro do período visível; as setas andam com ele. */
   anchor: string;
   /** Qual data o período compara: lançamento, vencimento ou pagamento. */
-  dateField: "date" | "dueDate" | "effectiveDate";
+  dateField: "settlement" | "date" | "dueDate" | "effectiveDate";
   customStart: string;
   customEnd: string;
   search: string;
@@ -655,12 +655,10 @@ function createFinanceFilterState(
     // e "todo o período" misturava três anos de lançamento na mesma lista.
     granularity: "month",
     anchor: customEnd,
-    // Pela data do lançamento, receita e despesa igual: é a data que a lista
-    // mostra e por onde ela ordena. A despesa já foi por vencimento, mas
-    // quase toda despesa aqui nasce paga — aí o vencimento é só a data em que
-    // ela foi digitada, e um gasto de outubro ficava no mês errado. Quem está
-    // atrás de conta a pagar troca para "Vencimento" no filtro.
-    dateField: "date",
+    // Pelo vencimento enquanto não foi pago, pela data do pagamento depois:
+    // é quando o dinheiro sai ou entra que decide o mês. Uma compra de
+    // outubro que vence em novembro é um compromisso de novembro.
+    dateField: "settlement",
     customStart,
     customEnd,
     search: "",
@@ -717,7 +715,9 @@ function matchesFinanceFilter(
         ? entry.dueDate
         : filters.dateField === "effectiveDate"
           ? entry.effectiveDate
-          : entry.date;
+          : filters.dateField === "date"
+            ? entry.date
+            : settlementDate(entry);
     // Sem a data escolhida o lançamento não cabe no período: uma conta sem
     // vencimento não entra num filtro por vencimento.
     if (!basis || !isDateInRange(basis, range)) return false;
@@ -1247,15 +1247,21 @@ function isDateInRange(date: string, range: DateRange) {
 }
 
 /**
- * A lista abre pela data do lançamento — a que a coluna "Data" mostra e que o
- * cabeçalho dela ordena —, não por quando ele foi digitado nem pelo
- * vencimento. Corrigir a data de uma despesa tem que levá-la para o lugar
- * dela no mês; ordenar pela digitação deixava um gasto de outubro no topo,
- * entre os de novembro, e ordenar pelo vencimento deixava a coluna visível
- * fora de ordem. Empate no mesmo dia: o mais recente primeiro.
+ * A data que manda na lista: o dia em que o dinheiro se moveu quando já se
+ * moveu, o vencimento enquanto não. Sem nenhuma das duas, a do lançamento.
+ *
+ * É a data do compromisso, não a da digitação: uma compra feita em outubro
+ * que vence em novembro pesa em novembro, e é lá que ela tem que aparecer.
+ * Mês, ordem e coluna "Data" seguem todas esta — se divergirem, a lista fica
+ * visivelmente fora de ordem.
  */
+function settlementDate(entry: FinanceEntry) {
+  return entry.effectiveDate || entry.dueDate || entry.date;
+}
+
+/** Empate no mesmo dia: o lançamento mais recente primeiro. */
 function sortEntriesByDate(a: FinanceEntry, b: FinanceEntry) {
-  const byDate = b.date.localeCompare(a.date);
+  const byDate = settlementDate(b).localeCompare(settlementDate(a));
   if (byDate !== 0) return byDate;
   return b.createdAt.localeCompare(a.createdAt);
 }
@@ -1310,6 +1316,16 @@ function formatShortDate(date: string) {
   const day = String(parsed.getDate()).padStart(2, "0");
 
   return `${day} ${shortMonthLabels[parsed.getMonth()]}`;
+}
+
+/** dd/mm/aa — como a data vem na nota, e o que cabe na linha da lista. */
+function formatCardDate(date: string) {
+  const parsed = parseLocalDate(date);
+  const day = String(parsed.getDate()).padStart(2, "0");
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const year = String(parsed.getFullYear()).slice(-2);
+
+  return `${day}/${month}/${year}`;
 }
 
 function toCurrencyNumber(value: number | string | null | undefined) {
@@ -2154,14 +2170,17 @@ function InlineFilterButton({
           <div className="mt-4 border-t border-border pt-4">
             <p className="label-caps">Filtrar pela data de</p>
             <p className="mb-2 mt-0.5 text-xs text-muted">
-              Qual das três datas o período escolhido no calendário considera.
+              Qual data o período escolhido no calendário considera. A primeira
+              usa o {settlementLabel.toLowerCase()} quando já houve, e o
+              vencimento enquanto não.
             </p>
             <div className="flex flex-wrap gap-1.5">
               {(
                 [
+                  { value: "settlement", label: `Vencimento/${settlementLabel}` },
                   { value: "date", label: "Lançamento" },
-                  { value: "dueDate", label: "Vencimento" },
-                  { value: "effectiveDate", label: settlementLabel },
+                  { value: "dueDate", label: "Só vencimento" },
+                  { value: "effectiveDate", label: `Só ${settlementLabel.toLowerCase()}` },
                 ] as const
               ).map((option) => (
                 <button
@@ -2860,14 +2879,15 @@ function TransactionList({
 
           for (const item of pagedItems) {
             if (item.kind === "group") {
-              pushMonthHeader(item.entries[0]?.date ?? "");
+              const first = item.entries[0];
+              pushMonthHeader(first ? settlementDate(first) : "");
               rows.push({ kind: "group", groupId: item.groupId, groupEntries: item.entries });
               if (expandedGroups[item.groupId] !== false) {
                 item.entries.forEach((entry) => rows.push({ kind: "entry", entry, nested: true }));
               }
               continue;
             }
-            pushMonthHeader(item.entry.date);
+            pushMonthHeader(settlementDate(item.entry));
             rows.push({ kind: "entry", entry: item.entry });
           }
 
@@ -2895,23 +2915,30 @@ function TransactionList({
             entry.kind === "automatic" && entry.serviceName
               ? entry.serviceName
               : undefined;
-          // Ao lado da data de lançamento fica a data que ainda interessa:
-          // enquanto não há pagamento é o vencimento, em vermelho; assim que o
-          // dinheiro se move, é a data em que se moveu — e o vencimento volta
-          // para a linha de baixo, onde já morava.
+          // A coluna mostra a data que manda na lista — a mesma do mês e da
+          // ordem —, dita pelo rótulo ao lado: pago, recebido ou a vencer. A
+          // data do lançamento só aparece quando é outra, senão seria o mesmo
+          // dia escrito duas vezes.
           const settled = Boolean(entry.effectiveDate);
-          const sideDate = settled ? entry.effectiveDate : entry.dueDate;
+          const rowDate = settlementDate(entry);
           const sideLabel = settled
             ? isRevenue
               ? "Recebido"
               : "Pago"
-            : overdue
-              ? "Venceu"
-              : "Vence";
+            : entry.dueDate
+              ? overdue
+                ? "Venceu"
+                : "Vence"
+              : "Lançado";
 
           const metaParts: string[] = [];
           if (settled && entry.dueDate) {
-            metaParts.push(`Vence ${formatShortDate(entry.dueDate)}`);
+            metaParts.push(`Vence ${formatCardDate(entry.dueDate)}`);
+          }
+          // A coluna de data é estreita demais para duas datas; quando a do
+          // lançamento é outra, ela desce para cá, onde sobra linha.
+          if (entry.date !== rowDate) {
+            metaParts.push(`Lançado ${formatCardDate(entry.date)}`);
           }
           const accountName = entry.accountId
             ? accountNames?.get(entry.accountId)
@@ -2939,15 +2966,15 @@ function TransactionList({
               ? [{ label: "Fornecedor", value: entry.supplierName ?? "-" }]
               : []),
             { label: "Valor", value: formatCurrency(entry.amount) },
-            { label: "Lançado em", value: formatShortDate(entry.date) },
+            { label: "Lançado em", value: formatCardDate(entry.date) },
             {
               label: "Vencimento",
-              value: entry.dueDate ? formatShortDate(entry.dueDate) : "-",
+              value: entry.dueDate ? formatCardDate(entry.dueDate) : "-",
             },
             {
               label: isRevenue ? "Recebido em" : "Pago em",
               value: entry.effectiveDate
-                ? formatShortDate(entry.effectiveDate)
+                ? formatCardDate(entry.effectiveDate)
                 : "-",
             },
             { label: "Conta", value: accountName ?? "Não classificado" },
@@ -2995,17 +3022,21 @@ function TransactionList({
                   ) : (
                     <CaretRight size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
                   )}
-                  {formatShortDate(entry.date)}
-                </span>
-                {sideDate && (
-                  <span
-                    className={`truncate ${
-                      settled ? "text-foreground/70" : "text-danger"
-                    }`}
-                  >
-                    {sideLabel} {formatShortDate(sideDate)}
+                  <span className={!settled && overdue ? "text-danger" : "text-foreground"}>
+                    {formatCardDate(rowDate)}
                   </span>
-                )}
+                </span>
+                <span
+                  className={`truncate ${
+                    settled
+                      ? "text-foreground/70"
+                      : overdue
+                        ? "text-danger"
+                        : "text-muted"
+                  }`}
+                >
+                  {sideLabel}
+                </span>
               </div>
               <div className="min-w-0">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -3306,7 +3337,9 @@ function TransactionList({
                     ) : (
                       <CaretRight size={12} weight={FINANCE_ICON_WEIGHT} aria-hidden />
                     )}
-                    {formatShortDate(row.groupEntries[0]?.date ?? "")}
+                    {row.groupEntries[0]
+                      ? formatCardDate(settlementDate(row.groupEntries[0]))
+                      : ""}
                   </div>
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-foreground">
