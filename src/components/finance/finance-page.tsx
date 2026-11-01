@@ -27,6 +27,7 @@ import {
   Package,
   CircleHalf,
   Funnel,
+  MagnifyingGlass,
   Note,
   PencilSimple,
   Plus,
@@ -38,6 +39,7 @@ import {
   Wallet,
   WarningCircle,
   Wrench,
+  X,
   XCircle,
 } from "@phosphor-icons/react";
 import {
@@ -684,7 +686,9 @@ function parseFilterAmount(value: string) {
 function countActiveFinanceFilters(filters: FinanceFilterState) {
   return [
     filters.granularity !== "all",
-    Boolean(filters.search.trim()),
+    // A busca não entra na conta: ela mora fora do funil, à vista e com o
+    // próprio X para limpar.
+
     filters.status !== categoryFilterAll,
     filters.origin !== categoryFilterAll,
     filters.category !== categoryFilterAll,
@@ -1869,6 +1873,50 @@ function DateRangeFilter({
   );
 }
 
+/**
+ * A busca saiu de dentro do funil e ficou no topo da lista, à esquerda: é o
+ * filtro que se usa o tempo todo, e escondê-lo atrás do funil custava dois
+ * cliques para cada tentativa. Mesmo desenho da busca de Produtos.
+ */
+function FinanceSearchBox({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    // Estreito: a busca fica com a linha inteira e o período desce para a
+    // debaixo — dividir os dois numa tela de celular não deixava espaço para
+    // digitar. Largo: os dois na mesma linha, busca à esquerda.
+    <div className="relative min-w-0 basis-full sm:w-64 sm:flex-none sm:basis-auto md:w-80">
+      <MagnifyingGlass
+        size={15}
+        weight={FINANCE_ICON_WEIGHT}
+        className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
+        aria-hidden
+      />
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="Buscar lançamento…"
+        aria-label="Buscar descrição, cliente, serviço, fornecedor ou observação"
+        className="h-9 w-full rounded-lg border border-border/80 bg-card pl-9 pr-8 text-sm text-foreground placeholder:text-muted/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-muted transition-colors hover:text-foreground"
+          aria-label="Limpar busca"
+        >
+          <X size={13} weight={FINANCE_ICON_WEIGHT} aria-hidden />
+        </button>
+      )}
+    </div>
+  );
+}
+
 function InlineFilterButton({
   value,
   categoryOptions,
@@ -2008,14 +2056,7 @@ function InlineFilterButton({
               "-6px 8px 24px rgba(15, 23, 42, 0.1), 0 4px 12px rgba(15, 23, 42, 0.06)",
           }}
         >
-          <Input
-            label="Buscar"
-            value={value.search}
-            onChange={(event) => onChange({ search: event.target.value })}
-            placeholder="Descrição, cliente, serviço, fornecedor ou observação"
-          />
-
-          <div className="mt-4 grid grid-cols-1 gap-4 @md:grid-cols-2 @2xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 @md:grid-cols-2 @2xl:grid-cols-3">
             <Dropdown
               label="Status"
               value={value.status}
@@ -2430,6 +2471,8 @@ function TransactionList({
   onEditGroup,
   onDeleteGroup,
   filter,
+  searchValue,
+  onSearchChange,
   groupByMonth = false,
   groupInstallments = false,
   editingId,
@@ -2449,6 +2492,8 @@ function TransactionList({
   onEditGroup?: (entries: FinanceEntry[]) => void;
   onDeleteGroup?: (entries: FinanceEntry[]) => void;
   filter?: React.ReactNode;
+  searchValue?: string;
+  onSearchChange?: (value: string) => void;
   groupByMonth?: boolean;
   groupInstallments?: boolean;
   editingId?: string | null;
@@ -2609,7 +2654,16 @@ function TransactionList({
   if (entries.length === 0) {
     return (
       <div className="w-full">
-        {filter && <div className="mb-2 flex justify-end px-3">{filter}</div>}
+        {(filter || onSearchChange) && (
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-3">
+            {onSearchChange ? (
+              <FinanceSearchBox value={searchValue ?? ""} onChange={onSearchChange} />
+            ) : (
+              <span />
+            )}
+            {filter && <div className="flex items-center gap-2">{filter}</div>}
+          </div>
+        )}
         <EmptyState
           icon={<ClipboardList className="h-5 w-5" />}
           title={emptyMessage}
@@ -2621,9 +2675,16 @@ function TransactionList({
 
   return (
     <div className="w-full">
-      {filter && (
-        <div className="mb-2 flex items-center justify-end gap-2 px-3">{filter}</div>
-      )}
+      {(filter || onSearchChange) && (
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-3">
+            {onSearchChange ? (
+              <FinanceSearchBox value={searchValue ?? ""} onChange={onSearchChange} />
+            ) : (
+              <span />
+            )}
+            {filter && <div className="flex items-center gap-2">{filter}</div>}
+          </div>
+        )}
       <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
         {(
           [
@@ -7432,6 +7493,8 @@ export function FinancePage() {
                 accountNames={accountNames}
                 emptyMessage="Nenhuma receita encontrada."
                 groupByMonth={revenueFilters.granularity !== "all"}
+                searchValue={revenueFilters.search}
+                onSearchChange={(search) => setRevenueFilters((prev) => ({ ...prev, search }))}
                 editingId={editingRevenueId}
                 editForm={
                   editingRevenueId ? (
@@ -7479,12 +7542,14 @@ export function FinancePage() {
                       setRevenueFilters((prev) => ({ ...prev, ...patch }))
                     }
                     onClear={() =>
-                      setRevenueFilters(
-                        createFinanceFilterState(
+                      setRevenueFilters((prev) => ({
+                        ...createFinanceFilterState(
                           dateKey(startOfMonth(today)),
                           dateKey(today)
-                        )
-                      )
+                        ),
+                        // A busca mora fora do card; limpar o card não a apaga.
+                        search: prev.search,
+                      }))
                     }
                     ariaLabel="Filtros de receitas"
                   />
@@ -7587,6 +7652,8 @@ export function FinancePage() {
                   setDeleteConfirm({ type: "wholeInstallment", entries })
                 }
                 groupInstallments
+                searchValue={expenseFilters.search}
+                onSearchChange={(search) => setExpenseFilters((prev) => ({ ...prev, search }))}
                 filter={
                   <>
                   <DateRangeFilter
@@ -7610,12 +7677,14 @@ export function FinancePage() {
                       setExpenseFilters((prev) => ({ ...prev, ...patch }))
                     }
                     onClear={() =>
-                      setExpenseFilters(
-                        createFinanceFilterState(
+                      setExpenseFilters((prev) => ({
+                        ...createFinanceFilterState(
                           dateKey(startOfMonth(today)),
                           dateKey(today)
-                        )
-                      )
+                        ),
+                        // A busca mora fora do card; limpar o card não a apaga.
+                        search: prev.search,
+                      }))
                     }
                     ariaLabel="Filtros de despesas"
                   />
