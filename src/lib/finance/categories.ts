@@ -53,6 +53,46 @@ export function matchCategoryId(
   );
 }
 
+/**
+ * `financial_transactions.category` é uma cópia do nome, não uma FK: os filtros
+ * e o DRE agrupam por essa coluna. Sem carregar o rename até lá, o nome antigo
+ * continua aparecendo ao lado do novo como se fossem duas categorias.
+ */
+async function renameTransactionCategory(
+  supabase: SupabaseClient,
+  workshopId: string,
+  input: {
+    categoryId: string;
+    type: TransactionType;
+    previousName: string;
+    nextName: string;
+  }
+) {
+  const linked = await supabase
+    .from("financial_transactions")
+    .update({ category: input.nextName })
+    .eq("workshop_id", workshopId)
+    .eq("category_id", input.categoryId);
+
+  // Lançamentos de antes da 031 têm só o texto, sem `category_id`. O tipo
+  // separa uma receita e uma despesa que se chamem igual.
+  const legacy = await supabase
+    .from("financial_transactions")
+    .update({ category: input.nextName })
+    .eq("workshop_id", workshopId)
+    .is("category_id", null)
+    .eq("type", input.type)
+    .eq("category", input.previousName);
+
+  if (linked.error || legacy.error) {
+    throw new Error(
+      linked.error?.message ??
+        legacy.error?.message ??
+        "Não foi possível renomear a categoria nos lançamentos."
+    );
+  }
+}
+
 export async function saveFinancialCategory(
   supabase: SupabaseClient,
   workshopId: string,
@@ -62,7 +102,7 @@ export async function saveFinancialCategory(
     type: TransactionType;
     active: boolean;
   }
-) {
+): Promise<{ category: FinancialCategory; renamedFrom: string | null }> {
   const payload = {
     workshop_id: workshopId,
     name: input.name.trim(),
@@ -72,6 +112,33 @@ export async function saveFinancialCategory(
   };
 
   if (input.id) {
+    // Lido antes do update: é o nome que os lançamentos ainda carregam.
+    const previous = await supabase
+      .from("financial_categories")
+      .select("name")
+      .eq("id", input.id)
+      .eq("workshop_id", workshopId)
+      .maybeSingle();
+    const previousName = previous.error
+      ? null
+      : ((previous.data?.name as string | null | undefined) ?? null);
+
+    const renamedFrom =
+      previousName && previousName !== payload.name ? previousName : null;
+
+    // Os lançamentos primeiro, de propósito: se este passo falhar, nada mudou
+    // e tentar de novo começa do mesmo lugar. Na ordem inversa, a categoria já
+    // teria o nome novo e o nome antigo nos lançamentos ficaria sem quem o
+    // procurasse.
+    if (renamedFrom) {
+      await renameTransactionCategory(supabase, workshopId, {
+        categoryId: input.id,
+        type: input.type,
+        previousName: renamedFrom,
+        nextName: payload.name,
+      });
+    }
+
     const { data, error } = await supabase
       .from("financial_categories")
       .update(payload)
@@ -82,7 +149,8 @@ export async function saveFinancialCategory(
     if (error || !data) {
       throw new Error(error?.message ?? "Não foi possível salvar a categoria.");
     }
-    return normalizeCategory(data as Record<string, unknown>);
+
+    return { category: normalizeCategory(data as Record<string, unknown>), renamedFrom };
   }
 
   const { data, error } = await supabase
@@ -93,5 +161,5 @@ export async function saveFinancialCategory(
   if (error || !data) {
     throw new Error(error?.message ?? "Não foi possível criar a categoria.");
   }
-  return normalizeCategory(data as Record<string, unknown>);
+  return { category: normalizeCategory(data as Record<string, unknown>), renamedFrom: null };
 }

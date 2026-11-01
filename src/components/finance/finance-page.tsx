@@ -6872,7 +6872,7 @@ export function FinancePage() {
     if (!workshopId) return "Oficina não encontrada.";
 
     try {
-      const saved = await saveFinancialCategory(supabase, workshopId, {
+      const { category: saved } = await saveFinancialCategory(supabase, workshopId, {
         name: trimmed,
         type,
         active: true,
@@ -6900,11 +6900,28 @@ export function FinancePage() {
     active: boolean;
   }) {
     if (!workshopId) throw new Error("Oficina não encontrada.");
-    const saved = await saveFinancialCategory(supabase, workshopId, input);
+    const { category: saved, renamedFrom } = await saveFinancialCategory(
+      supabase,
+      workshopId,
+      input
+    );
     setCategories((prev) => {
       const next = [...prev.filter((category) => category.id !== saved.id), saved];
       return next.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
     });
+    if (renamedFrom) {
+      // O banco já carregou o rename para `financial_transactions.category`;
+      // aqui a lista em memória acompanha, senão o filtro e o DRE continuam
+      // mostrando o nome antigo até o próximo carregamento.
+      setTransactions((prev) =>
+        prev.map((row) => {
+          const linked = row.category_id === saved.id;
+          const legacy =
+            !row.category_id && row.type === saved.type && row.category === renamedFrom;
+          return linked || legacy ? { ...row, category: saved.name } : row;
+        })
+      );
+    }
   }
 
   async function handleSubmitTransfer(input: {
