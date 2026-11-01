@@ -4264,25 +4264,34 @@ function TransactionFormCard({
               }}
             />
           </div>
-          {/* Fecha a seção: as duas parcelas do ajuste na mesma ordem dos
-              campos acima, e o que vai para o banco à direita. */}
-          <p className="mt-4 flex flex-wrap items-baseline justify-between gap-2 border-t border-border pt-3 text-sm">
+          {/* Fecha a seção. A conta fica à esquerda, na ordem dos campos
+              acima, e a palavra "Total" encostada no número que ela nomeia:
+              com o abatimento logo depois dela, "Total −R$ 100,45" se lia
+              como se o total fosse negativo. */}
+          <p className="mt-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-t border-border pt-3 text-sm">
             <span className="text-muted">
-              Total
-              {surchargeMoney > 0 && (
-                <span className="ml-2 text-xs font-semibold text-foreground">
-                  +{formatCurrency(surchargeMoney)}
-                </span>
-              )}
-              {discountMoney > 0 && (
-                <span className="ml-2 text-xs font-semibold text-danger">
-                  −{formatCurrency(discountMoney)}
-                </span>
+              {(discountMoney > 0 || surchargeMoney > 0) && (
+                <>
+                  {formatCurrency(grossValue)}
+                  {surchargeMoney > 0 && (
+                    <span className="ml-1.5 font-semibold text-foreground">
+                      + {formatCurrency(surchargeMoney)}
+                    </span>
+                  )}
+                  {discountMoney > 0 && (
+                    <span className="ml-1.5 font-semibold text-danger">
+                      − {formatCurrency(discountMoney)}
+                    </span>
+                  )}
+                </>
               )}
             </span>
-            <strong className="text-base font-bold text-foreground">
-              {formatCurrency(amountValue)}
-            </strong>
+            <span className="flex items-baseline gap-2">
+              <span className="text-muted">Total</span>
+              <strong className="text-base font-bold text-foreground">
+                {formatCurrency(amountValue)}
+              </strong>
+            </span>
           </p>
         </FormSection>
       )}
