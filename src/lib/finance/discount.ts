@@ -1,10 +1,13 @@
 /**
- * Desconto do lançamento.
+ * Desconto e acréscimo do lançamento.
  *
  * O que vai para o banco é o líquido: é ele que saiu da conta, e é o que
- * relatório, fluxo de caixa e saldo precisam somar. O bruto e o desconto
- * ficam guardados ao lado para a nota continuar contando a história certa
- * quando você reabrir o lançamento.
+ * relatório, fluxo de caixa e saldo precisam somar. O bruto, o desconto e o
+ * acréscimo ficam guardados ao lado para a nota continuar contando a história
+ * certa quando você reabrir o lançamento.
+ *
+ * A ordem é desconto sobre o bruto, acréscimo depois: desconto de 10% numa
+ * nota de 100 com 20 de frete é 10, não 12.
  */
 
 export type DiscountType = "fixed" | "percent";
@@ -37,8 +40,22 @@ export function discountAmount(gross: number, type: DiscountType, value: number)
   return round(Math.min(value, gross));
 }
 
-export function netFromGross(gross: number, type: DiscountType, value: number) {
-  return round(gross - discountAmount(gross, type, value));
+/**
+ * Acréscimo é sempre em reais — juros, frete, taxa. Não tem tipo como o
+ * desconto porque não existe "10% de frete".
+ */
+export function surchargeAmount(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return round(value);
+}
+
+export function netFromGross(
+  gross: number,
+  type: DiscountType,
+  value: number,
+  surcharge = 0
+) {
+  return round(gross - discountAmount(gross, type, value) + surchargeAmount(surcharge));
 }
 
 /**
@@ -62,13 +79,22 @@ export function normalizeDiscountValue(
  * O caminho de volta, para quem reabre o lançamento: o banco guarda o
  * líquido, e o bruto é o que havia antes do desconto.
  */
-export function grossFromNet(net: number, type: DiscountType, value: number) {
+export function grossFromNet(
+  net: number,
+  type: DiscountType,
+  value: number,
+  surcharge = 0
+) {
   if (!Number.isFinite(net) || net < 0) return 0;
+  // O acréscimo entrou por último, então sai primeiro na volta.
+  const beforeSurcharge = Math.max(0, round(net - surchargeAmount(surcharge)));
   if (type === "fixed") {
-    return round(net + (Number.isFinite(value) && value > 0 ? value : 0));
+    return round(
+      beforeSurcharge + (Number.isFinite(value) && value > 0 ? value : 0)
+    );
   }
   const percent = clampPercent(value);
   // 100% de desconto zera a nota e apaga o bruto junto: não há o que inverter.
-  if (percent >= 100) return round(net);
-  return round(net / (1 - percent / 100));
+  if (percent >= 100) return round(beforeSurcharge);
+  return round(beforeSurcharge / (1 - percent / 100));
 }

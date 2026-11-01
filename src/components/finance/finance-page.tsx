@@ -89,6 +89,7 @@ import {
   grossFromNet,
   isDiscountType,
   netFromGross,
+  surchargeAmount,
   normalizeDiscountValue,
   type DiscountType,
 } from "@/lib/finance/discount";
@@ -173,6 +174,8 @@ interface FinancialTransaction {
   /** Desconto da nota. Nulo enquanto a 050 não rodar, ou sem desconto. */
   discount_type: string | null;
   discount_value: number | null;
+  /** Acréscimo em reais. Nulo enquanto a 051 não rodar, ou sem acréscimo. */
+  surcharge_value: number | null;
   created_at: string;
 }
 
@@ -427,6 +430,7 @@ interface FinanceEntry {
   /** Desconto aplicado. `amount` já vem abatido. */
   discountType?: DiscountType;
   discountValue?: number;
+  surchargeValue?: number;
 }
 
 type FinanceDeleteConfirm =
@@ -498,6 +502,7 @@ interface TransactionForm {
   /** Desconto da nota. `amount` é o bruto; o que se paga é o líquido. */
   discountType: DiscountType;
   discountValue: string;
+  surchargeValue: string;
 }
 
 interface InstallmentDraft {
@@ -825,6 +830,7 @@ const initialRevenueForm: TransactionForm = {
   installments: [],
   discountType: "fixed",
   discountValue: "",
+  surchargeValue: "",
   invoiceNumber: "",
   items: [],
   notes: "",
@@ -846,6 +852,7 @@ const initialExpenseForm: TransactionForm = {
   installments: [],
   discountType: "fixed",
   discountValue: "",
+  surchargeValue: "",
   invoiceNumber: "",
   items: [],
   notes: "",
@@ -1331,6 +1338,10 @@ function formatSupplierSaveError(message: string) {
     return "O desconto ainda não foi instalado no banco. Aplique a migration 050 no Supabase, ou salve o lançamento sem desconto.";
   }
 
+  if (normalized.includes("surcharge_value")) {
+    return "Os acréscimos ainda não foram instalados no banco. Aplique a migration 051 no Supabase, ou salve o lançamento sem acréscimo.";
+  }
+
   if (normalized.includes("supplier_id") && normalized.includes("foreign key")) {
     return "Fornecedor inválido. Cadastre-o na aba Fornecedores em Produtos antes de vincular à despesa.";
   }
@@ -1338,8 +1349,10 @@ function formatSupplierSaveError(message: string) {
   return message;
 }
 
-// A 050 pode não ter rodado ainda: a cascata abaixo tenta a coluna nova e
-// cai para a lista anterior sem quebrar a página.
+// A 050 e a 051 podem não ter rodado ainda: a cascata abaixo tenta a coluna
+// nova e cai para a lista anterior sem quebrar a página.
+const TRANSACTION_SELECT_PHASE5 =
+  "id, type, description, amount, category, category_id, account_id, service_order_id, supplier_id, product_id, source, payment_status, notes, items, invoice_number, transaction_date, effective_date, due_date, installment_group_id, installment_number, installment_total, discount_type, discount_value, surcharge_value, created_at";
 const TRANSACTION_SELECT_PHASE4 =
   "id, type, description, amount, category, category_id, account_id, service_order_id, supplier_id, product_id, source, payment_status, notes, items, invoice_number, transaction_date, effective_date, due_date, installment_group_id, installment_number, installment_total, discount_type, discount_value, created_at";
 const TRANSACTION_SELECT_PHASE3 =
@@ -1402,6 +1415,10 @@ function normalizeTransactionRow(
       row.discount_value === null || row.discount_value === undefined
         ? null
         : Number(row.discount_value) || 0,
+    surcharge_value:
+      row.surcharge_value === null || row.surcharge_value === undefined
+        ? null
+        : Number(row.surcharge_value) || 0,
     created_at: String(row.created_at ?? row.transaction_date),
   };
 }
@@ -1432,6 +1449,7 @@ async function loadFinancialTransactions(
   workshopId: string
 ) {
   const attempts = [
+    TRANSACTION_SELECT_PHASE5,
     TRANSACTION_SELECT_PHASE4,
     TRANSACTION_SELECT_PHASE3,
     TRANSACTION_SELECT_PHASE2,
@@ -1621,6 +1639,7 @@ async function fetchFinancialTransactionById(
   transactionId: string
 ) {
   const attempts = [
+    TRANSACTION_SELECT_PHASE5,
     TRANSACTION_SELECT_PHASE4,
     TRANSACTION_SELECT_PHASE3,
     TRANSACTION_SELECT_PHASE2,
@@ -3846,9 +3865,15 @@ function TransactionFormCard({
   const grossValue = parseFilterAmount(form.amount) ?? 0;
   const discountTyped = parseFilterAmount(form.discountValue) ?? 0;
   const discountMoney = discountAmount(grossValue, form.discountType, discountTyped);
+  const surchargeMoney = surchargeAmount(parseFilterAmount(form.surchargeValue) ?? 0);
   // Daqui para baixo, "amount" é o que realmente se paga: é ele que vira
   // parcela, que fecha com as parcelas e que vai para o banco.
-  const amountValue = netFromGross(grossValue, form.discountType, discountTyped);
+  const amountValue = netFromGross(
+    grossValue,
+    form.discountType,
+    discountTyped,
+    surchargeMoney
+  );
   // Centavo de diferença não é erro: o usuário mexeu numa parcela e as contas
   // pararam de fechar com o valor total.
   const installmentsMismatch =
@@ -3889,6 +3914,7 @@ function TransactionFormCard({
     dueDate?: string;
     discountType?: DiscountType;
     discountValue?: string;
+    surchargeValue?: string;
   }): Partial<TransactionForm> {
     if (!form.installmentsEnabled) return {};
     // Parcela-se o que se paga, não o de tabela.
@@ -3896,7 +3922,8 @@ function TransactionFormCard({
     const total = netFromGross(
       gross,
       patch.discountType ?? form.discountType,
-      parseFilterAmount(patch.discountValue ?? form.discountValue) ?? 0
+      parseFilterAmount(patch.discountValue ?? form.discountValue) ?? 0,
+      parseFilterAmount(patch.surchargeValue ?? form.surchargeValue) ?? 0
     );
     const count = Number(patch.installmentCount ?? form.installmentCount) || 0;
     if (count < 1) return {};
@@ -4186,6 +4213,25 @@ function TransactionFormCard({
             />
           </div>
           <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Input
+              label="Acréscimos"
+              prefix="R$"
+              inputMode="decimal"
+              value={form.surchargeValue}
+              placeholder="0,00"
+              onChange={(event) => {
+                const surchargeValue = event.target.value;
+                onChange({
+                  surchargeValue,
+                  ...regenerate({ surchargeValue }),
+                });
+              }}
+            />
+            <p className="self-center text-xs text-muted md:pt-5">
+              Juros, frete ou taxa. O desconto abaixo não incide sobre ele.
+            </p>
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
             <Dropdown
               label="Tipo de desconto"
               value={form.discountType}
@@ -4218,19 +4264,26 @@ function TransactionFormCard({
               }}
             />
           </div>
-          {discountMoney > 0 && (
-            <p className="mt-3 flex flex-wrap items-baseline justify-between gap-2 border-t border-border pt-3 text-sm">
-              <span className="text-muted">
-                Valor pós descontos
+          {/* Fecha a seção: as duas parcelas do ajuste na mesma ordem dos
+              campos acima, e o que vai para o banco à direita. */}
+          <p className="mt-4 flex flex-wrap items-baseline justify-between gap-2 border-t border-border pt-3 text-sm">
+            <span className="text-muted">
+              Total
+              {surchargeMoney > 0 && (
+                <span className="ml-2 text-xs font-semibold text-foreground">
+                  +{formatCurrency(surchargeMoney)}
+                </span>
+              )}
+              {discountMoney > 0 && (
                 <span className="ml-2 text-xs font-semibold text-danger">
                   −{formatCurrency(discountMoney)}
                 </span>
-              </span>
-              <strong className="text-base font-bold text-foreground">
-                {formatCurrency(amountValue)}
-              </strong>
-            </p>
-          )}
+              )}
+            </span>
+            <strong className="text-base font-bold text-foreground">
+              {formatCurrency(amountValue)}
+            </strong>
+          </p>
         </FormSection>
       )}
 
@@ -5020,6 +5073,7 @@ export function FinancePage() {
           ? transaction.discount_type
           : undefined,
         discountValue: transaction.discount_value ?? undefined,
+        surchargeValue: transaction.surcharge_value ?? undefined,
       };
     });
   }, [ordersById, suppliersById, transactions]);
@@ -5636,12 +5690,31 @@ export function FinancePage() {
       form.discountType,
       discountTyped
     );
-    // O banco guarda o que saiu da conta. O bruto se recompõe pelo desconto.
-    const amount = netFromGross(gross, form.discountType, discountStored);
-    const hadDiscount = transactionId
+
+    let surchargeTyped: number;
+    try {
+      surchargeTyped = form.surchargeValue.trim()
+        ? parseMoney(form.surchargeValue, { min: 0 })
+        : 0;
+    } catch {
+      setFormError("Informe um acréscimo válido.");
+      return;
+    }
+    const surchargeStored = surchargeAmount(surchargeTyped);
+
+    // O banco guarda o que saiu da conta. O bruto se recompõe pelo desconto e
+    // pelo acréscimo.
+    const amount = netFromGross(
+      gross,
+      form.discountType,
+      discountStored,
+      surchargeStored
+    );
+    const previous = transactionId
       ? transactionEntries.find((entry) => entry.id === transactionId)
-          ?.discountType !== undefined
-      : false;
+      : undefined;
+    const hadDiscount = previous?.discountType !== undefined;
+    const hadSurcharge = previous?.surchargeValue !== undefined;
 
     const supplierId =
       type === "despesa" && form.supplierId !== categoryFilterAll
@@ -5683,6 +5756,12 @@ export function FinancePage() {
         ? { discount_type: form.discountType, discount_value: discountStored }
         : hadDiscount
           ? { discount_type: null, discount_value: null }
+          : {}),
+      // Mesma regra do desconto, agora para a 051.
+      ...(surchargeStored > 0
+        ? { surcharge_value: surchargeStored }
+        : hadSurcharge
+          ? { surcharge_value: null }
           : {}),
     };
 
@@ -5939,26 +6018,29 @@ export function FinancePage() {
 
   /**
    * O formulário mostra o bruto, porque é o que estava na nota. O banco só
-   * guarda o líquido, então o bruto é recomposto a partir do desconto.
+   * guarda o líquido, então o bruto é recomposto tirando o acréscimo e
+   * devolvendo o desconto.
    */
-  function formDiscountFields(entry: FinanceEntry) {
+  function formValueFields(entry: FinanceEntry) {
     const discountType = entry.discountType ?? "fixed";
     const discountValue = entry.discountValue ?? 0;
+    const surchargeValue = entry.surchargeValue ?? 0;
     return {
       amount: formatMoneyInput(
-        discountValue > 0
-          ? grossFromNet(entry.amount, discountType, discountValue)
+        discountValue > 0 || surchargeValue > 0
+          ? grossFromNet(entry.amount, discountType, discountValue, surchargeValue)
           : entry.amount
       ),
       discountType,
       discountValue: discountValue > 0 ? formatMoneyInput(discountValue) : "",
+      surchargeValue: surchargeValue > 0 ? formatMoneyInput(surchargeValue) : "",
     };
   }
 
   function handleEditRevenue(entry: FinanceEntry) {
     setRevenueForm({
       description: entry.description,
-      ...formDiscountFields(entry),
+      ...formValueFields(entry),
       date: entry.date,
       effectiveDate: entry.effectiveDate || entry.date,
       dueDate: entry.dueDate || entry.date,
@@ -6164,7 +6246,7 @@ export function FinancePage() {
   function handleEditExpense(entry: FinanceEntry) {
     setExpenseForm({
       description: entry.description,
-      ...formDiscountFields(entry),
+      ...formValueFields(entry),
       date: entry.date,
       effectiveDate: entry.effectiveDate || entry.date,
       dueDate: entry.dueDate || entry.date,
