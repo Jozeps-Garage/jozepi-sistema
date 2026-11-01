@@ -257,7 +257,14 @@ export function TransactionSheet({
             label="Data"
             type="date"
             value={date}
-            onChange={(event) => setDate(event.target.value)}
+            onChange={(event) => {
+              const next = event.target.value;
+              // Enquanto a data ao lado continua colada nesta, corrigir aqui
+              // leva as duas: uma despesa de outubro lançada hoje não pode
+              // vencer — nem ser paga — em novembro.
+              if (settleDate === date) setSettleDate(next);
+              setDate(next);
+            }}
           />
         </div>
         <div className="grid grid-cols-2 gap-3">

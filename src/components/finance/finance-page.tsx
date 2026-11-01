@@ -3851,16 +3851,25 @@ function TransactionFormCard({
             label="Data do lançamento"
             type="date"
             value={form.date}
-            onChange={(event) =>
+            onChange={(event) => {
+              const next = event.target.value;
+              // As três datas nascem iguais. Enquanto pagamento e vencimento
+              // continuam colados na data do lançamento, corrigir o lançamento
+              // leva os dois junto — senão uma despesa de outubro lançada hoje
+              // vence, é paga e conta em novembro. Quem mexeu numa delas à mão
+              // fica com a sua.
+              const stillLinked = (value: string) => !value || value === form.date;
+              const dueDate = stillLinked(form.dueDate) ? next : form.dueDate;
               onChange({
-                date: event.target.value,
+                date: next,
                 effectiveDate:
-                  form.paymentStatus === "pago" && !form.effectiveDate
-                    ? event.target.value
+                  form.paymentStatus === "pago" && stillLinked(form.effectiveDate)
+                    ? next
                     : form.effectiveDate,
-                dueDate: form.dueDate || event.target.value,
-              })
-            }
+                dueDate,
+                ...regenerate({ dueDate }),
+              });
+            }}
           />
           {supplierOptions && (
             <Dropdown
