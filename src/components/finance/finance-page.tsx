@@ -753,23 +753,43 @@ function matchesFinanceFilter(
   const max = parseFilterAmount(filters.maxAmount);
   if (max !== null && entry.amount > max) return false;
 
-  const term = filters.search.trim().toLowerCase();
-  if (term) {
-    const haystack = [
+  const term = normalizeForSearch(filters.search.trim());
+  if (term && !financeSearchHaystack(entry).includes(term)) return false;
+
+  return true;
+}
+
+/**
+ * O "R$" do Intl vem com espaço não-separável, que ninguém digita, e o tamanho
+ * da letra não deveria decidir se acha ou não.
+ */
+function normalizeForSearch(value: string) {
+  return value.toLowerCase().replace(/\u00a0/g, " ");
+}
+
+/**
+ * Tudo que a barra de busca varre: o que a linha mostra e o que se guarda de
+ * cabeça. O valor entra em três grafias — 1140, 1140.00 e R$ 1.140,00 — porque
+ * cada um digita de um jeito, e procurar "1.140" não pode falhar só porque o
+ * número está guardado sem o ponto.
+ */
+function financeSearchHaystack(entry: FinanceEntry) {
+  return normalizeForSearch(
+    [
       entry.description,
       entry.clientName,
       entry.serviceName,
       entry.supplierName,
       entry.category,
       entry.notes,
+      entry.invoiceNumber,
+      String(entry.amount),
+      entry.amount.toFixed(2),
+      formatCurrency(entry.amount),
     ]
       .filter(Boolean)
       .join(" ")
-      .toLowerCase();
-    if (!haystack.includes(term)) return false;
-  }
-
-  return true;
+  );
 }
 const FINANCE_ICON_WEIGHT = "light" as const;
 const DONUT_COLORS = ["#f97316", "#3b82f6", "#22c55e", "#6b7280", "#ef4444"];
@@ -1900,7 +1920,8 @@ function FinanceSearchBox({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder="Buscar lançamento…"
-        aria-label="Buscar descrição, cliente, serviço, fornecedor ou observação"
+        aria-label="Buscar por descrição, cliente, serviço, fornecedor, categoria, observação, nota fiscal ou valor"
+        title="Descrição, cliente, serviço, fornecedor, categoria, observação, nota fiscal ou valor"
         className="h-9 w-full rounded-lg border border-border/80 bg-card pl-9 pr-8 text-sm text-foreground placeholder:text-muted/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
       />
       {value && (
