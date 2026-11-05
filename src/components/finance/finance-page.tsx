@@ -921,6 +921,14 @@ function isFixedCostSource(source: string | null | undefined) {
   return Boolean(source?.startsWith("fixed_cost:"));
 }
 
+/** `fixed_cost:<id>:<ano-mês>` — o custo que lançou, e o mês que ele lançou. */
+function fixedCostSourceParts(source: string | null | undefined) {
+  if (!isFixedCostSource(source)) return null;
+  const [, costId, yearMonth] = (source as string).split(":");
+  if (!costId || !yearMonth) return null;
+  return { costId, yearMonth };
+}
+
 function getFixedCostTransactionsBySource(transactions: FinancialTransaction[]) {
   return new Map(
     transactions
@@ -6853,6 +6861,41 @@ export function FinancePage() {
     }
   }
 
+  /**
+   * O custo fixo que vai lançar esta despesa de novo se ela for apagada —
+   * e só ele. Apagar um lançamento desses sozinho não resolve nada: a
+   * próxima carga vê o mês sem lançamento e refaz. Custo apagado, desativado
+   * ou estimado não refaz, e aí não há o que avisar.
+   */
+  function relaunchingFixedCost(entry: FinanceEntry) {
+    const parts = fixedCostSourceParts(entry.source);
+    if (!parts) return null;
+
+    const cost = fixedCosts.find((item) => item.id === parts.costId);
+    // As mesmas condições de syncFixedCostExpenses, na mesma ordem.
+    if (!cost || !cost.active || cost.kind !== "real" || !cost.payment_day) {
+      return null;
+    }
+
+    // A carga só refaz os doze meses mais recentes; o que é mais antigo fica
+    // apagado mesmo, e prometer o contrário seria mentira.
+    const oldest = new Date(today.getFullYear(), today.getMonth() - 11, 1);
+    if (parts.yearMonth < yearMonthKey(oldest.getFullYear(), oldest.getMonth())) {
+      return null;
+    }
+
+    return cost;
+  }
+
+  /** Desativar antes de apagar: na ordem inversa a carga já teria refeito. */
+  async function deactivateFixedCostAndDeleteEntry(
+    cost: FixedCost,
+    entry: FinanceEntry
+  ) {
+    await handleToggleFixedCost(cost);
+    await executeDeleteTransaction(entry, false);
+  }
+
   function handleDeleteFixedCost(cost: FixedCost) {
     requestDeleteFixedCost(cost);
   }
@@ -8331,12 +8374,29 @@ export function FinancePage() {
         title="Excluir lançamento"
         description={
           deleteConfirm?.type === "transaction"
-            ? deleteConfirm.entry.kind === "automatic"
-              ? "Deseja apagar esta receita gerada pela Agenda?"
-              : "Deseja apagar este lançamento?"
+            ? (() => {
+                const cost = relaunchingFixedCost(deleteConfirm.entry);
+                if (cost) {
+                  return `Este lançamento vem do custo fixo "${cost.name}", que continua ativo: apagar só ele não adianta, porque a próxima vez que a página carregar ele lança de novo. Desativar o custo para de lançar daqui para frente, e o que já foi pago continua no histórico.`;
+                }
+                return deleteConfirm.entry.kind === "automatic"
+                  ? "Deseja apagar esta receita gerada pela Agenda?"
+                  : "Deseja apagar este lançamento?";
+              })()
             : ""
         }
-        confirmLabel="Excluir lançamento"
+        confirmLabel={
+          deleteConfirm?.type === "transaction" &&
+          relaunchingFixedCost(deleteConfirm.entry)
+            ? "Excluir mesmo assim"
+            : "Excluir lançamento"
+        }
+        extraLabel={
+          deleteConfirm?.type === "transaction" &&
+          relaunchingFixedCost(deleteConfirm.entry)
+            ? "Desativar o custo e excluir"
+            : undefined
+        }
         loading={deletingFinanceItem}
         onCancel={() => {
           if (!deletingFinanceItem) setDeleteConfirm(null);
@@ -8351,6 +8411,15 @@ export function FinancePage() {
           }
 
           void executeDeleteTransaction(entry, false);
+        }}
+        onExtra={() => {
+          if (deleteConfirm?.type !== "transaction") return;
+
+          const entry = deleteConfirm.entry;
+          const cost = relaunchingFixedCost(entry);
+          if (!cost) return;
+
+          void deactivateFixedCostAndDeleteEntry(cost, entry);
         }}
       />
 
