@@ -1302,8 +1302,24 @@ function getOrderDate(order: CompletedOrder) {
   return (order.completed_at ?? order.opened_at ?? "").slice(0, 10);
 }
 
-function sumEntries(entries: FinanceEntry[]) {
-  return entries.reduce((total, entry) => total + entry.amount, 0);
+/**
+ * O que entrou ou saiu de verdade no período, pela data em que se moveu — a
+ * mesma conta dos cards "Receita do mês" e "Despesas do mês".
+ *
+ * O gráfico somava todo lançamento pela data em que foi digitado, pendente
+ * incluído: uma conta lançada em novembro para vencer em dezembro subia na
+ * barra de novembro, como se o dinheiro já tivesse saído, e contradizia o
+ * card logo acima dela.
+ */
+function sumCashInRange(entries: FinanceEntry[], range: DateRange) {
+  return entries.reduce((total, entry) => {
+    if (!isPaidCashStatus(entry.paymentStatus)) return total;
+    const date = cashflowDate({
+      effective_date: entry.effectiveDate,
+      transaction_date: entry.date,
+    });
+    return isDateInRange(date, range) ? total + entry.amount : total;
+  }, 0);
 }
 
 function getMonthLabel(date: Date) {
@@ -5435,8 +5451,8 @@ export function FinancePage() {
     const range = { start: startOfMonth(month), end: endOfMonth(month) };
     return {
       label: getMonthLabel(month),
-      revenue: sumEntries(revenueEntries.filter((entry) => isDateInRange(entry.date, range))),
-      expense: sumEntries(expenseEntries.filter((entry) => isDateInRange(entry.date, range))),
+      revenue: sumCashInRange(revenueEntries, range),
+      expense: sumCashInRange(expenseEntries, range),
     };
   });
   const maxMonthlyValue = Math.max(
@@ -5451,12 +5467,8 @@ export function FinancePage() {
       const range = { start, end };
       return {
         label,
-        revenue: sumEntries(
-          revenueEntries.filter((e) => isDateInRange(e.date, range))
-        ),
-        expense: sumEntries(
-          expenseEntries.filter((e) => isDateInRange(e.date, range))
-        ),
+        revenue: sumCashInRange(revenueEntries, range),
+        expense: sumCashInRange(expenseEntries, range),
       };
     };
 
@@ -5466,8 +5478,8 @@ export function FinancePage() {
         const range = { start: startOfDay(d), end: endOfDay(d) };
         return {
           label: dayLabels[d.getDay()],
-          revenue: sumEntries(revenueEntries.filter((e) => isDateInRange(e.date, range))),
-          expense: sumEntries(expenseEntries.filter((e) => isDateInRange(e.date, range))),
+          revenue: sumCashInRange(revenueEntries, range),
+          expense: sumCashInRange(expenseEntries, range),
         };
       });
     }
@@ -5525,8 +5537,8 @@ export function FinancePage() {
         const range = { start, end };
         return {
           label,
-          revenue: sumEntries(revenueEntries.filter((e) => isDateInRange(e.date, range))),
-          expense: sumEntries(expenseEntries.filter((e) => isDateInRange(e.date, range))),
+          revenue: sumCashInRange(revenueEntries, range),
+          expense: sumCashInRange(expenseEntries, range),
         };
       });
     }
@@ -5536,8 +5548,8 @@ export function FinancePage() {
         const range = { start: startOfMonth(month), end: endOfMonth(month) };
         return {
           label: getMonthLabel(month),
-          revenue: sumEntries(revenueEntries.filter((e) => isDateInRange(e.date, range))),
-          expense: sumEntries(expenseEntries.filter((e) => isDateInRange(e.date, range))),
+          revenue: sumCashInRange(revenueEntries, range),
+          expense: sumCashInRange(expenseEntries, range),
         };
       });
     }
@@ -5547,8 +5559,8 @@ export function FinancePage() {
         const range = { start: startOfMonth(month), end: endOfMonth(month) };
         return {
           label: getMonthLabel(month),
-          revenue: sumEntries(revenueEntries.filter((e) => isDateInRange(e.date, range))),
-          expense: sumEntries(expenseEntries.filter((e) => isDateInRange(e.date, range))),
+          revenue: sumCashInRange(revenueEntries, range),
+          expense: sumCashInRange(expenseEntries, range),
         };
       });
     }
