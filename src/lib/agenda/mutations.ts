@@ -266,57 +266,30 @@ export async function deleteFinanceRevenue(
 
 // ─── product_stock_discounts ──────────────────────────────────────────────────
 
+/**
+ * Não desconta nada, de propósito.
+ *
+ * Esta função abatia do produto o que cada serviço "consome" ao concluir o
+ * agendamento, escrevendo em `stock_remaining` — a coluna que a 047 aposentou
+ * quando o estoque virou contagem de embalagem com movimento registrado. Ou
+ * seja: baixava num campo que nenhuma tela lê.
+ *
+ * Passou despercebido enquanto a tela que amarrava produto a serviço esteve
+ * fora: sem vínculo cadastrado, não havia o que descontar. Com a precificação
+ * de volta ela dispararia de novo, a partir de números que são estimativa de
+ * custo, não medição de consumo.
+ *
+ * Precificação não mexe em estoque. Baixa automática por serviço prestado é
+ * outra decisão, e passa por medir de verdade. Fica como no-op porque a Agenda
+ * ainda a chama em três pontos ao concluir o agendamento, e tirar as chamadas
+ * é mexer no calendário — que não é o que a precificação pede.
+ */
 export async function applyStockDiscount(
-  supabase: SupabaseClient,
-  workshopId: string,
-  appointment: Appointment
+  _supabase: SupabaseClient,
+  _workshopId: string,
+  _appointment: Appointment
 ): Promise<void> {
-  if (!workshopId) return;
-
-  const { data: existingDiscount, error: findDiscountError } = await supabase
-    .from("product_stock_discounts")
-    .select("service_order_id")
-    .eq("workshop_id", workshopId)
-    .eq("service_order_id", appointment.id)
-    .maybeSingle();
-
-  if (findDiscountError || existingDiscount) return;
-
-  const catalog = await loadSupabaseCatalog(supabase, workshopId);
-  const usageByProductId = new Map<string, number>();
-
-  appointment.serviceIds.forEach((serviceId) => {
-    (catalog.serviceProductUsages[serviceId] ?? []).forEach((usage) => {
-      try {
-        const amount = parsePositiveNumber(usage.amount);
-        usageByProductId.set(
-          usage.productId,
-          (usageByProductId.get(usage.productId) ?? 0) + amount
-        );
-      } catch {
-        // Ignore incomplete service usage rows.
-      }
-    });
-  });
-
-  if (usageByProductId.size === 0) return;
-
-  for (const product of catalog.products) {
-    const discountAmount = usageByProductId.get(product.id);
-    if (!discountAmount) continue;
-
-    await saveSupabaseProduct(supabase, workshopId, {
-      ...product,
-      stockRemaining: String(
-        Math.max(0, getProductRemainingStock(product) - discountAmount)
-      ),
-    });
-  }
-
-  await supabase.from("product_stock_discounts").insert({
-    workshop_id: workshopId,
-    service_order_id: appointment.id,
-  });
+  return;
 }
 
 // ─── importLocalAppointments ─────────────────────────────────────────────────
