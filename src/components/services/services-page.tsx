@@ -22,9 +22,10 @@ import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { assertMutationRows } from "@/lib/supabase/mutations";
 import { cn } from "@/lib/utils/cn";
 import { formatCurrency } from "@/lib/utils/format";
-import { ServicePricingTable } from "@/components/services/pricing-table";
+import { ServicePricingEditor } from "@/components/services/pricing-editor";
 import {
   calculateProductUsageCost,
+  calculateServiceUsageCost,
   type ProductItem,
   type ServiceProductUsage,
 } from "@/lib/products/catalog";
@@ -333,8 +334,8 @@ export function ServicesPage() {
   const router = useRouter();
 
   const [typeFilter, setTypeFilter] = useState<CatalogTypeFilter>("all");
-  /** O catálogo e a precificação olham a mesma lista por ângulos diferentes. */
-  const [view, setView] = useState<"catalogo" | "precificacao">("catalogo");
+  /** Serviço com o editor de itens aberto no card. */
+  const [pricingServiceId, setPricingServiceId] = useState<string | null>(null);
 
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [products, setProducts] = useState<ProductItem[]>([]);
@@ -759,10 +760,22 @@ export function ServicesPage() {
     return matchesType && matchesSearch;
   });
 
-  // Só o que é serviço de verdade e tem preço: o que a precificação compara.
-  const pricedServices = visibleCatalogRows
-    .filter((row) => row.service)
-    .map((row) => ({ id: row.id, name: row.name, price: row.price }));
+  /**
+   * O custo que a precificação montou, por serviço — o card mostra a margem
+   * sem obrigar a trocar de aba. Serviço sem itens fica de fora: dizer
+   * "margem 100%" em toda linha que ninguém precificou é ruído.
+   */
+  const productCostByService = useMemo(() => {
+    const byService: Record<string, number> = {};
+    Object.entries(serviceProductUsages).forEach(([serviceId, usages]) => {
+      const total = usages.reduce(
+        (sum, usage) => sum + calculateServiceUsageCost(usage, products),
+        0
+      );
+      if (total > 0) byService[serviceId] = total;
+    });
+    return byService;
+  }, [serviceProductUsages, products]);
 
   async function handleSaveServiceUsages(
     serviceId: string,
@@ -772,6 +785,7 @@ export function ServicesPage() {
 
     await replaceSupabaseServiceUsages(supabase, workshopId, serviceId, usages);
     setServiceProductUsages((prev) => ({ ...prev, [serviceId]: usages }));
+    setPricingServiceId(null);
   }
 
   function handleBookService(serviceId: string) {
@@ -818,25 +832,6 @@ export function ServicesPage() {
                 </button>
               );
             })}
-            <span className="mx-1 h-4 w-px bg-border" aria-hidden />
-            {([
-              { id: "catalogo", label: "Catálogo" },
-              { id: "precificacao", label: "Precificação" },
-            ] as const).map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                onClick={() => setView(option.id)}
-                className={cn(
-                  "rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
-                  view === option.id
-                    ? "border-primary bg-primary text-white"
-                    : "border-border bg-card text-muted hover:border-primary/30 hover:text-foreground"
-                )}
-              >
-                {option.label}
-              </button>
-            ))}
           </div>
         </div>
         <Button
@@ -849,14 +844,7 @@ export function ServicesPage() {
         </Button>
       </div>
 
-      {view === "precificacao" ? (
-        <ServicePricingTable
-          services={pricedServices}
-          products={products}
-          usagesByService={serviceProductUsages}
-          onSave={handleSaveServiceUsages}
-        />
-      ) : loading && visibleCatalogRows.length === 0 && !isCreating ? (
+      {loading && visibleCatalogRows.length === 0 && !isCreating ? (
         <div className="rounded-lg border border-border bg-card py-16 text-center text-sm text-muted shadow-card">
           Carregando serviços...
         </div>
@@ -1130,6 +1118,39 @@ export function ServicesPage() {
                     <p className="text-sm font-semibold tabular-nums leading-tight text-foreground">
                       {formatCurrency(row.price)}
                     </p>
+                    {service && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPricingServiceId((current) =>
+                            current === row.id ? null : row.id
+                          )
+                        }
+                        className="whitespace-nowrap text-[11px] leading-tight text-muted underline-offset-2 transition-colors hover:text-foreground hover:underline"
+                        title="O que entra neste serviço"
+                      >
+                        {productCostByService[row.id] === undefined ? (
+                          "precificar"
+                        ) : (
+                          <>
+                            custo {formatCurrency(productCostByService[row.id])}
+                            <span
+                              className={cn(
+                                "ml-1.5 font-semibold",
+                                row.price - productCostByService[row.id] < 0
+                                  ? "text-danger"
+                                  : "text-foreground"
+                              )}
+                            >
+                              margem{" "}
+                              {formatCurrency(
+                                row.price - productCostByService[row.id]
+                              )}
+                            </span>
+                          </>
+                        )}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => {
@@ -1195,6 +1216,16 @@ export function ServicesPage() {
                     </div>
                   </div>
                 </div>
+
+                {service && pricingServiceId === row.id && (
+                  <ServicePricingEditor
+                    price={row.price}
+                    products={products}
+                    usages={serviceProductUsages[row.id] ?? []}
+                    onSave={(usages) => handleSaveServiceUsages(row.id, usages)}
+                    onCancel={() => setPricingServiceId(null)}
+                  />
+                )}
               </div>
             );
           })}
