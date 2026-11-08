@@ -22,6 +22,7 @@ import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { assertMutationRows } from "@/lib/supabase/mutations";
 import { cn } from "@/lib/utils/cn";
 import { formatCurrency } from "@/lib/utils/format";
+import { ServicePricingTable } from "@/components/services/pricing-table";
 import {
   calculateProductUsageCost,
   type ProductItem,
@@ -332,6 +333,8 @@ export function ServicesPage() {
   const router = useRouter();
 
   const [typeFilter, setTypeFilter] = useState<CatalogTypeFilter>("all");
+  /** O catálogo e a precificação olham a mesma lista por ângulos diferentes. */
+  const [view, setView] = useState<"catalogo" | "precificacao">("catalogo");
 
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [products, setProducts] = useState<ProductItem[]>([]);
@@ -756,6 +759,21 @@ export function ServicesPage() {
     return matchesType && matchesSearch;
   });
 
+  // Só o que é serviço de verdade e tem preço: o que a precificação compara.
+  const pricedServices = visibleCatalogRows
+    .filter((row) => row.service)
+    .map((row) => ({ id: row.id, name: row.name, price: row.price }));
+
+  async function handleSaveServiceUsages(
+    serviceId: string,
+    usages: ServiceProductUsage[]
+  ) {
+    if (!workshopId) throw new Error("Oficina não encontrada.");
+
+    await replaceSupabaseServiceUsages(supabase, workshopId, serviceId, usages);
+    setServiceProductUsages((prev) => ({ ...prev, [serviceId]: usages }));
+  }
+
   function handleBookService(serviceId: string) {
     router.push(`/agenda?packageServices=${serviceId}`);
   }
@@ -800,6 +818,25 @@ export function ServicesPage() {
                 </button>
               );
             })}
+            <span className="mx-1 h-4 w-px bg-border" aria-hidden />
+            {([
+              { id: "catalogo", label: "Catálogo" },
+              { id: "precificacao", label: "Precificação" },
+            ] as const).map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => setView(option.id)}
+                className={cn(
+                  "rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
+                  view === option.id
+                    ? "border-primary bg-primary text-white"
+                    : "border-border bg-card text-muted hover:border-primary/30 hover:text-foreground"
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
           </div>
         </div>
         <Button
@@ -812,7 +849,14 @@ export function ServicesPage() {
         </Button>
       </div>
 
-      {loading && visibleCatalogRows.length === 0 && !isCreating ? (
+      {view === "precificacao" ? (
+        <ServicePricingTable
+          services={pricedServices}
+          products={products}
+          usagesByService={serviceProductUsages}
+          onSave={handleSaveServiceUsages}
+        />
+      ) : loading && visibleCatalogRows.length === 0 && !isCreating ? (
         <div className="rounded-lg border border-border bg-card py-16 text-center text-sm text-muted shadow-card">
           Carregando serviços...
         </div>

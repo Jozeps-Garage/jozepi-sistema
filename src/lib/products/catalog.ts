@@ -86,8 +86,17 @@ export interface ProductForm {
 
 export interface ServiceProductUsage {
   id: string;
-  productId: string;
+  /**
+   * Produto do catálogo, ou nulo na linha avulsa — a que existe só para a
+   * conta do serviço e não vira cadastro nem aparece no estoque.
+   */
+  productId: string | null;
+  /** Quanto o serviço consome. Só vale na linha de produto. */
   amount: string;
+  /** Linha avulsa: o que é. */
+  label?: string;
+  /** Linha avulsa: quanto custa, em reais. */
+  cost?: string;
 }
 
 export const PRODUCTS_STORAGE_KEY = "auto-estetica-products-utensils";
@@ -268,24 +277,61 @@ export function normalizeProductStock(product: ProductItem): ProductItem {
   };
 }
 
+/**
+ * Quanto custa consumir `amountValue` de um produto: ml no líquido, unidade
+ * no resto.
+ *
+ * `totalCost` é o preço de UMA embalagem — é o que a entrada de estoque grava
+ * ali desde que a compra passou a ditar o custo unitário. No líquido, divide
+ * pelo tamanho da embalagem (`packageVolumeMl` da 047, com o `volumeMl` antigo
+ * como reserva para quem não migrou). No utensílio, o custo já é por unidade.
+ */
 export function calculateProductUsageCost(
   product: ProductItem,
   amountValue: string
 ) {
   try {
-    const totalCost = parseMoney(product.totalCost || "0");
+    const unitCost = parseMoney(product.totalCost || "0");
     const amount = parsePositiveNumber(amountValue);
+    if (unitCost <= 0 || amount <= 0) return 0;
 
-    if (product.type === "liquid") {
-      const volumeMl = parsePositiveNumber(product.volumeMl);
-      return (totalCost * amount) / volumeMl;
+    const isLiquid = product.kind
+      ? product.kind === "liquido"
+      : product.type === "liquid";
+
+    if (isLiquid) {
+      const packageMl =
+        product.packageVolumeMl && product.packageVolumeMl > 0
+          ? product.packageVolumeMl
+          : parsePositiveNumber(product.volumeMl);
+      return (unitCost * amount) / packageMl;
     }
 
-    const quantity = parsePositiveNumber(product.quantity);
-    return (totalCost * amount) / quantity;
+    return unitCost * amount;
   } catch {
     return 0;
   }
+}
+
+/**
+ * O custo de uma linha da precificação, venha ela do catálogo ou da mão.
+ * Produto some do catálogo depois de amarrado: a linha vira zero em vez de
+ * derrubar a conta inteira.
+ */
+export function calculateServiceUsageCost(
+  usage: ServiceProductUsage,
+  products: ProductItem[]
+) {
+  if (!usage.productId) {
+    try {
+      return parseMoney(usage.cost || "0");
+    } catch {
+      return 0;
+    }
+  }
+
+  const product = products.find((item) => item.id === usage.productId);
+  return product ? calculateProductUsageCost(product, usage.amount) : 0;
 }
 
 export function getProductTypeLabel(type: ProductType) {

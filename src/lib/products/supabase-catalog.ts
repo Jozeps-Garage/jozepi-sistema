@@ -1,5 +1,6 @@
 import {
   normalizeProductStock,
+  parseMoney,
   productTypeOptions,
   PRODUCTS_STORAGE_KEY,
   PRODUCT_TYPES_STORAGE_KEY,
@@ -44,8 +45,25 @@ interface ProductTypeRow {
 interface ProductUsageRow {
   id: string;
   service_id: string;
-  product_id: string;
-  amount: string;
+  /** Nulo na linha avulsa da precificação. */
+  product_id: string | null;
+  amount: string | null;
+  label: string | null;
+  cost: number | string | null;
+}
+
+const USAGE_COLUMNS = "id, service_id, product_id, amount, label, cost";
+const USAGE_COLUMNS_LEGACY = "id, service_id, product_id, amount";
+
+/** Erro do PostgREST quando a 052 ainda não rodou. */
+function isMissingPricingColumns(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    (normalized.includes("label") || normalized.includes("cost")) &&
+    (normalized.includes("does not exist") ||
+      normalized.includes("could not find") ||
+      normalized.includes("schema cache"))
+  );
 }
 
 type SupabaseLike = SupabaseClient;
@@ -159,7 +177,16 @@ export function usagesFromRows(rows: ProductUsageRow[]) {
   return rows.reduce<Record<string, ServiceProductUsage[]>>((acc, row) => {
     acc[row.service_id] = [
       ...(acc[row.service_id] ?? []),
-      { id: row.id, productId: row.product_id, amount: row.amount },
+      {
+        id: row.id,
+        productId: row.product_id ?? null,
+        amount: row.amount ?? "",
+        label: row.label ?? undefined,
+        cost:
+          row.cost === null || row.cost === undefined
+            ? undefined
+            : String(row.cost),
+      },
     ];
     return acc;
   }, {});
@@ -179,7 +206,7 @@ export async function loadSupabaseCatalog(
     .select("value, label, custom");
   const usagesQuery = supabase
     .from("service_product_usages")
-    .select("id, service_id, product_id, amount");
+    .select(USAGE_COLUMNS);
 
   if (
     !isQueryBuilder(productsQuery) ||
@@ -195,7 +222,20 @@ export async function loadSupabaseCatalog(
   const typesResult = await typesQuery
     .eq("workshop_id", workshopId)
     .order("label", { ascending: true });
-  const usagesResult = await usagesQuery.eq("workshop_id", workshopId);
+  let usagesResult: { data: unknown; error: { message: string } | null } =
+    await usagesQuery.eq("workshop_id", workshopId);
+
+  // A 052 pode não ter rodado ainda. Sem ela, `label` e `cost` não existem e o
+  // select inteiro volta 400 — o que derrubaria o catálogo de produtos junto,
+  // numa tela que nem precificação está pedindo. Cai para as colunas antigas.
+  if (usagesResult.error && isMissingPricingColumns(usagesResult.error.message)) {
+    const legacyQuery = supabase
+      .from("service_product_usages")
+      .select(USAGE_COLUMNS_LEGACY);
+    if (isQueryBuilder(legacyQuery)) {
+      usagesResult = await legacyQuery.eq("workshop_id", workshopId);
+    }
+  }
 
   if (productsResult.error) throw new Error(productsResult.error.message);
   if (typesResult.error) throw new Error(typesResult.error.message);
@@ -307,13 +347,23 @@ export async function replaceSupabaseServiceUsages(
       service_id: serviceId,
       product_id: usage.productId,
       amount: usage.amount,
+      // Só na linha avulsa: com produto, quem manda é o catálogo.
+      label: usage.productId ? null : usage.label?.trim() || null,
+      cost: usage.productId ? null : parseMoney(usage.cost || "0"),
     }))
   );
 
   if (!result) throw new Error("Tabela service_product_usages indisponível.");
 
   const { error } = (await result) as { error: { message: string } | null };
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (isMissingPricingColumns(error.message)) {
+      throw new Error(
+        "A precificação ainda não foi instalada no banco. Aplique a migration 052 no Supabase."
+      );
+    }
+    throw new Error(error.message);
+  }
 }
 
 export function readLocalCatalogFromStorage() {
