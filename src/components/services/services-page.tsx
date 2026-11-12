@@ -22,7 +22,7 @@ import { fetchOwnWorkshop } from "@/lib/supabase/current-profile";
 import { assertMutationRows } from "@/lib/supabase/mutations";
 import { cn } from "@/lib/utils/cn";
 import { formatCurrency } from "@/lib/utils/format";
-import { ServicePricingEditor } from "@/components/services/pricing-editor";
+import { ServicePricingFields } from "@/components/services/pricing-fields";
 import {
   calculateProductUsageCost,
   calculateServiceUsageCost,
@@ -334,8 +334,6 @@ export function ServicesPage() {
   const router = useRouter();
 
   const [typeFilter, setTypeFilter] = useState<CatalogTypeFilter>("all");
-  /** Serviço com o editor de itens aberto no card. */
-  const [pricingServiceId, setPricingServiceId] = useState<string | null>(null);
 
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [products, setProducts] = useState<ProductItem[]>([]);
@@ -571,10 +569,14 @@ export function ServicesPage() {
     setError(null);
 
     try {
-      const productUsages = form.productUsages.filter((usage) => {
-        const product = products.find((item) => item.id === usage.productId);
-        return product && calculateProductUsageCost(product, usage.amount) > 0;
-      });
+      // Linha pela metade não vai para o banco. A avulsa não tem produto: é o
+      // nome que a torna válida, não o catálogo.
+      const productUsages = form.productUsages.filter((usage) =>
+        usage.productId
+          ? Boolean(usage.amount.trim()) &&
+            products.some((item) => item.id === usage.productId)
+          : Boolean(usage.label?.trim())
+      );
       const payload = {
         name: form.name.trim(),
         description: form.description.trim() || null,
@@ -777,17 +779,6 @@ export function ServicesPage() {
     return byService;
   }, [serviceProductUsages, products]);
 
-  async function handleSaveServiceUsages(
-    serviceId: string,
-    usages: ServiceProductUsage[]
-  ) {
-    if (!workshopId) throw new Error("Oficina não encontrada.");
-
-    await replaceSupabaseServiceUsages(supabase, workshopId, serviceId, usages);
-    setServiceProductUsages((prev) => ({ ...prev, [serviceId]: usages }));
-    setPricingServiceId(null);
-  }
-
   function handleBookService(serviceId: string) {
     router.push(`/agenda?packageServices=${serviceId}`);
   }
@@ -959,6 +950,14 @@ export function ServicesPage() {
             />
           </div>
 
+          <ServicePricingFields
+            price={parsePrice(form.price || "0")}
+            products={products}
+            usages={form.productUsages}
+            onChange={(productUsages) =>
+              setForm((prev) => ({ ...prev, productUsages }))
+            }
+          />
 
           <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-end">
             <Button
@@ -1049,6 +1048,15 @@ export function ServicesPage() {
                             />
                           </div>
 
+                          <ServicePricingFields
+                            price={parsePrice(form.price || "0")}
+                            products={products}
+                            usages={form.productUsages}
+                            onChange={(productUsages) =>
+                              setForm((prev) => ({ ...prev, productUsages }))
+                            }
+                          />
+
                           {error && (
                             <div className="mt-4 rounded-lg border border-danger/20 bg-danger/5 px-4 py-3 text-sm text-danger">
                               {error}
@@ -1121,11 +1129,7 @@ export function ServicesPage() {
                     {service && (
                       <button
                         type="button"
-                        onClick={() =>
-                          setPricingServiceId((current) =>
-                            current === row.id ? null : row.id
-                          )
-                        }
+                        onClick={() => openEditForm(service)}
                         className="whitespace-nowrap text-[11px] leading-tight text-muted underline-offset-2 transition-colors hover:text-foreground hover:underline"
                         title="O que entra neste serviço"
                       >
@@ -1217,15 +1221,6 @@ export function ServicesPage() {
                   </div>
                 </div>
 
-                {service && pricingServiceId === row.id && (
-                  <ServicePricingEditor
-                    price={row.price}
-                    products={products}
-                    usages={serviceProductUsages[row.id] ?? []}
-                    onSave={(usages) => handleSaveServiceUsages(row.id, usages)}
-                    onCancel={() => setPricingServiceId(null)}
-                  />
-                )}
               </div>
             );
           })}

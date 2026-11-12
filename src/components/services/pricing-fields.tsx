@@ -1,8 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Plus, Trash } from "@phosphor-icons/react";
-import { Button } from "@/components/ui/button";
 import {
   calculateServiceUsageCost,
   type ProductItem,
@@ -36,35 +35,28 @@ function amountUnit(product: ProductItem | undefined) {
 /**
  * O que entra num serviço e quanto sobra do preço cobrado.
  *
- * Mora dentro do card do próprio serviço, aberto pela linha de margem. Uma
- * versão disto já viveu escondida no formulário de edição e foi removida em
- * outubro, por ser cadastro para manter sem nada à vista que pagasse o
- * trabalho; agora o custo e a margem ficam no card mesmo fechado, e abrir é
- * só para mexer.
+ * É uma seção do formulário do serviço, não uma tela à parte: salva no mesmo
+ * "Salvar alterações" que o nome e o preço, porque é a mesma decisão. O card
+ * mostra o custo e a margem com o formulário fechado — foi a falta disso, e
+ * não o lugar, que fez a primeira versão morrer em outubro.
  */
-export function ServicePricingEditor({
+export function ServicePricingFields({
   price,
   products,
   usages,
-  onSave,
-  onCancel,
+  onChange,
 }: {
   price: number;
   products: ProductItem[];
   usages: ServiceProductUsage[];
-  onSave: (usages: ServiceProductUsage[]) => Promise<void>;
-  onCancel: () => void;
+  onChange: (usages: ServiceProductUsage[]) => void;
 }) {
-  const [draft, setDraft] = useState<ServiceProductUsage[]>(() =>
-    usages.map((usage) => ({ ...usage }))
-  );
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
   const priceableProducts = useMemo(
     () => products.filter(isPriceable),
     [products]
   );
+
+  const draft = usages;
 
   const cost = draft.reduce(
     (total, usage) => total + calculateServiceUsageCost(usage, products),
@@ -72,31 +64,22 @@ export function ServicePricingEditor({
   );
 
   function updateLine(id: string, patch: Partial<ServiceProductUsage>) {
-    setDraft((prev) =>
-      prev.map((line) => (line.id === id ? { ...line, ...patch } : line))
+    onChange(
+      draft.map((line) => (line.id === id ? { ...line, ...patch } : line))
     );
-  }
-
-  async function save() {
-    // Linha pela metade não vai para o banco: produto sem quantidade e avulsa
-    // sem nome valem zero e só sujariam a conta.
-    const clean = draft.filter((line) =>
-      line.productId ? Boolean(line.amount.trim()) : Boolean(line.label?.trim())
-    );
-
-    setSaving(true);
-    setError(null);
-    try {
-      await onSave(clean);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Não foi possível salvar.");
-    } finally {
-      setSaving(false);
-    }
   }
 
   return (
-    <div className="mt-4 rounded-lg border border-border bg-background/40 p-4">
+    <section className="mt-6 border-t border-border pt-5">
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold tracking-wide text-foreground">
+          Custo do serviço
+        </h3>
+        <p className="mt-0.5 text-xs text-muted">
+          O que este serviço gasta. Sai do estoque pelos ml, ou entra como item
+          avulso com o valor na mão.
+        </p>
+      </div>
       {draft.length === 0 ? (
         <p className="text-sm text-muted">
           Nenhum item ainda. Some o que este serviço gasta.
@@ -180,9 +163,7 @@ export function ServicePricingEditor({
                 </span>
                 <button
                   type="button"
-                  onClick={() =>
-                    setDraft((prev) => prev.filter((item) => item.id !== line.id))
-                  }
+                  onClick={() => onChange(draft.filter((item) => item.id !== line.id))}
                   className="justify-self-start rounded-lg p-2 text-muted transition-colors hover:bg-danger/10 hover:text-danger sm:justify-self-center"
                   aria-label="Remover item"
                   title="Remover item"
@@ -199,10 +180,7 @@ export function ServicePricingEditor({
         <button
           type="button"
           onClick={() =>
-            setDraft((prev) => [
-              ...prev,
-              { id: newLineId(), productId: "", amount: "" },
-            ])
+            onChange([...draft, { id: newLineId(), productId: "", amount: "" }])
           }
           className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-success/50 bg-success/5 px-3 py-2 text-xs font-semibold text-success transition-colors hover:border-success hover:bg-success/10"
         >
@@ -212,8 +190,8 @@ export function ServicePricingEditor({
         <button
           type="button"
           onClick={() =>
-            setDraft((prev) => [
-              ...prev,
+            onChange([
+              ...draft,
               { id: newLineId(), productId: null, amount: "", label: "", cost: "" },
             ])
           }
@@ -246,21 +224,6 @@ export function ServicePricingEditor({
         </span>
       </p>
 
-      {error && <p className="mt-3 text-sm text-danger">{error}</p>}
-
-      <div className="mt-4 flex justify-end gap-2">
-        <Button type="button" variant="secondary" onClick={onCancel} disabled={saving}>
-          Cancelar
-        </Button>
-        <Button
-          type="button"
-          variant="success"
-          loading={saving}
-          onClick={() => void save()}
-        >
-          Salvar itens
-        </Button>
-      </div>
-    </div>
+    </section>
   );
 }
