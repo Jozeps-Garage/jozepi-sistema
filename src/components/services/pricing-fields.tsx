@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { Plus, Trash } from "@phosphor-icons/react";
+import { Dropdown } from "@/components/ui/dropdown";
 import {
   calculateServiceUsageCost,
   type ProductItem,
@@ -17,11 +18,6 @@ const FIELD_CLASS =
 
 function newLineId() {
   return `usage-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-/** Patrimônio não se consome: politriz não entra na conta de um serviço. */
-function isPriceable(product: ProductItem) {
-  return product.kind !== "patrimonio";
 }
 
 /**
@@ -56,8 +52,17 @@ export function ServicePricingFields({
   usages: ServiceProductUsage[];
   onChange: (usages: ServiceProductUsage[]) => void;
 }) {
-  const priceableProducts = useMemo(
-    () => products.filter(isPriceable),
+  /**
+   * Tudo entra, patrimônio incluído. Enquanto o campo multiplicava, pôr uma
+   * politriz aqui cobrava o equipamento inteiro de uma lavagem; dividindo
+   * pelos usos, é justamente assim que se rateia o que não se consome.
+   */
+  const productOptions = useMemo(
+    () =>
+      products.map((item) => ({
+        value: item.id,
+        label: item.name,
+      })),
     [products]
   );
 
@@ -105,21 +110,13 @@ export function ServicePricingFields({
               >
                 {line.productId !== null ? (
                   <>
-                    <select
-                      aria-label="Produto"
-                      className={FIELD_CLASS}
+                    <Dropdown
                       value={line.productId}
-                      onChange={(event) =>
-                        updateLine(line.id, { productId: event.target.value })
-                      }
-                    >
-                      <option value="">Selecione o produto</option>
-                      {priceableProducts.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name}
-                        </option>
-                      ))}
-                    </select>
+                      options={productOptions}
+                      placeholder="Selecione o produto"
+                      searchPlaceholder="Buscar produto..."
+                      onChange={(productId) => updateLine(line.id, { productId })}
+                    />
                     <div className="relative">
                       <input
                         aria-label="Quantidade usada"
