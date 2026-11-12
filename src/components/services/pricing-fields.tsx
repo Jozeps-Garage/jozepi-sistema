@@ -24,12 +24,17 @@ function isPriceable(product: ProductItem) {
   return product.kind !== "patrimonio";
 }
 
+/**
+ * Líquido se mede no que sai da embalagem; o resto, em quantos serviços a
+ * unidade atende — é a divisão que transforma um pano caro num custo de
+ * centavos por carro.
+ */
 function amountUnit(product: ProductItem | undefined) {
   if (!product) return "";
   const isLiquid = product.kind
     ? product.kind === "liquido"
     : product.type === "liquid";
-  return isLiquid ? "ml" : product.unitLabel || "un";
+  return isLiquid ? "ml" : "usos";
 }
 
 /**
@@ -76,8 +81,9 @@ export function ServicePricingFields({
           Custo do serviço
         </h3>
         <p className="mt-0.5 text-xs text-muted">
-          O que este serviço gasta. Sai do estoque pelos ml, ou entra como item
-          avulso com o valor na mão.
+          O que este serviço gasta. Líquido entra pelos ml; o que não é líquido,
+          por quantos serviços a unidade atende — o valor se divide por eles. O
+          item avulso você digita com o valor na mão.
         </p>
       </div>
       {draft.length === 0 ? (

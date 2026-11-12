@@ -278,13 +278,19 @@ export function normalizeProductStock(product: ProductItem): ProductItem {
 }
 
 /**
- * Quanto custa consumir `amountValue` de um produto: ml no líquido, unidade
- * no resto.
+ * Quanto um produto custa dentro de um serviço.
  *
- * `totalCost` é o preço de UMA embalagem — é o que a entrada de estoque grava
- * ali desde que a compra passou a ditar o custo unitário. No líquido, divide
- * pelo tamanho da embalagem (`packageVolumeMl` da 047, com o `volumeMl` antigo
- * como reserva para quem não migrou). No utensílio, o custo já é por unidade.
+ * `totalCost` é o preço de UMA embalagem ou unidade — é o que a entrada de
+ * estoque grava ali desde que a compra passou a ditar o custo unitário.
+ *
+ * No líquido, `amountValue` são os ml gastos, e o custo sai do tamanho da
+ * embalagem (`packageVolumeMl` da 047, com o `volumeMl` antigo como reserva
+ * para quem não migrou).
+ *
+ * No resto, `amountValue` é quantos serviços aquela unidade atende, e o custo
+ * é o valor dividido por eles: um pano de 50 reais que dura 100 secagens entra
+ * a 50 centavos por carro, não a 50 reais. Item que acaba no uso é "1", e aí a
+ * divisão devolve o valor cheio.
  */
 export function calculateProductUsageCost(
   product: ProductItem,
@@ -307,7 +313,7 @@ export function calculateProductUsageCost(
       return (unitCost * amount) / packageMl;
     }
 
-    return unitCost * amount;
+    return unitCost / amount;
   } catch {
     return 0;
   }
